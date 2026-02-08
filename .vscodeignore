@@ -1,0 +1,35 @@
+# Editor & SCM
+.vscode/
+.github/
+.serena/
+.gitignore
+
+# Source & Tests
+src/
+out/test/
+fixtures/
+
+# Build Configuration & Dependencies
+node_modules/
+package-lock.json
+tsconfig.json
+eslint.config.mjs
+esbuild.js
+
+# Documentation (Internal)
+CONTRIBUTING.md
+DEVELOPMENT.md
+PUBLISHING.md
+
+# Artifacts & Logs
+*.vsix
+*.log
+
+# Assets
+# Exclude heavy GIFs (served from GitHub), keep other images (icon.png)
+images/*.gif
+
+# Bundled Extension Inclusion
+# We need to explicitly include the bundled extension file if 'out/' was ignored directly,
+# but since we ignore source dirs etc, ensure this is kept.
+!out/extension.js

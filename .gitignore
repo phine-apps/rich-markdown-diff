@@ -1,0 +1,17 @@
+# Build output
+out/
+
+# Dependencies
+node_modules/
+
+# VS Code test directory
+.vscode-test/
+
+# Packaged extension
+*.vsix
+
+# OS files
+**/.DS_Store
+
+# Serena MCP config
+.serena/
