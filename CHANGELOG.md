@@ -8,6 +8,10 @@ All notable changes to **Rich Markdown Diff** will be documented in this file.
 
 - Enabled find widget inside the webview diff view panels allowing search operations.
 
+### Security
+
+- Updated dependencies with security vulnerabilities (`npm audit fix`).
+
 ## [1.0.0] - 2026-02-23
 
 ### Added
