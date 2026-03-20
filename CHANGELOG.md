@@ -9,6 +9,10 @@ All notable changes to **Rich Markdown Diff** will be documented in this file.
 - Added find widget support inside the webview diff view panels allowing search operations.
 - Added support for Japanese and Simplified Chinese languages (i18n).
 
+### Fixed
+
+- Improved Frontmatter diff display by showing all metadata fields (including unchanged ones with normal styling) and removing the confusing "Key" header.
+
 ### Security
 
 - Security updates for dependency packages.

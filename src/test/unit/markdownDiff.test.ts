@@ -68,6 +68,22 @@ describe("MarkdownDiffProvider", () => {
     assert.ok(diff.includes("New"), "Should show new value");
   });
 
+  it("should show unchanged frontmatter fields without highlight", () => {
+    const oldMd = "---\ntitle: Old\nauthor: phine-apps\n---\nContent";
+    const newMd = "---\ntitle: New\nauthor: phine-apps\n---\nContent";
+    const diff = provider.computeDiff(oldMd, newMd);
+
+    assert.ok(
+      diff.includes("Frontmatter Changes"),
+      "Should render frontmatter table",
+    );
+    assert.ok(diff.includes("author"), "Should contain unchanged field 'author'");
+    assert.ok(
+      diff.includes("phine-apps"),
+      "Should contain unchanged value 'phine-apps'",
+    );
+  });
+
   it("should preserve mermaid diagrams (tokenization)", () => {
     const oldMd = "A\n```mermaid\ngraph TD;\nA-->B;\n```\nB";
     const newMd = "A\n```mermaid\ngraph TD;\nA-->B;\n```\nC";

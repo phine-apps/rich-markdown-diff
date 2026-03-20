@@ -512,15 +512,25 @@ export class MarkdownDiffProvider {
       const oldVal = JSON.stringify(oldMatter.data[key]);
       const newVal = JSON.stringify(newMatter.data[key]);
 
-      if (oldVal !== newVal) {
+      const isChanged = oldVal !== newVal;
+      if (isChanged) {
         hasFmChanges = true;
-        const safeOldKey = oldMatter.data.hasOwnProperty(key)
-          ? oldVal || '""'
-          : "(missing)";
-        const safeNewKey = newMatter.data.hasOwnProperty(key)
-          ? newVal || '""'
-          : "(missing)";
+      }
 
+      const safeOldKey = oldMatter.data.hasOwnProperty(key)
+        ? oldVal || '""'
+        : "(missing)";
+      const safeNewKey = newMatter.data.hasOwnProperty(key)
+        ? newVal || '""'
+        : "(missing)";
+
+      if (isChanged) {
+        fmDiffRows += `<tr>
+                <td>${key}</td>
+                <td class="fm-old fm-changed">${safeOldKey}</td>
+                <td class="fm-new fm-changed">${safeNewKey}</td>
+            </tr>`;
+      } else {
         fmDiffRows += `<tr>
                 <td>${key}</td>
                 <td class="fm-old">${safeOldKey}</td>
@@ -535,9 +545,6 @@ export class MarkdownDiffProvider {
         <div class="frontmatter-diff">
             <h3>Frontmatter Changes</h3>
             <table>
-                <thead>
-                    <tr><th class="fm-key">Key</th><th class="fm-old">Original</th><th class="fm-new">Modified</th></tr>
-                </thead>
                 <tbody>
                     ${fmDiffRows}
                 </tbody>
@@ -1348,11 +1355,11 @@ export class MarkdownDiffProvider {
         .frontmatter-diff th {
             font-weight: bold;
         }
-        .frontmatter-diff .fm-old {
+        .frontmatter-diff .fm-old.fm-changed {
             background-color: rgba(248, 113, 113, 0.2);
             color: var(--vscode-editor-foreground);
         }
-        .frontmatter-diff .fm-new {
+        .frontmatter-diff .fm-new.fm-changed {
             background-color: rgba(74, 222, 128, 0.2);
             color: var(--vscode-editor-foreground);
         }
