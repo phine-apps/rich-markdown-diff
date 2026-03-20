@@ -4,13 +4,13 @@ All notable changes to **Rich Markdown Diff** will be documented in this file.
 
 ## [1.1.0] - 2026-03-20
 
-### Fixed
+### Added
 
-- Enabled find widget inside the webview diff view panels allowing search operations.
+- Added find widget support inside the webview diff view panels allowing search operations.
 
 ### Security
 
-- Updated dependencies with security vulnerabilities (`npm audit fix`).
+- Security updates for dependency packages.
 
 ## [1.0.0] - 2026-02-23
 
