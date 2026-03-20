@@ -21,6 +21,9 @@ CONTRIBUTING.md
 DEVELOPMENT.md
 PUBLISHING.md
 
+# Source Maps (debug only, not needed in release)
+out/*.js.map
+
 # Artifacts & Logs
 *.vsix
 *.log

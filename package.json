@@ -3,7 +3,7 @@
   "publisher": "phine-apps",
   "displayName": "Rich Markdown Diff",
   "description": "Displays a rich, visual diff of two markdown files.",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "icon": "images/icon.png",
   "author": "phine-apps",
   "license": "MIT",

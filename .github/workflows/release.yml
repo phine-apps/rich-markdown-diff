@@ -32,19 +32,16 @@ jobs:
       - name: Unit Tests
         run: npm run test:unit
 
-      - name: Compile
-        run: npm run compile
-
       - name: Package Extension
         run: npm run package
 
       - name: Publish to VS Code Marketplace
         if: success() && startsWith(github.ref, 'refs/tags/') && env.VSCE_PAT != ''
-        run: npm run publish:vsce
+        run: npx vsce publish --packagePath *.vsix
 
       - name: Publish to OpenVSX
         if: success() && startsWith(github.ref, 'refs/tags/') && env.OVSX_PAT != ''
-        run: npm run publish:ovsx
+        run: npx ovsx publish *.vsix
 
       - name: Create Release
         uses: softprops/action-gh-release@v2

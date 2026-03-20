@@ -251,6 +251,7 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.ViewColumn.Active,
         {
           enableScripts: true,
+          enableFindWidget: true,
           localResourceRoots: [
             vscode.Uri.joinPath(context.extensionUri, "media"),
             vscode.Uri.joinPath(context.extensionUri, "node_modules"),
@@ -387,6 +388,11 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.window.registerCustomEditorProvider(
       DiffEditorProvider.viewType,
       provider,
+      {
+        webviewOptions: {
+          enableFindWidget: true,
+        },
+      }
     ),
   );
 
@@ -557,6 +563,7 @@ async function showTwoFilesDiff(
     vscode.ViewColumn.Active,
     {
       enableScripts: true,
+      enableFindWidget: true,
       localResourceRoots: [
         vscode.Uri.joinPath(_context.extensionUri, "media"),
         vscode.Uri.joinPath(_context.extensionUri, "node_modules"),
