@@ -2,6 +2,12 @@
 
 All notable changes to **Rich Markdown Diff** will be documented in this file.
 
+## [1.1.1] - 2026-03-20
+
+### Fixed
+
+- Fixed an issue where localized placeholders (e.g., `%rich-markdown-diff.displayName%`) were appearing literally on the Marketplace website.
+
 ## [1.1.0] - 2026-03-20
 
 ### Added
