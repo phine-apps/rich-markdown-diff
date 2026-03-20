@@ -1017,10 +1017,20 @@ export class MarkdownDiffProvider {
     leftLabel: string = "Original",
     rightLabel: string = "Modified",
     cspSource: string = "",
+    translations: Record<string, string> = {},
   ): string {
     const nonce = crypto.randomBytes(16).toString("hex");
-    const safeLeft = this.escapeHtml(leftLabel);
-    const safeRight = this.escapeHtml(rightLabel);
+
+    const t = (key: string, ...args: any[]) => {
+      let text = translations[key] || key;
+      args.forEach((arg, i) => {
+        text = text.replace(`{${i}}`, String(arg));
+      });
+      return text;
+    };
+
+    const safeLeft = this.escapeHtml(leftLabel === "Original" ? t("Original") : leftLabel);
+    const safeRight = this.escapeHtml(rightLabel === "Modified" ? t("Modified") : rightLabel);
 
     return `<!DOCTYPE html>
 <html lang="en">
@@ -1028,7 +1038,7 @@ export class MarkdownDiffProvider {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}'; img-src ${cspSource} https: data:; font-src ${cspSource};">
-    <title>Markdown Diff</title>
+    <title>${this.escapeHtml(t("Markdown Diff"))}</title>
     <!-- KaTeX CSS -->
     <link rel="stylesheet" href="${katexCssUri}">
     <!-- Highlight.js CSS -->
@@ -1515,6 +1525,15 @@ export class MarkdownDiffProvider {
         </div>
     </div>
     <script nonce="${nonce}">
+        const translations = ${JSON.stringify(translations)};
+        const t = (key, ...args) => {
+            let text = translations[key] || key;
+            args.forEach((arg, i) => {
+                text = text.replace(\`{\${i}}\`, String(arg));
+            });
+            return text;
+        };
+
         const vscode = acquireVsCodeApi();
         const leftPane = document.getElementById('left-pane');
         const rightPane = document.getElementById('right-pane');
@@ -1575,8 +1594,9 @@ export class MarkdownDiffProvider {
              const c2 = applyFolding(rightPane, isFolded, 'modified');
              
              if (isFolded) {
-                 statusMsg.textContent = \`Folded \${c1} (Original) / \${c2} (Modified) blocks\`;
+                 statusMsg.textContent = t("Folded {0} (Original) / {1} (Modified) blocks", c1, c2);
              } else {
+
                  statusMsg.textContent = '';
              }
              collectChanges(); // Re-collect visible changes
@@ -1625,9 +1645,10 @@ export class MarkdownDiffProvider {
                          const isList = pane.tagName === 'UL' || pane.tagName === 'OL';
                          const placeholder = document.createElement(isList ? 'li' : 'div');
                          placeholder.className = 'fold-placeholder';
-                         placeholder.textContent = \`... \${visibleToHide.length} unchanged blocks ...\`;
-                         placeholder.title = 'Click to expand';
+                         placeholder.textContent = t("{0} unchanged blocks", visibleToHide.length);
+                         placeholder.title = t("Click to expand");
                          placeholder.onclick = (e) => {
+
                              e.stopPropagation(); // Prevent parent clicks
                              toHide.forEach(el => el.style.display = '');
                              placeholder.remove();
@@ -1704,7 +1725,7 @@ export class MarkdownDiffProvider {
             try {
                 changeElements = [];
                 currentChangeIndex = -1;
-                statusMsg.textContent = 'Scanning...';
+                statusMsg.textContent = t("Scanning...");
                 
                 document.querySelectorAll('.selected-change').forEach(el => el.classList.remove('selected-change'));
                 
@@ -1871,14 +1892,14 @@ export class MarkdownDiffProvider {
                 if (currentGroup.length > 0) groups.push(currentGroup);
                 changeElements = groups;
                 
-                statusMsg.textContent = 'Found ' + changeElements.length + ' groups';
+                statusMsg.textContent = t("Found {0} groups", changeElements.length);
                 statusMsg.style.color = '';
             } else {
-                statusMsg.textContent = 'No changes found';
+                statusMsg.textContent = t("No changes found");
             }
             } catch (e) {
                 console.error(e);
-                statusMsg.textContent = 'Error: ' + e.message;
+                statusMsg.textContent = t("Error: {0}", e.message);
                 statusMsg.style.color = 'red';
             }
         }
@@ -1975,8 +1996,9 @@ export class MarkdownDiffProvider {
         }
         
         function updateStatus() {
-             statusMsg.textContent = \`Change \${currentChangeIndex + 1} of \${changeElements.length}\`;
+             statusMsg.textContent = t("Change {0} of {1}", currentChangeIndex + 1, changeElements.length);
         }
+
 
         // --- Scroll Sync (Master-Slave Pattern) ---
         // Instead of a timer-based lock (which can drop final events),

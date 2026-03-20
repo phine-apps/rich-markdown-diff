@@ -1,8 +1,8 @@
 {
   "name": "rich-markdown-diff",
   "publisher": "phine-apps",
-  "displayName": "Rich Markdown Diff",
-  "description": "Displays a rich, visual diff of two markdown files.",
+  "displayName": "%rich-markdown-diff.displayName%",
+  "description": "%rich-markdown-diff.description%",
   "version": "1.1.0",
   "icon": "images/icon.png",
   "author": "phine-apps",
@@ -41,54 +41,54 @@
     "commands": [
       {
         "command": "rich-markdown-diff.selectForCompare",
-        "title": "Select for Markdown Diff",
-        "category": "Markdown Diff",
+        "title": "%rich-markdown-diff.selectForCompare.title%",
+        "category": "%rich-markdown-diff.category%",
         "enablement": "editorLangId == 'markdown' || resourceLangId == 'markdown'"
       },
       {
         "command": "rich-markdown-diff.compareWithSelected",
-        "title": "Compare with Selected (Markdown Diff)",
-        "category": "Markdown Diff",
+        "title": "%rich-markdown-diff.compareWithSelected.title%",
+        "category": "%rich-markdown-diff.category%",
         "enablement": "(editorLangId == 'markdown' || resourceLangId == 'markdown') && rich-markdown-diff.hasSelectedForCompare"
       },
       {
         "command": "rich-markdown-diff.showRenderedDiff",
-        "title": "Show Markdown Diff",
-        "category": "Markdown Diff",
+        "title": "%rich-markdown-diff.showRenderedDiff.title%",
+        "category": "%rich-markdown-diff.category%",
         "icon": "$(diff)",
         "enablement": "editorLangId == 'markdown' || resourceLangId == 'markdown'"
       },
       {
         "command": "rich-markdown-diff.diffClipboard",
-        "title": "Compare with Clipboard",
-        "category": "Markdown Diff",
+        "title": "%rich-markdown-diff.diffClipboard.title%",
+        "category": "%rich-markdown-diff.category%",
         "enablement": "editorLangId == 'markdown' || resourceLangId == 'markdown' || activeCustomEditorId == 'vscode.markdown.preview.editor'"
       },
       {
         "command": "rich-markdown-diff.toggleInlineView",
-        "title": "Toggle Inline/Side-by-Side",
-        "category": "Markdown Diff",
+        "title": "%rich-markdown-diff.toggleInlineView.title%",
+        "category": "%rich-markdown-diff.category%",
         "icon": "$(split-horizontal)",
         "enablement": "rich-markdown-diff.isDiffActive"
       },
       {
         "command": "rich-markdown-diff.toggleFoldUnchanged",
-        "title": "Toggle Context Folding",
-        "category": "Markdown Diff",
+        "title": "%rich-markdown-diff.toggleFoldUnchanged.title%",
+        "category": "%rich-markdown-diff.category%",
         "icon": "$(fold)",
         "enablement": "rich-markdown-diff.isDiffActive"
       },
       {
         "command": "rich-markdown-diff.nextChange",
-        "title": "Next Change",
-        "category": "Markdown Diff",
+        "title": "%rich-markdown-diff.nextChange.title%",
+        "category": "%rich-markdown-diff.category%",
         "icon": "$(arrow-down)",
         "enablement": "rich-markdown-diff.isDiffActive"
       },
       {
         "command": "rich-markdown-diff.prevChange",
-        "title": "Previous Change",
-        "category": "Markdown Diff",
+        "title": "%rich-markdown-diff.prevChange.title%",
+        "category": "%rich-markdown-diff.category%",
         "icon": "$(arrow-up)",
         "enablement": "rich-markdown-diff.isDiffActive"
       }
@@ -186,7 +186,7 @@
         },
         {
           "command": "rich-markdown-diff.showRenderedDiff",
-          "title": "Show Markdown Diff",
+          "title": "%rich-markdown-diff.showRenderedDiff.title%",
           "group": "modification",
           "when": "resourceLangId == markdown && listMultiSelection"
         }
@@ -224,7 +224,7 @@
     "customEditors": [
       {
         "viewType": "rich-markdown-diff.diffPreview",
-        "displayName": "Markdown Diff Preview",
+        "displayName": "%rich-markdown-diff.customEditor.displayName%",
         "selector": [
           {
             "filenamePattern": "*.md"
@@ -259,6 +259,7 @@
     "@types/vscode": "^1.80.0",
     "@typescript-eslint/eslint-plugin": "^8.54.0",
     "@typescript-eslint/parser": "^8.54.0",
+    "@vscode/l10n-dev": "^0.0.35",
     "@vscode/test-electron": "^2.5.2",
     "@vscode/vsce": "^3.0.0",
     "esbuild": "^0.27.3",
@@ -274,6 +275,7 @@
   },
   "dependencies": {
     "@iktakahiro/markdown-it-katex": "^3.1.0",
+    "@vscode/l10n": "^0.0.18",
     "gray-matter": "^4.0.3",
     "highlight.js": "^11.11.1",
     "htmldiff-js": "^1.0.5",

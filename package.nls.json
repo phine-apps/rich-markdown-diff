@@ -1,0 +1,14 @@
+{
+  "rich-markdown-diff.displayName": "Rich Markdown Diff",
+  "rich-markdown-diff.description": "Displays a rich, visual diff of two markdown files.",
+  "rich-markdown-diff.selectForCompare.title": "Select for Markdown Diff",
+  "rich-markdown-diff.compareWithSelected.title": "Compare with Selected (Markdown Diff)",
+  "rich-markdown-diff.showRenderedDiff.title": "Show Markdown Diff",
+  "rich-markdown-diff.diffClipboard.title": "Compare with Clipboard",
+  "rich-markdown-diff.toggleInlineView.title": "Toggle Inline/Side-by-Side",
+  "rich-markdown-diff.toggleFoldUnchanged.title": "Toggle Context Folding",
+  "rich-markdown-diff.nextChange.title": "Next Change",
+  "rich-markdown-diff.prevChange.title": "Previous Change",
+  "rich-markdown-diff.category": "Markdown Diff",
+  "rich-markdown-diff.customEditor.displayName": "Markdown Diff Preview"
+}

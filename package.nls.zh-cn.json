@@ -1,0 +1,14 @@
+{
+  "rich-markdown-diff.displayName": "Rich Markdown Diff",
+  "rich-markdown-diff.description": "显示两个 Markdown 文件的富文本可视化差异。",
+  "rich-markdown-diff.selectForCompare.title": "选择以进行 Markdown 差异对比",
+  "rich-markdown-diff.compareWithSelected.title": "与已选项目进行比较 (Markdown Diff)",
+  "rich-markdown-diff.showRenderedDiff.title": "显示 Markdown 差异",
+  "rich-markdown-diff.diffClipboard.title": "与剪贴板比较",
+  "rich-markdown-diff.toggleInlineView.title": "切换内联/并排视图",
+  "rich-markdown-diff.toggleFoldUnchanged.title": "切换未更改内容的折叠",
+  "rich-markdown-diff.nextChange.title": "下一个更改",
+  "rich-markdown-diff.prevChange.title": "上一个更改",
+  "rich-markdown-diff.category": "Markdown Diff",
+  "rich-markdown-diff.customEditor.displayName": "Markdown 差异预览"
+}

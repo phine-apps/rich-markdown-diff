@@ -25,6 +25,7 @@
 import * as vscode from "vscode";
 import { MarkdownDiffProvider } from "./markdownDiff";
 import * as path from "path";
+import * as l10n from "@vscode/l10n";
 
 /**
  * Escapes HTML special characters to prevent XSS in webview content.
@@ -109,6 +110,24 @@ function createImageResolver(fileUri: vscode.Uri, webview: vscode.Webview) {
   };
 }
 
+function getWebviewTranslations() {
+  return {
+    "Markdown Diff": l10n.t("Markdown Diff"),
+    Original: l10n.t("Original"),
+    Modified: l10n.t("Modified"),
+    "Scanning...": l10n.t("Scanning..."),
+    "Found {0} groups": l10n.t("Found {0} groups"),
+    "No changes found": l10n.t("No changes found"),
+    "Error: {0}": l10n.t("Error: {0}"),
+    "Change {0} of {1}": l10n.t("Change {0} of {1}"),
+    "Folded {0} (Original) / {1} (Modified) blocks": l10n.t(
+      "Folded {0} (Original) / {1} (Modified) blocks",
+    ),
+    "{0} unchanged blocks": l10n.t("{0} unchanged blocks"),
+    "Click to expand": l10n.t("Click to expand"),
+  };
+}
+
 /**
  * Activates the extension.
  * Sets up commands, custom editors, and context keys.
@@ -116,6 +135,10 @@ function createImageResolver(fileUri: vscode.Uri, webview: vscode.Webview) {
  * @param context - The extension context provided by VS Code.
  */
 export function activate(context: vscode.ExtensionContext) {
+  l10n.config({
+    uri: vscode.Uri.joinPath(context.extensionUri, "l10n").toString(),
+  });
+
   // Initialize Context Key
   vscode.commands.executeCommand(
     "setContext",
@@ -150,7 +173,7 @@ export function activate(context: vscode.ExtensionContext) {
         if (activePanel) {
           activePanel.webview.postMessage({ command: "toggleInline" });
         } else {
-          vscode.window.showWarningMessage("No active diff panel found.");
+          vscode.window.showWarningMessage(l10n.t("No active diff panel found."));
         }
       },
     ),
@@ -223,14 +246,18 @@ export function activate(context: vscode.ExtensionContext) {
 
       if (!document) {
         vscode.window.showErrorMessage(
-          "Could not determine the active Markdown file. Please open or focus a Markdown file.",
+          l10n.t(
+            "Could not determine the active Markdown file. Please open or focus a Markdown file.",
+          ),
         );
         return;
       }
 
       if (document.languageId !== "markdown") {
         vscode.window.showErrorMessage(
-          "Compare with Clipboard is only available for Markdown files.",
+          l10n.t(
+            "Compare with Clipboard is only available for Markdown files.",
+          ),
         );
         return;
       }
@@ -308,6 +335,7 @@ export function activate(context: vscode.ExtensionContext) {
         "Clipboard",
         path.basename(document.fileName),
         panel.webview.cspSource,
+        getWebviewTranslations(),
       );
 
       // Helper to track active panel for shortcuts
@@ -360,7 +388,9 @@ export function activate(context: vscode.ExtensionContext) {
           const line = message.line;
           if (side === "original") {
             vscode.window.showInformationMessage(
-              "Original source is the clipboard content and cannot be opened as a file.",
+              l10n.t(
+                "Original source is the clipboard content and cannot be opened as a file.",
+              ),
             );
             return;
           }
@@ -435,7 +465,9 @@ export function activate(context: vscode.ExtensionContext) {
     }
 
     if (!targetUri) {
-      vscode.window.showErrorMessage("No file selected for Markdown Diff.");
+      vscode.window.showErrorMessage(
+        l10n.t("No file selected for Markdown Diff."),
+      );
       return;
     }
 
@@ -452,7 +484,7 @@ export function activate(context: vscode.ExtensionContext) {
     ];
     if (!markdownExtensions.includes(ext)) {
       vscode.window.showInformationMessage(
-        `Markdown Diff only works for Markdown files (found '${ext}').`,
+        l10n.t("Markdown Diff only works for Markdown files (found '{0}').", ext),
       );
       return;
     }
@@ -482,7 +514,9 @@ export function activate(context: vscode.ExtensionContext) {
           uri = vscode.window.activeTextEditor.document.uri;
         }
         if (!uri) {
-          vscode.window.showErrorMessage("No file selected for comparison.");
+          vscode.window.showErrorMessage(
+            l10n.t("No file selected for comparison."),
+          );
           return;
         }
         selectedForCompareUri = uri;
@@ -493,7 +527,7 @@ export function activate(context: vscode.ExtensionContext) {
         );
 
         vscode.window.setStatusBarMessage(
-          `Selected '${path.basename(uri.fsPath)}' for Markdown diff.`,
+          l10n.t("Selected '{0}' for Markdown diff.", path.basename(uri.fsPath)),
           5000,
         );
       },
@@ -509,20 +543,24 @@ export function activate(context: vscode.ExtensionContext) {
           uri = vscode.window.activeTextEditor.document.uri;
         }
         if (!uri) {
-          vscode.window.showErrorMessage("No file selected for comparison.");
+          vscode.window.showErrorMessage(
+            l10n.t("No file selected for comparison."),
+          );
           return;
         }
 
         if (!selectedForCompareUri) {
           vscode.window.showErrorMessage(
-            "Please first select a file using 'Select for Markdown Diff'.",
+            l10n.t(
+              "Please first select a file using 'Select for Markdown Diff'.",
+            ),
           );
           return;
         }
 
         if (selectedForCompareUri.toString() === uri.toString()) {
           vscode.window.showInformationMessage(
-            "You are comparing the same file.",
+            l10n.t("You are comparing the same file."),
           );
         }
 
@@ -672,9 +710,10 @@ async function showTwoFilesDiff(
         leftLabel,
         rightLabel,
         panel.webview.cspSource,
+        getWebviewTranslations(),
       );
     } catch (e) {
-      panel.webview.html = `<h1>Error reading files</h1><p>${escapeHtml(String(e))}</p>`;
+      panel.webview.html = `<h1>${escapeHtml(l10n.t("Error reading files"))}</h1><p>${escapeHtml(String(e))}</p>`;
     }
   };
 
@@ -719,7 +758,9 @@ async function showTwoFilesDiff(
           editor.selection = new vscode.Selection(range.start, range.start);
         }
       } catch (e) {
-        vscode.window.showErrorMessage(`Could not open source file: ${e}`);
+        vscode.window.showErrorMessage(
+          l10n.t("Could not open source file: {0}", String(e)),
+        );
       }
     }
   });
@@ -860,7 +901,9 @@ class DiffEditorProvider implements vscode.CustomReadonlyEditorProvider {
         } catch (e) {
           if (side === "original") {
             vscode.window.showWarningMessage(
-              "Could not open original version (it might be a Git revision). Opening modified version instead.",
+              l10n.t(
+                "Could not open original version (it might be a Git revision). Opening modified version instead.",
+              ),
             );
             // Fallback to modified
             const doc = await vscode.workspace.openTextDocument(modifiedUri);
@@ -872,7 +915,9 @@ class DiffEditorProvider implements vscode.CustomReadonlyEditorProvider {
               editor.revealRange(range, vscode.TextEditorRevealType.InCenter);
             }
           } else {
-            vscode.window.showErrorMessage(`Could not open file: ${e}`);
+            vscode.window.showErrorMessage(
+              l10n.t("Could not open file: {0}", String(e)),
+            );
           }
         }
       }
@@ -910,7 +955,9 @@ class DiffEditorProvider implements vscode.CustomReadonlyEditorProvider {
         // If git lookup fails, show modified version only
         originalContent = "";
         vscode.window.showWarningMessage(
-          "Could not load original version from Git. Showing modified version only.",
+          l10n.t(
+            "Could not load original version from Git. Showing modified version only.",
+          ),
         );
       }
 
@@ -964,9 +1011,10 @@ class DiffEditorProvider implements vscode.CustomReadonlyEditorProvider {
         undefined,
         undefined,
         panel.webview.cspSource,
+        getWebviewTranslations(),
       );
     } catch (e) {
-      panel.webview.html = `<h1>Error reading file: ${escapeHtml(String(e))}</h1>`;
+      panel.webview.html = `<h1>${escapeHtml(l10n.t("Error reading file: {0}", String(e)))}</h1>`;
     }
   }
 }

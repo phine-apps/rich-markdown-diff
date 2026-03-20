@@ -1,0 +1,14 @@
+{
+  "rich-markdown-diff.displayName": "Rich Markdown Diff",
+  "rich-markdown-diff.description": "2つのMarkdownファイルの視覚的な差分（Rich Diff）を表示します。",
+  "rich-markdown-diff.selectForCompare.title": "Markdown Diff のために選択",
+  "rich-markdown-diff.compareWithSelected.title": "選択した項目と比較 (Markdown Diff)",
+  "rich-markdown-diff.showRenderedDiff.title": "Markdown Diff を表示",
+  "rich-markdown-diff.diffClipboard.title": "クリップボードと比較",
+  "rich-markdown-diff.toggleInlineView.title": "インライン/サイドバイサイドの切り替え",
+  "rich-markdown-diff.toggleFoldUnchanged.title": "変更のない箇所の折り畳みを切り替え",
+  "rich-markdown-diff.nextChange.title": "次の変更点",
+  "rich-markdown-diff.prevChange.title": "前の変更点",
+  "rich-markdown-diff.category": "Markdown Diff",
+  "rich-markdown-diff.customEditor.displayName": "Markdown Diff プレビュー"
+}
