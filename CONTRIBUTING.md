@@ -27,12 +27,12 @@ First off, thank you for considering contributing to Rich Markdown Diff!
 1. **Clone the repository.**
 2. **Install dependencies:**
    ```bash
-   npm install
+   pnpm install
    ```
 3. **Compile and Lint:**
    ```bash
-   npm run compile
-   npm run lint
+   pnpm run compile
+   pnpm run lint
    ```
 4. **Run Extension:**
    - Open this folder in VS Code.
@@ -40,9 +40,9 @@ First off, thank you for considering contributing to Rich Markdown Diff!
 
 5. **Run Tests:**
    ```bash
-   npm test
+   pnpm test
    # or for unit tests
-   npm run test:unit
+   pnpm run test:unit
    ```
 
 ## License

@@ -235,22 +235,22 @@
     ]
   },
   "scripts": {
-    "vscode:prepublish": "npm run esbuild-base -- --production",
+    "vscode:prepublish": "pnpm run esbuild-base -- --production",
     "esbuild-base": "node esbuild.js",
-    "esbuild": "npm run esbuild-base -- --sourcemap",
-    "esbuild-watch": "npm run esbuild-base -- --sourcemap --watch",
-    "compile": "tsc -p ./ && npm run esbuild",
-    "watch": "npm run esbuild-watch",
-    "pretest": "npm run compile && npm run lint",
+    "esbuild": "pnpm run esbuild-base -- --sourcemap",
+    "esbuild-watch": "pnpm run esbuild-base -- --sourcemap --watch",
+    "compile": "tsc -p ./ && pnpm run esbuild",
+    "watch": "pnpm run esbuild-watch",
+    "pretest": "pnpm run compile && pnpm run lint",
     "lint": "eslint src",
     "test": "node ./out/test/runTest.js",
-    "test:unit": "npm run compile && mocha ./out/test/unit/**/*.test.js",
+    "test:unit": "pnpm run compile && mocha ./out/test/unit/**/*.test.js",
     "package": "vsce package",
     "publish:vsce": "vsce publish",
-    "publish:ovsx": "npx ovsx publish",
-    "test:visual": "playwright test",
-    "test:visual:docker": "docker compose run --rm playwright npx playwright test",
-    "test:visual:update": "docker compose run --rm playwright npx playwright test --update-snapshots"
+    "publish:ovsx": "pnpm exec ovsx publish",
+    "test:visual": "pnpm exec playwright test",
+    "test:visual:docker": "docker compose run --rm playwright sh -c \"pnpm install --store-dir /pnpm-store && pnpm exec playwright test\"",
+    "test:visual:update": "docker compose run --rm playwright sh -c \"pnpm install --store-dir /pnpm-store && pnpm exec playwright test --update-snapshots\""
   },
   "devDependencies": {
     "@eslint/js": "^9.39.2",
@@ -297,5 +297,13 @@
     "markdown-it-task-lists": "^2.1.1",
     "markdown-it-wikilinks": "^1.4.0",
     "sanitize-html": "^2.17.1"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@vscode/vsce-sign",
+      "esbuild",
+      "keytar",
+      "reurl"
+    ]
   }
 }

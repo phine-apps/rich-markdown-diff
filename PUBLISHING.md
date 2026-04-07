@@ -19,13 +19,13 @@
 To create a `.vsix` file for testing or manual upload:
 
 ```bash
-npm run package
+pnpm run package
 ```
 
 ### Publish to VS Code Marketplace
 
 ```bash
-npm run publish:vsce
+pnpm run publish:vsce
 ```
 
 _Requires `VSCE_PAT` if not logged in locally._
@@ -33,7 +33,7 @@ _Requires `VSCE_PAT` if not logged in locally._
 ### Publish to OpenVSX
 
 ```bash
-npm run publish:ovsx
+pnpm run publish:ovsx
 ```
 
 _Requires `OVSX_PAT` if not logged in locally._
