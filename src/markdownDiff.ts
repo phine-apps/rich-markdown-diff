@@ -278,6 +278,7 @@ export class MarkdownDiffProvider {
         "dt",
         "dd",
         "section",
+        "mark",
         // MathML tags (if used by KaTeX or others)
         "math",
         "semantics",
@@ -1054,6 +1055,7 @@ export class MarkdownDiffProvider {
     <!-- Mermaid JS -->
     <script nonce="${nonce}" src="${mermaidJsUri}"></script>
     <style>
+        :root { /* VRT_THEME_VARS */ }
         html, body {
             height: 100%;
             overflow: hidden;
@@ -1131,6 +1133,8 @@ export class MarkdownDiffProvider {
             box-sizing: border-box;
             height: 100%;
             position: relative; /* Ensure offsetTop is relative to pane */
+            background-color: var(--vscode-editor-background);
+            color: var(--vscode-editor-foreground);
         }
         .pane:last-child {
             border-right: none;
@@ -1141,19 +1145,15 @@ export class MarkdownDiffProvider {
             flex-direction: column;
         }
         body.inline-mode #left-pane {
-            display: none;
+            display: none !important;
         }
         body.inline-mode #right-pane {
             flex: 1;
             width: 100%;
             border-right: none;
         }
-        body.inline-mode #right-pane {
-            border-right: none;
-            width: 100%;
-        }
         body.inline-mode .header {
-            display: none; /* Hide Original/Modified header in inline */
+            display: none !important; /* Hide Original/Modified header in inline */
         }
         
         /* Inline Mode Coloring: Show BOTH del and ins in the right pane */
@@ -1514,7 +1514,7 @@ export class MarkdownDiffProvider {
         }
     </style>
 </head>
-<body>
+<body class="VRT_LAYOUT_CLASS">
     <div class="toolbar">
         <!-- Buttons removed, moved to VS Code View Actions -->
         <span id="status-msg" style="margin-left: auto; font-size: 11px; opacity: 0.7;"></span>
@@ -2214,7 +2214,7 @@ export class MarkdownDiffProvider {
 
         // Initialize Mermaid
         mermaid.initialize({ startOnLoad: true });
-    </script>
+    <script>/* VRT_SCRIPT_PLACEHOLDER */</script>
 </body>
 </html>`;
   }
