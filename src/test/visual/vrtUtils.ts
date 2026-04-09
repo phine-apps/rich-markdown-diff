@@ -64,22 +64,18 @@ export async function generateVRTHtml(
     translations
   );
 
-  // Inject Theme Variables
-  html = html.replace(":root {", `:root { ${themeVars}`);
+  // Inject Theme Variables via placeholder
+  html = html.replace("/* VRT_THEME_VARS */", themeVars);
 
-  // Layout overrides removed because they cause infinite layout loops in headless Chromium.
-  // We simply use setViewportSize(1280, 4000) for screenshotting.
+  // Force inline mode if requested via placeholder in body class
+  const layoutClass = options.inline ? "inline-mode" : "split-mode";
+  html = html.replace("VRT_LAYOUT_CLASS", layoutClass);
 
   // Remove CSP for testing environment
   html = html.replace(/<meta http-equiv="Content-Security-Policy"[^>]*>/, "");
 
   // We don't inject mermaid.min.js in VRT since it's mocked by CSS and executing it can cause hangs.
   html = html.replace(/<script[^>]*src="[^"]*mock-mermaid.min.js"[^>]*><\/script>/, "");
-
-  // Force inline mode if requested
-  if (options.inline) {
-    html = html.replace("<body", '<body class="inline-mode"');
-  }
 
   // Mock Mermaid for VRT. Headless browsers often fail to render Mermaid SVGs securely (sandbox errors),
   // which causes flaky text-only snapshots or timeouts. We replace `.mermaid` with a static visual block.

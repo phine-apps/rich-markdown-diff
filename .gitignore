@@ -30,3 +30,6 @@ index.html
 
 # Cache/Temp data
 data/
+
+# Environment specific screenshots
+*-darwin.png
