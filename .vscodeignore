@@ -32,6 +32,16 @@ out/*.js.map
 # Exclude heavy GIFs (served from GitHub), keep other images (icon.png)
 images/*.gif
 
+# Development & Test Artifacts
+.pnpm-store/
+scratch/
+playwright-report/
+test-results/
+Dockerfile.vrt
+docker-compose.yml
+pnpm-lock.yaml
+playwright.config.ts
+
 # Bundled Extension Inclusion
 # We need to explicitly include the bundled extension file if 'out/' was ignored directly,
 # but since we ignore source dirs etc, ensure this is kept.

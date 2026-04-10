@@ -26,7 +26,7 @@
     "rendered"
   ],
   "engines": {
-    "vscode": "^1.80.0"
+    "vscode": "^1.100.0"
   },
   "categories": [
     "Formatters",
@@ -245,7 +245,7 @@
     "lint": "eslint src",
     "test": "node ./out/test/runTest.js",
     "test:unit": "pnpm run compile && mocha ./out/test/unit/**/*.test.js",
-    "package": "vsce package",
+    "package": "vsce package --no-dependencies",
     "publish:vsce": "vsce publish",
     "publish:ovsx": "pnpm exec ovsx publish",
     "test:visual": "pnpm exec playwright test",
@@ -260,7 +260,7 @@
     "@types/mocha": "^10.0.10",
     "@types/node": "^25.5.2",
     "@types/sanitize-html": "^2.16.1",
-    "@types/vscode": "^1.110.0",
+    "@types/vscode": "^1.100.0",
     "@typescript-eslint/eslint-plugin": "^8.58.0",
     "@typescript-eslint/parser": "^8.58.0",
     "@vscode/l10n-dev": "^0.0.35",
