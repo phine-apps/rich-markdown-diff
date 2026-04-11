@@ -37,7 +37,7 @@ describe("GitHub Alert Tests", () => {
     const oldMd = `> [!NOTE]\n> Old content`;
     const newMd = `> [!NOTE]\n> New content`;
 
-    const diffHtml = provider.computeDiff(oldMd, newMd);
+    const { html: diffHtml } = provider.computeDiff(oldMd, newMd);
 
     // Extract the alert div
     const alertMatch = diffHtml.match(
@@ -82,7 +82,7 @@ describe("GitHub Alert Tests", () => {
     const oldMd = `\n> [!NOTE]\n> This is a note alert.\n`;
     const newMd = `\n> [!NOTE]\n> This is a note alert with updated content.\n`;
 
-    const diffHtml = provider.computeDiff(oldMd, newMd);
+    const { html: diffHtml } = provider.computeDiff(oldMd, newMd);
 
     // Extract the alert div
     const alertMatch = diffHtml.match(

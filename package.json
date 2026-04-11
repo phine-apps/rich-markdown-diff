@@ -308,6 +308,7 @@
   },
   "dependencies": {
     "@iktakahiro/markdown-it-katex": "^4.0.1",
+    "@marp-team/marp-core": "^4.3.0",
     "@vscode/l10n": "^0.0.18",
     "entities": "8.0.0",
     "gray-matter": "^4.0.3",

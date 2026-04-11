@@ -40,7 +40,7 @@ describe("Double Click Navigation", () => {
     // (e.g. identical headings at different source lines being split into
     // <del>/<ins> pairs). The diff output should NOT contain data-line.
 
-    const diff = provider.computeDiff(md, md);
+    const { html: diff } = provider.computeDiff(md, md);
     assert.ok(
       !diff.includes("data-line="),
       "Diff output should not contain data-line attributes (stripped before diffing)",
@@ -49,7 +49,7 @@ describe("Double Click Navigation", () => {
 
   it("should inject data-line attributes into headers", () => {
     const md = "# Header 1";
-    const diff = provider.computeDiff(md, md);
+    const { html: diff } = provider.computeDiff(md, md);
     assert.ok(
       !diff.includes("data-line="),
       "Header diff should not contain data-line attributes",
@@ -58,7 +58,7 @@ describe("Double Click Navigation", () => {
 
   it("should inject data-line attributes into lists", () => {
     const md = "- Item 1\n- Item 2";
-    const diff = provider.computeDiff(md, md);
+    const { html: diff } = provider.computeDiff(md, md);
     assert.ok(
       !diff.includes("data-line="),
       "List diff should not contain data-line attributes",

@@ -35,7 +35,7 @@ describe("Security Tests", () => {
     `;
     const safeMarkdown = "# Hello";
 
-    const diffHtml = provider.computeDiff(safeMarkdown, maliciousMarkdown);
+    const { html: diffHtml } = provider.computeDiff(safeMarkdown, maliciousMarkdown);
 
     // Verify sanitization
     assert.strictEqual(
@@ -55,7 +55,7 @@ describe("Security Tests", () => {
     const oldMarkdown = '<p style="position:fixed;inset:0">Hello</p>';
     const newMarkdown = "<p>Hello</p>";
 
-    const diffHtml = provider.computeDiff(oldMarkdown, newMarkdown);
+    const { html: diffHtml } = provider.computeDiff(oldMarkdown, newMarkdown);
 
     assert.strictEqual(
       diffHtml.includes("position:fixed"),
@@ -74,7 +74,7 @@ describe("Security Tests", () => {
     const maliciousLabel = '"><script>alert(1)</script>';
     const safeContent = "# Test";
 
-    const diffHtml = provider.computeDiff(safeContent, safeContent);
+    const { html: diffHtml } = provider.computeDiff(safeContent, safeContent);
     const webviewContent = provider.getWebviewContent(
       diffHtml,
       "katex.css",
@@ -100,7 +100,7 @@ describe("Security Tests", () => {
 
   it("uses nonce-based styles and strict Mermaid rendering in the webview", () => {
     const provider = new MarkdownDiffProvider();
-    const diffHtml = provider.computeDiff(
+    const { html: diffHtml } = provider.computeDiff(
       "```mermaid\ngraph TD;\nA-->B;\n```",
       "```mermaid\ngraph TD;\nA-->B;\n```",
     );

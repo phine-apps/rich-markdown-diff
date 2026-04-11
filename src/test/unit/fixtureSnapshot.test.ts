@@ -63,7 +63,7 @@ describe("Fixture Snapshot Tests", () => {
       const v2Content = fs.readFileSync(v2Path, "utf-8");
 
       // Generate diff
-      const actualDiff = provider.computeDiff(v1Content, v2Content);
+      const { html: actualDiff } = provider.computeDiff(v1Content, v2Content);
 
       // If expected file doesn't exist, create it (first run)
       if (!fs.existsSync(snapshotPath)) {
@@ -90,7 +90,7 @@ describe("Fixture Snapshot Tests", () => {
       const v1Content = fs.readFileSync(v1Path, "utf-8");
       const v2Content = fs.readFileSync(v2Path, "utf-8");
 
-      const diff = provider.computeDiff(v1Content, v2Content);
+      const { html: diff } = provider.computeDiff(v1Content, v2Content);
 
       // v2 has "New Section" added
       assert.ok(diff.includes("<ins"), "Should contain insertion tags");
@@ -107,7 +107,7 @@ describe("Fixture Snapshot Tests", () => {
       const v1Content = fs.readFileSync(v1Path, "utf-8");
       const v2Content = fs.readFileSync(v2Path, "utf-8");
 
-      const diff = provider.computeDiff(v1Content, v2Content);
+      const { html: diff } = provider.computeDiff(v1Content, v2Content);
 
       // Both insertion and deletion tags should be present for modifications
       assert.ok(diff.includes("<ins"), "Should contain insertion tags");
@@ -121,7 +121,7 @@ describe("Fixture Snapshot Tests", () => {
       const v1Content = fs.readFileSync(v1Path, "utf-8");
       const v2Content = fs.readFileSync(v2Path, "utf-8");
 
-      const diff = provider.computeDiff(v1Content, v2Content);
+      const { html: diff } = provider.computeDiff(v1Content, v2Content);
 
       // v2 has "Item 4" added
       assert.ok(diff.includes("<li"), "Should contain list items");
@@ -134,7 +134,7 @@ describe("Fixture Snapshot Tests", () => {
       const v1Content = fs.readFileSync(v1Path, "utf-8");
       const v2Content = fs.readFileSync(v2Path, "utf-8");
 
-      const diff = provider.computeDiff(v1Content, v2Content);
+      const { html: diff } = provider.computeDiff(v1Content, v2Content);
 
       // Should contain code elements
       assert.ok(
@@ -150,7 +150,7 @@ describe("Fixture Snapshot Tests", () => {
       const v1Content = fs.readFileSync(v1Path, "utf-8");
       const v2Content = fs.readFileSync(v2Path, "utf-8");
 
-      const diff = provider.computeDiff(v1Content, v2Content);
+      const { html: diff } = provider.computeDiff(v1Content, v2Content);
 
       // v2 has a "Notes" column added
       assert.ok(diff.includes("<table"), "Should contain table");
@@ -164,7 +164,7 @@ describe("Fixture Snapshot Tests", () => {
       const v1Content = fs.readFileSync(v1Path, "utf-8");
       const v2Content = fs.readFileSync(v2Path, "utf-8");
 
-      const diff = provider.computeDiff(v1Content, v2Content);
+      const { html: diff } = provider.computeDiff(v1Content, v2Content);
 
       // Emoji shortcodes should be rendered
       // :smile: becomes 😄, :rocket: becomes 🚀, etc.
@@ -184,7 +184,7 @@ describe("Fixture Snapshot Tests", () => {
       const v1Content = fs.readFileSync(v1Path, "utf-8");
       const v2Content = fs.readFileSync(v2Path, "utf-8");
 
-      const diff = provider.computeDiff(v1Content, v2Content);
+      const { html: diff } = provider.computeDiff(v1Content, v2Content);
 
       // KaTeX renders math with .katex class or specific elements
       assert.ok(
@@ -202,7 +202,7 @@ describe("Fixture Snapshot Tests", () => {
       const v1Content = fs.readFileSync(v1Path, "utf-8");
       const v2Content = fs.readFileSync(v2Path, "utf-8");
 
-      const diff = provider.computeDiff(v1Content, v2Content);
+      const { html: diff } = provider.computeDiff(v1Content, v2Content);
 
       // Mermaid blocks should be rendered with class="mermaid"
       assert.ok(
@@ -222,7 +222,7 @@ describe("Fixture Snapshot Tests", () => {
       const v1Content = fs.readFileSync(v1Path, "utf-8");
       const v2Content = fs.readFileSync(v2Path, "utf-8");
 
-      const diff = provider.computeDiff(v1Content, v2Content);
+      const { html: diff } = provider.computeDiff(v1Content, v2Content);
 
       // GitHub alerts render with markdown-alert class
       assert.ok(
@@ -240,7 +240,7 @@ describe("Fixture Snapshot Tests", () => {
       const v1Content = fs.readFileSync(v1Path, "utf-8");
       const v2Content = fs.readFileSync(v2Path, "utf-8");
 
-      const diff = provider.computeDiff(v1Content, v2Content);
+      const { html: diff } = provider.computeDiff(v1Content, v2Content);
 
       // Footnotes render with footnote-related classes or elements
       assert.ok(
@@ -258,7 +258,7 @@ describe("Fixture Snapshot Tests", () => {
       const v1Content = fs.readFileSync(v1Path, "utf-8");
       const v2Content = fs.readFileSync(v2Path, "utf-8");
 
-      const diff = provider.computeDiff(v1Content, v2Content);
+      const { html: diff } = provider.computeDiff(v1Content, v2Content);
 
       // Wikilinks render as <a> tags with the page name
       assert.ok(
@@ -274,7 +274,7 @@ describe("Fixture Snapshot Tests", () => {
       const v1Content = fs.readFileSync(v1Path, "utf-8");
       const v2Content = fs.readFileSync(v2Path, "utf-8");
 
-      const diff = provider.computeDiff(v1Content, v2Content);
+      const { html: diff } = provider.computeDiff(v1Content, v2Content);
 
       // ==text== renders as <mark>
       assert.ok(
@@ -290,7 +290,7 @@ describe("Fixture Snapshot Tests", () => {
       const v1Content = fs.readFileSync(v1Path, "utf-8");
       const v2Content = fs.readFileSync(v2Path, "utf-8");
 
-      const diff = provider.computeDiff(v1Content, v2Content);
+      const { html: diff } = provider.computeDiff(v1Content, v2Content);
 
       // H~2~O renders with <sub>, x^2^ renders with <sup>
       assert.ok(
@@ -306,7 +306,7 @@ describe("Fixture Snapshot Tests", () => {
       const v1Content = fs.readFileSync(v1Path, "utf-8");
       const v2Content = fs.readFileSync(v2Path, "utf-8");
 
-      const diff = provider.computeDiff(v1Content, v2Content);
+      const { html: diff } = provider.computeDiff(v1Content, v2Content);
 
       // Definition lists render with <dl>, <dt>, <dd>
       assert.ok(

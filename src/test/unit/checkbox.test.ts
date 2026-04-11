@@ -36,7 +36,7 @@ describe("MarkdownDiffProvider - Checkboxes", () => {
   it("should render unchecked checkboxes", () => {
     const oldMd = "- [ ] Task 1";
     const newMd = "- [ ] Task 1";
-    const diff = provider.computeDiff(oldMd, newMd);
+    const { html: diff } = provider.computeDiff(oldMd, newMd);
 
     assert.ok(
       diff.includes('type="checkbox"'),
@@ -48,7 +48,7 @@ describe("MarkdownDiffProvider - Checkboxes", () => {
   it("should render checked checkboxes", () => {
     const oldMd = "- [x] Task 1";
     const newMd = "- [x] Task 1";
-    const diff = provider.computeDiff(oldMd, newMd);
+    const { html: diff } = provider.computeDiff(oldMd, newMd);
 
     assert.ok(
       diff.includes('type="checkbox"'),
@@ -60,7 +60,7 @@ describe("MarkdownDiffProvider - Checkboxes", () => {
   it("should render diffs in checkboxes", () => {
     const oldMd = "- [ ] Task 1";
     const newMd = "- [x] Task 1";
-    const diff = provider.computeDiff(oldMd, newMd);
+    const { html: diff } = provider.computeDiff(oldMd, newMd);
 
     // This is tricky because the diff happens at HTML level.
     // htmldiff-js might wrap the whole list item or just parts of it.

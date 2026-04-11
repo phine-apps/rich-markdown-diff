@@ -36,7 +36,7 @@ describe("Footnote Tests", () => {
   it("should handle footnotes correctly", () => {
     const oldMd = "Text [^1]\n\n[^1]: Note 1";
     const newMd = "Text [^1]\n\n[^1]: Note 1 modified";
-    const diffHtml = provider.computeDiff(oldMd, newMd);
+    const { html: diffHtml } = provider.computeDiff(oldMd, newMd);
 
     assert.ok(
       diffHtml.includes('class="footnotes"'),
@@ -47,7 +47,7 @@ describe("Footnote Tests", () => {
   it("should handle added footnotes and show correct diff structure", () => {
     const oldMd = "Text [^1]\n\n[^1]: Note 1";
     const newMd = "Text [^1] [^2]\n\n[^1]: Note 1\n[^2]: Note 2";
-    const diffHtml = provider.computeDiff(oldMd, newMd);
+    const { html: diffHtml } = provider.computeDiff(oldMd, newMd);
 
     assert.ok(
       diffHtml.includes('class="footnotes"'),
@@ -84,7 +84,7 @@ Another footnote[^2].
 [^2]: This is a new footnote added in v2.
 `;
 
-    const diffHtml = provider.computeDiff(oldMarkdown, newMarkdown);
+    const { html: diffHtml } = provider.computeDiff(oldMarkdown, newMarkdown);
 
     assert.ok(diffHtml.includes('class="footnotes"'));
 
@@ -115,7 +115,7 @@ And another sentence with a second footnote[^2].
 
 [^2]: This is a new footnote added in v2.`;
 
-    const diffHtml = provider.computeDiff(oldMd, newMd);
+    const { html: diffHtml } = provider.computeDiff(oldMd, newMd);
 
     assert.ok(
       /<li id="fn1" class="footnote-item">[\s\S]*diffins[\s\S]*updated/i.test(

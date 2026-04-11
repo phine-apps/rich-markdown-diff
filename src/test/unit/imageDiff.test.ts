@@ -36,7 +36,7 @@ describe("MarkdownDiffProvider - Image Diff", () => {
   it("should wrap added images in <ins> tags", () => {
     const oldMd = "";
     const newMd = "![Icon](icon.png)";
-    const diff = provider.computeDiff(oldMd, newMd);
+    const { html: diff } = provider.computeDiff(oldMd, newMd);
 
     assert.ok(diff.includes("<ins"), "Should contain ins tag");
     assert.ok(diff.includes('<img src="icon.png"'), "Should contain image tag");
@@ -51,7 +51,7 @@ describe("MarkdownDiffProvider - Image Diff", () => {
   it("should wrap deleted images in <del> tags", () => {
     const oldMd = "![Icon](icon.png)";
     const newMd = "";
-    const diff = provider.computeDiff(oldMd, newMd);
+    const { html: diff } = provider.computeDiff(oldMd, newMd);
 
     assert.ok(diff.includes("<del"), "Should contain del tag");
     assert.ok(diff.includes('<img src="icon.png"'), "Should contain image tag");

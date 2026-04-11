@@ -36,7 +36,7 @@ describe("MarkdownDiffProvider", () => {
   it("should compute simple diff (insertion)", () => {
     const oldMd = "foo";
     const newMd = "foo bar";
-    const diff = provider.computeDiff(oldMd, newMd);
+    const { html: diff } = provider.computeDiff(oldMd, newMd);
 
     // Expected: "foo <ins ...>bar</ins>"
     assert.ok(diff.includes("foo"), "Should contain original text");
@@ -47,7 +47,7 @@ describe("MarkdownDiffProvider", () => {
   it("should compute simple diff (deletion)", () => {
     const oldMd = "foo bar";
     const newMd = "foo";
-    const diff = provider.computeDiff(oldMd, newMd);
+    const { html: diff } = provider.computeDiff(oldMd, newMd);
 
     // Expected: "foo <del ...>bar</del>"
     assert.ok(diff.includes("foo"), "Should contain original text");
@@ -58,7 +58,7 @@ describe("MarkdownDiffProvider", () => {
   it("should handle frontmatter changes", () => {
     const oldMd = "---\ntitle: Old\n---\nContent";
     const newMd = "---\ntitle: New\n---\nContent";
-    const diff = provider.computeDiff(oldMd, newMd);
+    const { html: diff } = provider.computeDiff(oldMd, newMd);
 
     assert.ok(
       diff.includes("Frontmatter Changes"),
@@ -71,7 +71,7 @@ describe("MarkdownDiffProvider", () => {
   it("should show unchanged frontmatter fields without highlight", () => {
     const oldMd = "---\ntitle: Old\nauthor: phine-apps\n---\nContent";
     const newMd = "---\ntitle: New\nauthor: phine-apps\n---\nContent";
-    const diff = provider.computeDiff(oldMd, newMd);
+    const { html: diff } = provider.computeDiff(oldMd, newMd);
 
     assert.ok(
       diff.includes("Frontmatter Changes"),
@@ -92,7 +92,7 @@ describe("MarkdownDiffProvider", () => {
     const newMd = "A\n```mermaid\ngraph TD;\nA-->B;\n```\nC";
 
     // Note: The provider renders mermaid as <div class="mermaid">...</div> because of the renderer override
-    const diff = provider.computeDiff(oldMd, newMd);
+    const { html: diff } = provider.computeDiff(oldMd, newMd);
 
     // We want to ensure it didn't mangle the mermaid content into a diff mess
     // The tokenization ensures the block is treated as a unit or restored correctly.
@@ -108,7 +108,7 @@ describe("MarkdownDiffProvider", () => {
     const resolver = (src: string) => `vscode-resource://${src}`;
 
     // @ts-ignore
-    const diff = provider.computeDiff(oldMd, newMd, resolver);
+    const { html: diff } = provider.computeDiff(oldMd, newMd, resolver);
 
     assert.ok(
       diff.includes('src="vscode-resource://images/icon.png"'),
@@ -119,7 +119,7 @@ describe("MarkdownDiffProvider", () => {
   it("should render strikethrough content inside diffs", () => {
     const oldMd = "This has ~~removed~~ text.";
     const newMd = "This has text.";
-    const diff = provider.computeDiff(oldMd, newMd);
+    const { html: diff } = provider.computeDiff(oldMd, newMd);
 
     assert.ok(
       diff.includes("<s>") || diff.includes("removed"),
@@ -131,7 +131,7 @@ describe("MarkdownDiffProvider", () => {
   it("should preserve nested list structure", () => {
     const oldMd = "- Parent\n  - Child A\n  - Child B";
     const newMd = "- Parent\n  - Child A\n  - Child C";
-    const diff = provider.computeDiff(oldMd, newMd);
+    const { html: diff } = provider.computeDiff(oldMd, newMd);
 
     assert.ok(diff.includes("<ul>"), "Should render nested list containers");
     assert.ok(
@@ -143,7 +143,7 @@ describe("MarkdownDiffProvider", () => {
   it("should detect ordered to unordered list container changes", () => {
     const oldMd = "1. One\n2. Two";
     const newMd = "- One\n- Two";
-    const diff = provider.computeDiff(oldMd, newMd);
+    const { html: diff } = provider.computeDiff(oldMd, newMd);
 
     assert.ok(diff.includes("<del"), "Should mark the ordered list as removed");
     assert.ok(diff.includes("<ins"), "Should mark the unordered list as added");
@@ -168,7 +168,7 @@ describe("MarkdownDiffProvider", () => {
   it("should detect definition list to unordered list container changes", () => {
     const oldMd = "Term 1\n: One";
     const newMd = "- Term 1";
-    const diff = provider.computeDiff(oldMd, newMd);
+    const { html: diff } = provider.computeDiff(oldMd, newMd);
 
     assert.ok(
       diff.includes("diff-list-container-change"),
@@ -185,7 +185,7 @@ describe("MarkdownDiffProvider", () => {
   it("should detect ordered list to definition list container changes", () => {
     const oldMd = "1. Term 1";
     const newMd = "Term 1\n: One";
-    const diff = provider.computeDiff(oldMd, newMd);
+    const { html: diff } = provider.computeDiff(oldMd, newMd);
 
     assert.ok(
       diff.includes("diff-list-container-change"),
@@ -202,7 +202,7 @@ describe("MarkdownDiffProvider", () => {
   it("should keep same-type definition list changes granular", () => {
     const oldMd = "Term 1\n: One";
     const newMd = "Term 1\n: One\n\nTerm 2\n: Two";
-    const diff = provider.computeDiff(oldMd, newMd);
+    const { html: diff } = provider.computeDiff(oldMd, newMd);
 
     assert.ok(diff.includes("<dl>"), "Should preserve the definition list");
     assert.ok(diff.includes("<dt>"), "Should preserve definition terms");
@@ -220,7 +220,7 @@ describe("MarkdownDiffProvider", () => {
   it("should keep surrounding headings outside structural list-container change wrappers", () => {
     const oldMd = "## Header\n\n1. One\n2. Two\n\n## Next";
     const newMd = "## Header\n\n- One\n- Two\n\n## Next";
-    const diff = provider.computeDiff(oldMd, newMd);
+    const { html: diff } = provider.computeDiff(oldMd, newMd);
 
     assert.ok(
       diff.includes("<h2>Header</h2>"),
@@ -240,7 +240,7 @@ describe("MarkdownDiffProvider", () => {
   it("should preserve CJK text inside diffs", () => {
     const oldMd = "## 变更说明\n这是旧版本。";
     const newMd = "## 变更说明\n这是新版本。";
-    const diff = provider.computeDiff(oldMd, newMd);
+    const { html: diff } = provider.computeDiff(oldMd, newMd);
 
     assert.ok(diff.includes("变更说明"), "Should retain the heading text");
     assert.ok(
@@ -252,7 +252,7 @@ describe("MarkdownDiffProvider", () => {
   it("should keep changelog-style headings intact when body text changes", () => {
     const oldMd = "## [1.1.1] - 2026-03-20\nPrevious note.";
     const newMd = "## [1.1.1] - 2026-03-20\nUpdated note.";
-    const diff = provider.computeDiff(oldMd, newMd);
+    const { html: diff } = provider.computeDiff(oldMd, newMd);
 
     assert.ok(
       diff.includes("[1.1.1] - 2026-03-20"),
@@ -263,7 +263,7 @@ describe("MarkdownDiffProvider", () => {
   it("should keep numbered step headings intact when the number changes", () => {
     const oldMd = "### 3. Compare with Clipboard\nPrevious note.";
     const newMd = "### 4. Compare with Clipboard\nUpdated note.";
-    const diff = provider.computeDiff(oldMd, newMd);
+    const { html: diff } = provider.computeDiff(oldMd, newMd);
 
     assert.ok(
       diff.includes("Compare with Clipboard"),
@@ -277,7 +277,7 @@ describe("MarkdownDiffProvider", () => {
   });
 
   it("should allow normal documentation headings to wrap", () => {
-    const diff = provider.computeDiff(
+    const { html: diff } = provider.computeDiff(
       "## Local Testing and Installation\nInstructions.",
       "## Local Testing and Installation\nInstructions updated.",
     );
@@ -289,7 +289,7 @@ describe("MarkdownDiffProvider", () => {
   });
 
   it("should preserve highlight markup", () => {
-    const diff = provider.computeDiff(
+    const { html: diff } = provider.computeDiff(
       "Use ==highlighted text== for emphasis.",
       "Use ==highlighted text== for emphasis. Added.",
     );
@@ -304,7 +304,7 @@ describe("MarkdownDiffProvider", () => {
       "| Tables | Better |",
       "| Security | Hardened |",
     ].join("\n");
-    const diff = provider.computeDiff(md, md);
+    const { html: diff } = provider.computeDiff(md, md);
 
     assert.ok(diff.includes("<table"), "Should render a table element");
     assert.ok(diff.includes("<th"), "Should render header cells");
@@ -323,7 +323,7 @@ describe("MarkdownDiffProvider", () => {
       "| Tables | Improved |",
       "| SCM | Reliable |",
     ].join("\n");
-    const diff = provider.computeDiff(oldMd, newMd);
+    const { html: diff } = provider.computeDiff(oldMd, newMd);
 
     assert.ok(diff.includes("<table"), "Should preserve a table wrapper");
     assert.ok(diff.includes("<tr"), "Should preserve table rows");
@@ -721,7 +721,7 @@ describe("MarkdownDiffProvider", () => {
     const oldMd = "# Changelog\n\n## [1.1.1] - 2026-03-20\n\nFixed a bug.";
     const newMd =
       "# Changelog\n\n## [1.2.0] - 2026-04-06\n\nNew feature.\n\n## [1.1.1] - 2026-03-20\n\nFixed a bug.";
-    const diff = provider.computeDiff(oldMd, newMd);
+    const { html: diff } = provider.computeDiff(oldMd, newMd);
 
     assert.ok(
       diff.includes("[1.1.1] - 2026-03-20"),
@@ -736,7 +736,7 @@ describe("MarkdownDiffProvider", () => {
   it("should show inline diff within headings when heading text changes", async () => {
     const oldMd = "# Old Title\n\nSome text.";
     const newMd = "# New Title\n\nSome text.";
-    const diff = provider.computeDiff(oldMd, newMd);
+    const { html: diff } = provider.computeDiff(oldMd, newMd);
 
     // The heading should still exist as an h1
     assert.ok(diff.includes("<h1>"), "Output should contain an h1 element");
@@ -757,7 +757,7 @@ describe("MarkdownDiffProvider", () => {
   it("should highlight completely new heading additions with diff classes", async () => {
     const oldMd = "# Doc\n\nPara one.";
     const newMd = "# Doc\n\n## New Section\n\nNew content.\n\nPara one.";
-    const diff = provider.computeDiff(oldMd, newMd);
+    const { html: diff } = provider.computeDiff(oldMd, newMd);
 
     // The new heading should be wrapped with an insertion marker
     assert.ok(
@@ -781,7 +781,7 @@ describe("MarkdownDiffProvider", () => {
       "### 3. Compare with Clipboard\n\n1. Open a markdown file.\n2. Copy some text.";
     const newMd =
       "### 3. Open the Current File\n\n1. Open a Markdown file.\n2. Use action.\n\n### 4. Compare with Clipboard\n\n1. Open a markdown file.\n2. Copy some text.";
-    const diff = provider.computeDiff(oldMd, newMd);
+    const { html: diff } = provider.computeDiff(oldMd, newMd);
 
     // The old heading text must appear as one contiguous string inside a
     // single <h3>, not split across multiple heading elements.
@@ -805,7 +805,7 @@ describe("MarkdownDiffProvider", () => {
   it("should not wrap entire code blocks when only part changes", () => {
     const oldMd = 'Text\n\n```python\nprint("hello")\n```\n\nEnd.';
     const newMd = 'Text\n\n```python\nprint("world")\n```\n\nEnd.';
-    const diff = provider.computeDiff(oldMd, newMd);
+    const { html: diff } = provider.computeDiff(oldMd, newMd);
 
     assert.ok(
       diff.includes("<pre>") || diff.includes("<pre "),
@@ -818,7 +818,7 @@ describe("MarkdownDiffProvider", () => {
   });
 
   it("should render horizontal rules", () => {
-    const diff = provider.computeDiff(
+    const { html: diff } = provider.computeDiff(
       "Above\n\n---\n\nBelow",
       "Above\n\n---\n\nBelow",
     );
@@ -1063,7 +1063,7 @@ describe("MarkdownDiffProvider", () => {
   it("should split consecutive headings into separate diff wrappers", () => {
     const oldMd = "# Title\n\nParagraph.";
     const newMd = "# Title\n\n## New A\n\n## New B\n\nParagraph.";
-    const diff = provider.computeDiff(oldMd, newMd);
+    const { html: diff } = provider.computeDiff(oldMd, newMd);
 
     // Each heading should be in its own wrapper, not grouped together
     const insBlocks = diff.match(/<ins\b[^>]*>[\s\S]*?<\/ins>/gi) || [];
@@ -1083,7 +1083,7 @@ describe("MarkdownDiffProvider", () => {
     const oldMd = "# Intro\n\nSome content.";
     const newMd =
       "# Intro\n\nSome content.\n\n## License\n\nThis project is licensed under the MIT License.";
-    const diff = provider.computeDiff(oldMd, newMd);
+    const { html: diff } = provider.computeDiff(oldMd, newMd);
 
     // The heading and the paragraph must be in separate wrappers
     const insBlocks = diff.match(/<ins\b[^>]*>[\s\S]*?<\/ins>/gi) || [];
@@ -1130,7 +1130,7 @@ describe("MarkdownDiffProvider", () => {
       "- **GitHub Alerts**: Display styled admonitions like etc\n- **Footnotes**: Full support.";
     const newMd =
       "- **GitHub Alerts**: Display styled admonitions like etc.\n- **Tables and Lists**: Preserve rendered tables.\n- **Footnotes**: Full support.";
-    const diff = provider.computeDiff(oldMd, newMd);
+    const { html: diff } = provider.computeDiff(oldMd, newMd);
 
     // The Tables and Lists li should be marked as data-all-inserted
     assert.ok(
@@ -1166,7 +1166,7 @@ describe("MarkdownDiffProvider", () => {
       '1. **Run/Debug:**\n   - Open this project in VS Code.\n   - Press `F5` to launch an "Extension Development Host" instance.';
     const newMd =
       '1. **Run and debug.**\n\n- Open this project in VS Code.\n- Press `F5` to launch an "Extension Development Host" instance.';
-    const diff = provider.computeDiff(oldMd, newMd);
+    const { html: diff } = provider.computeDiff(oldMd, newMd);
 
     assert.ok(
       !/<del[^>]*class="[^"]*diff-block[^"]*"[^>]*>\s*<ul>/i.test(diff),

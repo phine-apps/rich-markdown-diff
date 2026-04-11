@@ -36,7 +36,7 @@ describe("Phantom Dot Tests", () => {
 > This is a new tip alert added in v2.
 `;
 
-    const diffHtml = provider.computeDiff(v1, v2);
+    const { html: diffHtml } = provider.computeDiff(v1, v2);
 
     assert.ok(!diffHtml.includes("<del>."), "Should not contain a deleted dot");
     assert.ok(
@@ -55,7 +55,7 @@ Some text.
 > This is a new tip alert added in v2.
 `;
 
-    const diffHtml = provider.computeDiff(v1, v2);
+    const { html: diffHtml } = provider.computeDiff(v1, v2);
 
     assert.ok(!diffHtml.includes("<del>."), "Should not contain a deleted dot");
     assert.ok(

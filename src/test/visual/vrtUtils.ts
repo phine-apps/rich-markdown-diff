@@ -9,7 +9,17 @@ export async function generateVRTHtml(
   newMarkdown: string,
   options: { inline?: boolean; theme?: "light" | "dark" } = {}
 ): Promise<string> {
-  const diffHtml = provider.computeDiff(oldMarkdown, newMarkdown);
+  const { html: diffHtml, marpCss, marpJs } = provider.computeDiff(
+    oldMarkdown,
+    newMarkdown,
+    (src) => {
+      // Resolve any path that doesn't look like a URL
+      if (!src.includes("://") && !src.startsWith("data:")) {
+        return "file://" + path.resolve(path.join(__dirname, "../../../fixtures"), src);
+      }
+      return src;
+    }
+  );
   
   const mediaDir = path.join(__dirname, "../../../media");
   const katexCss = fs.readFileSync(path.join(mediaDir, "katex/katex.min.css"), "utf8");
@@ -66,7 +76,9 @@ export async function generateVRTHtml(
     "Original",
     "Modified",
     "*",
-    translations
+    translations,
+    marpCss,
+    marpJs
   );
 
   // Inject Theme Variables via placeholder
