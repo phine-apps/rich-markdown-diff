@@ -45,7 +45,7 @@ export default defineConfig({
   snapshotDir: "./src/test/visual/__screenshots__",
   expect: {
     toHaveScreenshot: {
-      maxDiffPixelRatio: 0.1, // Relaxed for minor rendering diffs on CI
+      maxDiffPixelRatio: 0.15, // Accommodate for ARM/x86 font rendering differences
       threshold: 0.2,
     },
   },
