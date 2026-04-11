@@ -573,7 +573,7 @@ async function renderDiffPanel(
   await diffProvider.waitForReady();
 
   const resolver = createImageResolver(state.imageBaseUri, panel.webview);
-  const { html: diffHtml, marpCss } = diffProvider.computeDiff(
+  const { html: diffHtml, marpCss, marpJs } = diffProvider.computeDiff(
     originalContent,
     modifiedContent,
     resolver,
@@ -595,6 +595,7 @@ async function renderDiffPanel(
     panel.webview.cspSource,
     getWebviewTranslations(),
     marpCss,
+    marpJs,
   );
 
   return contentKey;

@@ -1,20 +1,42 @@
 ---
 marp: true
 theme: gaia
+style: |
+  section {
+    background-image: url('../images/slide_bg.png');
+    background-size: cover;
+  }
 ---
 
-# Slide 1 (Updated)
+# Rich Marp Presentation v2 (Updated)
 
-Welcome to the updated Marp presentation!
+This is a demonstration of **REALLY rich content** in Marp diffs.
 
----
-
-# Slide 2
-
-This content is unchanged.
+- Feature A (Optimized)
+- Feature B (Extended)
+- Feature D (New!)
 
 ---
 
-# Slide 3 (New)
+# <!-- fit --> Updated Features Overview
 
-This is a newly added slide in version 2.
+Here is some updated code:
+
+```typescript
+// Added async support
+async function hello(name: string) {
+  await delay(100);
+  console.log(`Hello, ${name}!`);
+}
+```
+
+And some math changes:
+$f(x) = \sum_{n=0}^{\infty} \frac{x^n}{n!}$
+
+---
+
+# Summary Slide
+
+- Content updated
+- Theme changed to Gaia
+- Math changed to Taylor series

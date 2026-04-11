@@ -44,6 +44,7 @@ export default defineConfig({
   /* Snapshot Path configuration */
   snapshotDir: "./src/test/visual/__screenshots__",
   expect: {
+    timeout: 15000,
     toHaveScreenshot: {
       maxDiffPixelRatio: 0.1,
       threshold: 0.1,

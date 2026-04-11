@@ -23,6 +23,7 @@ test.describe("Visual Regression Tests", () => {
   const cases = [
     { name: "comprehensive", v1: "comprehensive_v1.md", v2: "comprehensive_v2.md" },
     { name: "marp", v1: "marp_v1.md", v2: "marp_v2.md" },
+    { name: "marp-advanced", v1: "marp_v2.md", v2: "marp_v3.md" },
   ];
 
   for (const c of cases) {

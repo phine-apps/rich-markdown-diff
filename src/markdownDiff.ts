@@ -507,7 +507,7 @@ export class MarkdownDiffProvider {
     oldMarkdown: string,
     newMarkdown: string,
     imageResolver?: (src: string) => string,
-  ): { html: string; marpCss?: string } {
+  ): { html: string; marpCss?: string; marpJs?: string } {
     const oldMatter = matter(oldMarkdown);
     const newMatter = matter(newMarkdown);
 
@@ -518,18 +518,25 @@ export class MarkdownDiffProvider {
     let oldHtml: string;
     let newHtml: string;
     let marpCss: string | undefined;
+    let marpJs: string | undefined;
 
     if (isMarp && this.marp) {
       const { html: oHtml, css: cssOld } = this.marp.render(oldMarkdown, envOld);
-      oldHtml = this.cleanMarpHtml(oHtml);
+      const { cleaned: cleanedOld, scripts: scriptsOld } = this.cleanMarpHtml(oHtml);
+      oldHtml = cleanedOld;
 
       const envNew = { imageResolver };
       const { html: nHtml, css: cssNew } = this.marp.render(newMarkdown, envNew);
-      newHtml = this.cleanMarpHtml(nHtml);
+      const { cleaned: cleanedNew, scripts: scriptsNew } = this.cleanMarpHtml(nHtml);
+      newHtml = cleanedNew;
+
+      // Resolve URLs in CSS
+      const resolvedCssOld = this.resolveCssUrls(cssOld, imageResolver);
+      const resolvedCssNew = this.resolveCssUrls(cssNew, imageResolver);
 
       // Scope CSS to respective panes to allow different themes without conflict
-      const resOld = this.scopeMarpCss(cssOld, "#left-pane.marpit");
-      const resNew = this.scopeMarpCss(cssNew, "#right-pane.marpit");
+      const resOld = this.scopeMarpCss(resolvedCssOld, "#left-pane.marpit");
+      const resNew = this.scopeMarpCss(resolvedCssNew, "#right-pane.marpit");
 
       marpCss = [
         ...new Set([...resOld.charsets, ...resNew.charsets]),
@@ -537,6 +544,8 @@ export class MarkdownDiffProvider {
         resOld.scoped,
         resNew.scoped,
       ].join("\n");
+
+      marpJs = [...new Set([...scriptsOld, ...scriptsNew])].join("\n");
     } else {
       oldHtml = this.md.render(oldMatter.content, envOld);
       const envNew = { imageResolver };
@@ -1572,18 +1581,50 @@ export class MarkdownDiffProvider {
   /**
    * Removes scripts and style tags injected by Marp Core that are not needed for diffing.
    */
-  private cleanMarpHtml(html: string): string {
-    // Remove scripts
-    let cleaned = html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "");
+  /**
+    * Cleans Marp HTML by removing noisy elements and extracting scripts.
+    */
+  private cleanMarpHtml(html: string): { cleaned: string; scripts: string[] } {
+    const scripts: string[] = [];
+    // Extract and remove scripts
+    const cleaned = html.replace(
+      /<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi,
+      (match) => {
+        // Extract content between tags
+        const content = match.replace(/^<script.*?>/i, "").replace(/<\/script>$/i, "");
+        if (content.trim()) {
+          scripts.push(content);
+        }
+        return "";
+      },
+    );
+
     // Remove styles (Marp Core injects these for polyfills/runtime)
-    cleaned = cleaned.replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, "");
-    return cleaned;
+    const fullyCleaned = cleaned.replace(
+      /<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi,
+      "",
+    );
+
+    return { cleaned: fullyCleaned, scripts };
   }
 
   /**
-   * Scopes Marp CSS to a specific selector using CSS nesting.
-   * Extracts @import and @charset to ensure they remain valid at the top level.
+   * Resolves relative URLs in CSS using the provided imageResolver.
    */
+  private resolveCssUrls(
+    css: string,
+    imageResolver?: (src: string) => string,
+  ): string {
+    if (!imageResolver) return css;
+
+    return css.replace(/url\(['"]?(.*?)['"]?\)/gi, (match, src) => {
+      if (src && !src.startsWith("data:") && !src.startsWith("http")) {
+        const resolved = imageResolver(src);
+        return `url('${resolved}')`;
+      }
+      return match;
+    });
+  }
   private scopeMarpCss(
     css: string,
     scopeSelector: string,
@@ -1687,8 +1728,14 @@ export class MarkdownDiffProvider {
    * @param diffHtml - The computed HTML difference.
    * @param katexCssUri - The URI for KaTeX CSS.
    * @param mermaidJsUri - The URI for Mermaid JS.
+   * @param hljsLightCssUri - The URI for Highlight.js light theme CSS.
+   * @param hljsDarkCssUri - The URI for Highlight.js dark theme CSS.
    * @param leftLabel - Label for the original version (default: "Original").
    * @param rightLabel - Label for the modified version (default: "Modified").
+   * @param cspSource - The CSP source for the webview.
+   * @param translations - Translation map.
+   * @param marpCss - Optional Marp-specific CSS to inject.
+   * @param marpJs - Optional Marp-specific JavaScript to inject.
    * @returns The complete HTML document string.
    */
   public getWebviewContent(
@@ -1701,7 +1748,8 @@ export class MarkdownDiffProvider {
     rightLabel: string = "Modified",
     cspSource: string = "",
     translations: Record<string, string> = {},
-    marpCss: string = "",
+    marpCss?: string,
+    marpJs?: string,
   ): string {
     const nonce = crypto.randomBytes(16).toString("hex");
 
@@ -1736,6 +1784,8 @@ export class MarkdownDiffProvider {
     <script nonce="${nonce}" src="${mermaidJsUri}"></script>
     <!-- Marp CSS -->
     ${marpCss ? `<style nonce="${nonce}">${marpCss}</style>` : ""}
+    <!-- Marp JS -->
+    ${marpJs ? `<script nonce="${nonce}">${marpJs}</script>` : ""}
     <style nonce="${nonce}">
         :root { /* VRT_THEME_VARS */ }
         html, body {
@@ -2396,6 +2446,7 @@ export class MarkdownDiffProvider {
             display: flex;
             flex-direction: column;
             justify-content: center;
+            transform-origin: top left;
         }
         
         /* Ensure diff markers work inside slides */
@@ -2595,7 +2646,7 @@ export class MarkdownDiffProvider {
         }
     </style>
 </head>
-<body class="VRT_LAYOUT_CLASS">
+<body class="${marpCss ? "marp-mode" : ""}">
     <div class="toolbar">
         <!-- Buttons removed, moved to VS Code View Actions -->
     <span id="status-msg" class="toolbar-status"></span>
@@ -3285,6 +3336,7 @@ export class MarkdownDiffProvider {
         const scheduleAsyncLayoutRefresh = () => {
           noteRuntimeEvent('schedule-async-layout-refresh');
           refreshGhostLayout();
+          scaleSlides();
           scheduleLayoutRefresh();
 
           clearTimeout(asyncLayoutRefreshShortTimeout);
@@ -3452,6 +3504,12 @@ export class MarkdownDiffProvider {
         const syncScroll = (sourcePane, targetPane) => {
             // Only sync if the source is the one being actively scrolled by user
             if (activePane !== sourcePane) return;
+
+            // Specialized sync for Marp slides
+            if (document.body.classList.contains('marp-mode') && !isInline) {
+                syncScrollMarp(sourcePane, targetPane);
+                return;
+            }
             
             const sourceMax = sourcePane.scrollHeight - sourcePane.clientHeight;
             const targetMax = targetPane.scrollHeight - targetPane.clientHeight;
@@ -3490,6 +3548,78 @@ export class MarkdownDiffProvider {
               targetPane.scrollLeft = targetScrollLeft;
             }
             }
+        };
+
+        const syncScrollMarp = (sourcePane, targetPane) => {
+            const sourceSections = Array.from(sourcePane.querySelectorAll('section'));
+            const targetSections = Array.from(targetPane.querySelectorAll('section'));
+            
+            if (sourceSections.length === 0 || targetSections.length === 0) return;
+
+            // Find the slide that is most visible at the top
+            const sourceScrollTop = sourcePane.scrollTop;
+            let currentSlideIndex = 0;
+            
+            for (let i = 0; i < sourceSections.length; i++) {
+                const rect = sourceSections[i].getBoundingClientRect();
+                const paneRect = sourcePane.getBoundingClientRect();
+                const relativeTop = rect.top - paneRect.top;
+                
+                if (relativeTop + rect.height / 2 > 0) {
+                    currentSlideIndex = i;
+                    break;
+                }
+            }
+
+            // Sync to the same slide index in target
+            const targetSlide = targetSections[currentSlideIndex];
+            if (targetSlide) {
+                const targetRect = targetSlide.getBoundingClientRect();
+                const targetPaneRect = targetPane.getBoundingClientRect();
+                const targetRelativeTop = targetRect.top - targetPaneRect.top;
+                
+                // Keep the relative position of the slide top within the viewport
+                const sourceSlideRect = sourceSections[currentSlideIndex].getBoundingClientRect();
+                const sourcePaneRect = sourcePane.getBoundingClientRect();
+                const offsetInSlide = sourceScrollTop - (sourceSlideRect.top - sourcePaneRect.top + sourceScrollTop);
+                
+                const slideTopPos = targetSlide.offsetTop;
+                const sourceRelativePos = (sourceScrollTop - sourceSections[currentSlideIndex].offsetTop);
+
+                // Simple slide alignment (aligned with the top of the slide)
+                if (Math.abs(targetPane.scrollTop - targetSlide.offsetTop) > 5) {
+                    targetPane.scrollTop = targetSlide.offsetTop + sourceRelativePos;
+                }
+            }
+        };
+
+        const scaleSlides = () => {
+             if (!document.body.classList.contains('marp-mode')) return;
+             
+             const panes = [leftPane, rightPane];
+             panes.forEach(pane => {
+                 const sections = pane.querySelectorAll('section');
+                 if (sections.length === 0) return;
+                 
+                 const containerWidth = pane.clientWidth - 40; // Subtract padding
+                 const baseWidth = 1280; // Marp default width
+                 const scale = Math.min(1, containerWidth / baseWidth);
+                 
+                 sections.forEach(s => {
+                     s.style.width = baseWidth + 'px';
+                     s.style.transform = 'scale(' + scale + ')';
+                     
+                     // Center the scaled slide
+                     const scaledWidth = baseWidth * scale;
+                     const offset = (pane.clientWidth - scaledWidth) / 2;
+                     s.style.position = 'relative';
+                     s.style.left = Math.max(0, offset) + 'px';
+
+                     // Adjust container height to match scaled height
+                     const scaledHeight = (baseWidth * 9/16) * scale;
+                     s.parentElement.style.height = (scaledHeight + 20) + 'px'; // + margin
+                 });
+             });
         };
 
         const setActive = (pane) => { activePane = pane; };
