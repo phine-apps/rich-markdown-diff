@@ -98,4 +98,40 @@ Another footnote[^2].
       "Complete new footnote (LI) should be wrapped in <ins>",
     );
   });
+
+  it("should diff an updated footnote separately from a newly added footnote", () => {
+    const oldMd = `## Footnotes
+
+This is a sentence with a footnote[^1].
+
+[^1]: This is the footnote content.`;
+
+    const newMd = `## Footnotes
+
+This is a sentence with a footnote[^1].
+And another sentence with a second footnote[^2].
+
+[^1]: This is the footnote content (updated).
+
+[^2]: This is a new footnote added in v2.`;
+
+    const diffHtml = provider.computeDiff(oldMd, newMd);
+
+    assert.ok(
+      /<li id="fn1" class="footnote-item">[\s\S]*diffins[\s\S]*updated/i.test(
+        diffHtml,
+      ),
+      "Existing footnote fn1 should be refined in-place, not replaced wholesale",
+    );
+
+    assert.ok(
+      !/<ins[^>]*>\s*<li id="fn1" class="footnote-item">/i.test(diffHtml),
+      "Updated fn1 should not be wrapped as a wholesale insertion",
+    );
+
+    assert.ok(
+      /<ins[^>]*>[\s\S]*<li id="fn2" class="footnote-item">/i.test(diffHtml),
+      "New footnote fn2 should remain a standalone insertion",
+    );
+  });
 });

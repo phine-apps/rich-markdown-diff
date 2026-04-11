@@ -73,5 +73,13 @@ describe("MarkdownDiffProvider - Image Diff", () => {
     assert.ok(html.includes("ins img {"), "Should include ins img CSS styles");
     assert.ok(html.includes("del img {"), "Should include del img CSS styles");
     assert.ok(html.includes("border: 4px solid"), "Should have border style");
+    assert.ok(
+      html.includes("p > img:only-child {"),
+      "Standalone markdown images should be promoted to block layout",
+    );
+    assert.ok(
+      html.includes("height: auto;"),
+      "Images should keep their aspect ratio when resized to fit the pane",
+    );
   });
 });

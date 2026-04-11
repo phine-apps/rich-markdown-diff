@@ -54,8 +54,8 @@ describe("Fixture Snapshot Tests", () => {
       const v1Path = path.join(FIXTURES_DIR, "comprehensive_v1.md");
       const v2Path = path.join(FIXTURES_DIR, "comprehensive_v2.md");
       const snapshotPath = path.join(
-        __dirname,
-        "__snapshots__",
+        FIXTURES_DIR,
+        "expected",
         "comprehensive.html",
       );
       // Read fixture files

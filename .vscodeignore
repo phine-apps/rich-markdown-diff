@@ -12,9 +12,16 @@ fixtures/
 # Build Configuration & Dependencies
 node_modules/
 package-lock.json
+pnpm-lock.yaml
+bun.lock
 tsconfig.json
 eslint.config.mjs
 esbuild.js
+
+# Docker & Visual Regression Testing
+Dockerfile.vrt
+docker-compose.yml
+playwright.config.ts
 
 # Documentation (Internal)
 CONTRIBUTING.md
@@ -27,6 +34,7 @@ out/*.js.map
 # Artifacts & Logs
 *.vsix
 *.log
+tmp-*
 
 # Assets
 # Exclude heavy GIFs (served from GitHub), keep other images (icon.png)
@@ -43,6 +51,11 @@ pnpm-lock.yaml
 playwright.config.ts
 
 # Bundled Extension Inclusion
-# We need to explicitly include the bundled extension file if 'out/' was ignored directly,
-# but since we ignore source dirs etc, ensure this is kept.
+# esbuild bundles everything into out/extension.js; exclude tsc output files
+out/commandTarget.js
+out/gitDiffResolver.js
+out/markdownDiff.js
+out/wikilinksPlugin.js
+out/htmlDiffJs.d.js
+out/markdownPlugins.d.js
 !out/extension.js

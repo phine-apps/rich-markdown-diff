@@ -3,7 +3,7 @@
   "publisher": "phine-apps",
   "displayName": "Rich Markdown Diff",
   "description": "Displays a rich, visual diff of two markdown files.",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "icon": "images/icon.png",
   "author": "phine-apps",
   "license": "MIT",
@@ -34,7 +34,8 @@
     "SCM Providers"
   ],
   "activationEvents": [
-    "onLanguage:markdown"
+    "onLanguage:markdown",
+    "onView:scm"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -55,8 +56,7 @@
         "command": "rich-markdown-diff.showRenderedDiff",
         "title": "%rich-markdown-diff.showRenderedDiff.title%",
         "category": "%rich-markdown-diff.category%",
-        "icon": "$(diff)",
-        "enablement": "editorLangId == 'markdown' || resourceLangId == 'markdown'"
+        "icon": "$(diff)"
       },
       {
         "command": "rich-markdown-diff.diffClipboard",
@@ -144,13 +144,26 @@
         {
           "command": "rich-markdown-diff.compareWithSelected",
           "when": "rich-markdown-diff.hasSelectedForCompare"
+        },
+        {
+          "command": "rich-markdown-diff.showRenderedDiff",
+          "when": "editorLangId == markdown || resourceLangId == markdown"
+        },
+        {
+          "command": "rich-markdown-diff.showRenderedDiff",
+          "when": "activeWebviewPanelId == 'markdown.preview' || activeCustomEditorId == 'vscode.markdown.preview.editor'"
         }
       ],
       "editor/title": [
         {
           "command": "rich-markdown-diff.showRenderedDiff",
           "group": "navigation",
-          "when": "editorLangId == markdown"
+          "when": "(editorLangId == markdown || resourceLangId == markdown) && rich-markdown-diff.canShowRenderedDiff"
+        },
+        {
+          "command": "rich-markdown-diff.showRenderedDiff",
+          "group": "navigation",
+          "when": "activeWebviewPanelId == 'markdown.preview' || activeCustomEditorId == 'vscode.markdown.preview.editor'"
         },
         {
           "command": "rich-markdown-diff.prevChange",
@@ -189,6 +202,11 @@
           "title": "%rich-markdown-diff.showRenderedDiff.title%",
           "group": "modification",
           "when": "resourceLangId == markdown && listMultiSelection"
+        },
+        {
+          "command": "rich-markdown-diff.showRenderedDiff",
+          "group": "modification",
+          "when": "resourceLangId == markdown && !listMultiSelection"
         }
       ],
       "editor/context": [
@@ -206,18 +224,25 @@
           "command": "rich-markdown-diff.compareWithSelected",
           "group": "modification",
           "when": "(editorLangId == markdown || resourceLangId == markdown) && rich-markdown-diff.hasSelectedForCompare"
+        },
+        {
+          "command": "rich-markdown-diff.showRenderedDiff",
+          "group": "modification",
+          "when": "editorLangId == markdown || resourceLangId == markdown"
         }
       ],
       "scm/resourceState/context": [
         {
           "command": "rich-markdown-diff.showRenderedDiff",
-          "group": "inline",
-          "when": "scmProvider == git && resourceExtname == .md"
+          "group": "inline@1",
+          "icon": "$(diff)",
+          "when": "scmProvider == git"
         },
         {
           "command": "rich-markdown-diff.showRenderedDiff",
           "group": "navigation",
-          "when": "scmProvider == git && resourceExtname == .md"
+          "icon": "$(diff)",
+          "when": "scmProvider == git"
         }
       ]
     },
@@ -251,6 +276,9 @@
     "test:visual": "pnpm exec playwright test",
     "test:visual:docker": "docker compose run --rm playwright sh -c \"pnpm install --store-dir /pnpm-store && pnpm exec playwright test\"",
     "test:visual:update": "docker compose run --rm playwright sh -c \"pnpm install --store-dir /pnpm-store && pnpm exec playwright test --update-snapshots\""
+  },
+  "overrides": {
+    "serialize-javascript": "^7.0.5"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

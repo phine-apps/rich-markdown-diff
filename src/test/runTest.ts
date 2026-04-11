@@ -22,22 +22,68 @@
  * SOFTWARE.
  */
 
+import * as fs from "fs/promises";
+import * as os from "os";
 import * as path from "path";
 
 import { runTests } from "@vscode/test-electron";
+
+async function getPathWithoutSpaces(originalPath: string): Promise<string> {
+  if (process.platform !== "win32" || !/\s/.test(originalPath)) {
+    return originalPath;
+  }
+
+  const junctionPath = path.join(os.tmpdir(), "rich-markdown-diff-tests");
+
+  try {
+    await fs.rm(junctionPath, { recursive: true, force: true });
+    await fs.symlink(originalPath, junctionPath, "junction");
+    return junctionPath;
+  } catch (error) {
+    console.warn(
+      "Failed to create a junction for integration tests. Falling back to the original path.",
+      error,
+    );
+    return originalPath;
+  }
+}
 
 async function main() {
   try {
     // The folder containing the Extension Manifest package.json
     // Passed to `--extensionDevelopmentPath`
-    const extensionDevelopmentPath = path.resolve(__dirname, "../../");
+    const extensionDevelopmentPath = await getPathWithoutSpaces(
+      path.resolve(__dirname, "../../"),
+    );
 
     // The path to test runner
     // Passed to --extensionTestsPath
-    const extensionTestsPath = path.resolve(__dirname, "./suite/index");
+    const extensionTestsPath = path.join(
+      extensionDevelopmentPath,
+      "out",
+      "test",
+      "suite",
+      "index",
+    );
+    const runtimeRoot = path.join(
+      os.tmpdir(),
+      `rich-markdown-diff-host-${Date.now()}`,
+    );
+    const userDataDir = path.join(runtimeRoot, "user-data");
+    const extensionsDir = path.join(runtimeRoot, "extensions");
+
+    await fs.mkdir(userDataDir, { recursive: true });
+    await fs.mkdir(extensionsDir, { recursive: true });
 
     // Download VS Code, unzip it and run the integration test
-    await runTests({ extensionDevelopmentPath, extensionTestsPath });
+    await runTests({
+      extensionDevelopmentPath,
+      extensionTestsPath,
+      launchArgs: [
+        `--user-data-dir=${userDataDir}`,
+        `--extensions-dir=${extensionsDir}`,
+      ],
+    });
   } catch {
     console.error("Failed to run tests");
     process.exit(1);

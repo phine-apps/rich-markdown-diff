@@ -24,6 +24,12 @@
 
 import * as vscode from "vscode";
 import { MarkdownDiffProvider } from "./markdownDiff";
+import {
+  GitRepository,
+  resolveSingleFileComparison,
+  tryGetGitApi,
+} from "./gitDiffResolver";
+import { getCommandTarget, getFileUriFromCommandArg } from "./commandTarget";
 import * as path from "path";
 import * as l10n from "@vscode/l10n";
 
@@ -42,6 +48,85 @@ function escapeHtml(text: string): string {
 // We need to track active panels to dispatch commands to them
 let activePanel: vscode.WebviewPanel | undefined;
 let selectedForCompareUri: vscode.Uri | undefined;
+let activeEditorRepositorySubscription: vscode.Disposable | undefined;
+let contextUpdateGeneration = 0;
+let lastCanShowRenderedDiff: boolean | undefined;
+let runtimeDiagnosticsChannel: vscode.OutputChannel | undefined;
+
+const markdownExtensions = [
+  ".md",
+  ".markdown",
+  ".mdown",
+  ".mkdn",
+  ".mdwn",
+  ".mdtxt",
+  ".mdtext",
+];
+
+interface DiffPanelState {
+  originalUri?: vscode.Uri;
+  modifiedUri?: vscode.Uri;
+  leftLabel?: string;
+  rightLabel?: string;
+  watchUris: readonly vscode.Uri[];
+  repository?: GitRepository;
+  imageBaseUri: vscode.Uri;
+  fallbackSourceUri: vscode.Uri;
+}
+
+interface RuntimeDiagnosticsPayload {
+  reason: string;
+  reportId?: number;
+  metrics?: unknown;
+  recentEvents?: unknown;
+  extra?: unknown;
+}
+
+type DiffPanelUpdateTrigger = "initial" | "document" | "repository";
+type ResolveDiffPanelState = (options?: {
+  refreshComparisonStatus?: boolean;
+  trigger?: DiffPanelUpdateTrigger;
+}) => Promise<DiffPanelState>;
+
+function getRuntimeDiagnosticsChannel() {
+  runtimeDiagnosticsChannel ??= vscode.window.createOutputChannel(
+    "Rich Markdown Diff Diagnostics",
+  );
+  return runtimeDiagnosticsChannel;
+}
+
+function appendRuntimeDiagnostics(
+  panel: vscode.WebviewPanel,
+  state: DiffPanelState | undefined,
+  payload: RuntimeDiagnosticsPayload,
+) {
+  const channel = getRuntimeDiagnosticsChannel();
+  const heading = [
+    `[${new Date().toISOString()}] ${panel.title}`,
+    state?.leftLabel && state?.rightLabel
+      ? `${state.leftLabel} -> ${state.rightLabel}`
+      : undefined,
+    payload.reportId !== undefined ? `report #${payload.reportId}` : undefined,
+    payload.reason,
+  ]
+    .filter(Boolean)
+    .join(" | ");
+
+  channel.appendLine(heading);
+  channel.appendLine(
+    JSON.stringify(
+      {
+        reason: payload.reason,
+        metrics: payload.metrics,
+        recentEvents: payload.recentEvents,
+        extra: payload.extra,
+      },
+      null,
+      2,
+    ),
+  );
+  channel.appendLine("");
+}
 
 /**
  * Get minimal distinguishable paths for display in diff titles.
@@ -128,6 +213,606 @@ function getWebviewTranslations() {
   };
 }
 
+function getL10nBundleUri(context: vscode.ExtensionContext): vscode.Uri {
+  const language = vscode.env.language.toLowerCase();
+
+  if (language.startsWith("ja")) {
+    return vscode.Uri.joinPath(
+      context.extensionUri,
+      "l10n",
+      "bundle.l10n.ja.json",
+    );
+  }
+
+  if (language === "zh-cn" || language.startsWith("zh-hans")) {
+    return vscode.Uri.joinPath(
+      context.extensionUri,
+      "l10n",
+      "bundle.l10n.zh-cn.json",
+    );
+  }
+
+  return vscode.Uri.joinPath(context.extensionUri, "l10n", "bundle.l10n.json");
+}
+
+function isMarkdownPath(fsPath: string): boolean {
+  return markdownExtensions.includes(path.extname(fsPath).toLowerCase());
+}
+
+function getDiffPanelOptions(context: vscode.ExtensionContext) {
+  return {
+    enableScripts: true,
+    enableFindWidget: true,
+    localResourceRoots: [
+      vscode.Uri.joinPath(context.extensionUri, "media"),
+      vscode.Uri.joinPath(context.extensionUri, "node_modules"),
+      ...(vscode.workspace.workspaceFolders?.map((folder) => folder.uri) ?? []),
+    ],
+  };
+}
+
+function attachPanelTracking(panel: vscode.WebviewPanel) {
+  panel.onDidChangeViewState((e) => {
+    if (e.webviewPanel.active) {
+      activePanel = e.webviewPanel;
+      vscode.commands.executeCommand(
+        "setContext",
+        "rich-markdown-diff.isDiffActive",
+        true,
+      );
+    } else if (activePanel === e.webviewPanel) {
+      activePanel = undefined;
+      vscode.commands.executeCommand(
+        "setContext",
+        "rich-markdown-diff.isDiffActive",
+        false,
+      );
+    }
+  });
+
+  panel.onDidDispose(() => {
+    if (activePanel === panel) {
+      activePanel = undefined;
+      vscode.commands.executeCommand(
+        "setContext",
+        "rich-markdown-diff.isDiffActive",
+        false,
+      );
+    }
+  });
+
+  if (panel.active) {
+    activePanel = panel;
+    vscode.commands.executeCommand(
+      "setContext",
+      "rich-markdown-diff.isDiffActive",
+      true,
+    );
+  }
+}
+
+function getWebviewAssetUris(
+  panel: vscode.WebviewPanel,
+  extensionUri: vscode.Uri,
+) {
+  return {
+    katexCssUri: panel.webview.asWebviewUri(
+      vscode.Uri.joinPath(extensionUri, "media", "katex", "katex.min.css"),
+    ),
+    katexFontBaseUri: panel.webview.asWebviewUri(
+      vscode.Uri.joinPath(extensionUri, "media", "katex", "fonts"),
+    ),
+    mermaidJsUri: panel.webview.asWebviewUri(
+      vscode.Uri.joinPath(extensionUri, "media", "mermaid", "mermaid.min.js"),
+    ),
+    hljsLightCssUri: panel.webview.asWebviewUri(
+      vscode.Uri.joinPath(extensionUri, "media", "highlight", "github.min.css"),
+    ),
+    hljsDarkCssUri: panel.webview.asWebviewUri(
+      vscode.Uri.joinPath(
+        extensionUri,
+        "media",
+        "highlight",
+        "github-dark.min.css",
+      ),
+    ),
+  };
+}
+
+async function buildKatexCssInline(
+  extensionUri: vscode.Uri,
+  fontBaseUri: vscode.Uri,
+): Promise<string> {
+  const cssPath = vscode.Uri.joinPath(
+    extensionUri,
+    "media",
+    "katex",
+    "katex.min.css",
+  );
+  const cssBytes = await vscode.workspace.fs.readFile(cssPath);
+  const cssText = Buffer.from(cssBytes).toString("utf8");
+  return cssText.replace(/url\(fonts\//g, `url(${fontBaseUri.toString()}/`);
+}
+
+function isMarkdownDocument(document: vscode.TextDocument): boolean {
+  return (
+    document.languageId === "markdown" || isMarkdownPath(document.uri.fsPath)
+  );
+}
+
+async function tryOpenMarkdownDocument(
+  uri: vscode.Uri | undefined,
+  sourceLabel: string,
+): Promise<vscode.TextDocument | undefined> {
+  if (!uri) {
+    return undefined;
+  }
+
+  try {
+    return await vscode.workspace.openTextDocument(uri);
+  } catch (error) {
+    console.error(`Failed to open document from ${sourceLabel}:`, error);
+    return undefined;
+  }
+}
+
+async function resolveMarkdownDocument(
+  uri?: vscode.Uri,
+): Promise<vscode.TextDocument | undefined> {
+  let document = await tryOpenMarkdownDocument(uri, "URI");
+
+  if (!document) {
+    const activeTab = vscode.window.tabGroups.activeTabGroup.activeTab;
+    if (activeTab) {
+      if (
+        activeTab.input instanceof vscode.TabInputCustom &&
+        activeTab.input.viewType === "vscode.markdown.preview.editor"
+      ) {
+        document = await tryOpenMarkdownDocument(
+          activeTab.input.uri,
+          "Preview Tab",
+        );
+      } else if (activeTab.input instanceof vscode.TabInputText) {
+        document = await tryOpenMarkdownDocument(
+          activeTab.input.uri,
+          "Text Tab",
+        );
+      }
+    }
+  }
+
+  if (!document && vscode.window.activeTextEditor) {
+    document = vscode.window.activeTextEditor.document;
+  }
+
+  if (!document) {
+    const visibleMarkdown = vscode.window.visibleTextEditors.find((editor) =>
+      isMarkdownDocument(editor.document),
+    );
+    if (visibleMarkdown) {
+      document = visibleMarkdown.document;
+    }
+  }
+
+  if (!document) {
+    document = vscode.workspace.textDocuments.find((openDocument) =>
+      isMarkdownDocument(openDocument),
+    );
+  }
+
+  return document && isMarkdownDocument(document) ? document : undefined;
+}
+
+async function readDocumentText(uri?: vscode.Uri): Promise<string> {
+  if (!uri) {
+    return "";
+  }
+
+  try {
+    const document = await vscode.workspace.openTextDocument(uri);
+    return document.getText();
+  } catch (error) {
+    console.warn(
+      "Failed to read document for Markdown diff:",
+      uri.toString(),
+      error,
+    );
+    return "";
+  }
+}
+
+function toDiffPanelState(
+  comparison: Awaited<ReturnType<typeof resolveSingleFileComparison>>,
+): DiffPanelState {
+  return {
+    originalUri: comparison.originalUri,
+    modifiedUri: comparison.modifiedUri,
+    leftLabel: comparison.originalLabel,
+    rightLabel: comparison.modifiedLabel,
+    watchUris: comparison.watchUris,
+    repository: comparison.repository,
+    imageBaseUri: comparison.targetUri,
+    fallbackSourceUri: comparison.targetUri,
+  };
+}
+
+function isDocumentDirty(uri: vscode.Uri): boolean {
+  return vscode.workspace.textDocuments.some(
+    (document) =>
+      document.uri.toString() === uri.toString() && document.isDirty,
+  );
+}
+
+function isActionableSingleFileComparison(
+  comparison: Awaited<ReturnType<typeof resolveSingleFileComparison>>,
+  isDirty = false,
+): boolean {
+  if (comparison.kind === "fileOnly") {
+    return false;
+  }
+
+  return comparison.kind !== "cleanHeadToWorkingTree" || isDirty;
+}
+
+async function updateRenderedDiffContext(
+  editor: vscode.TextEditor | undefined = vscode.window.activeTextEditor,
+) {
+  const myGen = ++contextUpdateGeneration;
+
+  if (
+    !editor ||
+    (!isMarkdownPath(editor.document.uri.fsPath) &&
+      !isMarkdownDocument(editor.document))
+  ) {
+    // Keep canShowRenderedDiff true if any visible text editor has a markdown
+    // file, so the diff icon stays available when switching between the source
+    // editor and its preview panel (e.g. "Open Preview to the Side").
+    const hasVisibleMarkdownEditor = vscode.window.visibleTextEditors.some(
+      (e) =>
+        isMarkdownPath(e.document.uri.fsPath) || isMarkdownDocument(e.document),
+    );
+
+    if (myGen !== contextUpdateGeneration) {
+      return;
+    }
+
+    if (!hasVisibleMarkdownEditor) {
+      activeEditorRepositorySubscription?.dispose();
+      activeEditorRepositorySubscription = undefined;
+      if (lastCanShowRenderedDiff !== false) {
+        lastCanShowRenderedDiff = false;
+        await vscode.commands.executeCommand(
+          "setContext",
+          "rich-markdown-diff.canShowRenderedDiff",
+          false,
+        );
+      }
+    } else if (!lastCanShowRenderedDiff) {
+      // A markdown editor is visible but context was previously disabled or
+      // uninitialized — re-evaluate by finding the visible markdown editor.
+      const mdEditor = vscode.window.visibleTextEditors.find(
+        (e) =>
+          isMarkdownPath(e.document.uri.fsPath) ||
+          isMarkdownDocument(e.document),
+      );
+      if (mdEditor) {
+        void updateRenderedDiffContext(mdEditor);
+      }
+    }
+    return;
+  }
+
+  // Normalize git: / vscode-userdata: URIs to file: URIs so the git API
+  // can locate the repository (e.g. when the built-in diff editor is focused).
+  const editorUri = editor.document.uri;
+  const resolvedUri =
+    editorUri.scheme !== "file" && editorUri.fsPath
+      ? vscode.Uri.file(editorUri.fsPath)
+      : editorUri;
+
+  const comparison = await resolveSingleFileComparison(
+    resolvedUri,
+    "auto",
+    undefined,
+    { refreshStatus: false },
+  );
+  if (myGen !== contextUpdateGeneration) {
+    return;
+  }
+
+  activeEditorRepositorySubscription?.dispose();
+  activeEditorRepositorySubscription = undefined;
+
+  const canShow = isActionableSingleFileComparison(
+    comparison,
+    editor.document.isDirty,
+  );
+  if (lastCanShowRenderedDiff !== canShow) {
+    lastCanShowRenderedDiff = canShow;
+    await vscode.commands.executeCommand(
+      "setContext",
+      "rich-markdown-diff.canShowRenderedDiff",
+      canShow,
+    );
+  }
+
+  if (myGen !== contextUpdateGeneration) {
+    return;
+  }
+
+  const gitApi = await tryGetGitApi();
+  if (myGen !== contextUpdateGeneration) {
+    return;
+  }
+
+  const repository = gitApi?.getRepository(resolvedUri);
+  if (!repository) {
+    return;
+  }
+
+  activeEditorRepositorySubscription = repository.state.onDidChange(() => {
+    void updateRenderedDiffContext(vscode.window.activeTextEditor);
+  });
+}
+
+async function renderDiffPanel(
+  panel: vscode.WebviewPanel,
+  context: vscode.ExtensionContext,
+  diffProvider: MarkdownDiffProvider,
+  state: DiffPanelState,
+  lastContentKey?: string,
+): Promise<string> {
+  const originalContent = await readDocumentText(state.originalUri);
+  const modifiedContent = await readDocumentText(state.modifiedUri);
+
+  const contentKey = `${originalContent}\0${modifiedContent}\0${state.leftLabel}\0${state.rightLabel}`;
+  if (lastContentKey !== undefined && contentKey === lastContentKey) {
+    return contentKey;
+  }
+
+  await diffProvider.waitForReady();
+
+  const resolver = createImageResolver(state.imageBaseUri, panel.webview);
+  const diffHtml = diffProvider.computeDiff(
+    originalContent,
+    modifiedContent,
+    resolver,
+  );
+  const assets = getWebviewAssetUris(panel, context.extensionUri);
+  const katexCssInline = await buildKatexCssInline(
+    context.extensionUri,
+    assets.katexFontBaseUri,
+  );
+
+  panel.webview.html = diffProvider.getWebviewContent(
+    diffHtml,
+    katexCssInline,
+    assets.mermaidJsUri.toString(),
+    assets.hljsLightCssUri.toString(),
+    assets.hljsDarkCssUri.toString(),
+    state.leftLabel,
+    state.rightLabel,
+    panel.webview.cspSource,
+    getWebviewTranslations(),
+  );
+
+  return contentKey;
+}
+
+async function bindDiffPanel(
+  panel: vscode.WebviewPanel,
+  context: vscode.ExtensionContext,
+  resolveState: ResolveDiffPanelState,
+) {
+  attachPanelTracking(panel);
+
+  const diffProvider = new MarkdownDiffProvider();
+  const debounceDelay = 300;
+  let timeout: NodeJS.Timeout | undefined;
+  let currentState: DiffPanelState | undefined;
+  let repositorySubscription: vscode.Disposable | undefined;
+  let currentRepository: GitRepository | undefined;
+  let isDisposed = false;
+  let isUpdating = false;
+  let queuedTrigger: DiffPanelUpdateTrigger | undefined;
+  let lastContentKey: string | undefined;
+
+  const scheduleUpdate = (trigger: DiffPanelUpdateTrigger) => {
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+
+    timeout = setTimeout(
+      () => {
+        timeout = undefined;
+        void update(trigger);
+      },
+      trigger === "initial" ? 0 : debounceDelay,
+    );
+  };
+
+  const queueUpdate = (trigger: DiffPanelUpdateTrigger) => {
+    if (!queuedTrigger) {
+      queuedTrigger = trigger;
+      return;
+    }
+
+    if (trigger === "document" || queuedTrigger === "initial") {
+      queuedTrigger = trigger;
+      return;
+    }
+
+    if (trigger === "repository" && queuedTrigger !== "document") {
+      queuedTrigger = trigger;
+    }
+  };
+
+  const update = async (trigger: DiffPanelUpdateTrigger) => {
+    if (isDisposed) {
+      return;
+    }
+
+    if (isUpdating) {
+      queueUpdate(trigger);
+      return;
+    }
+
+    isUpdating = true;
+    try {
+      const nextState = await resolveState({
+        refreshComparisonStatus: trigger !== "repository",
+        trigger,
+      });
+
+      if (isDisposed) {
+        return;
+      }
+
+      currentState = nextState;
+
+      if (currentRepository !== nextState.repository) {
+        repositorySubscription?.dispose();
+        currentRepository = nextState.repository;
+        repositorySubscription = nextState.repository?.state.onDidChange(() => {
+          scheduleUpdate("repository");
+        });
+      }
+
+      lastContentKey = await renderDiffPanel(
+        panel,
+        context,
+        diffProvider,
+        nextState,
+        lastContentKey,
+      );
+
+      if (isDisposed) {
+        return;
+      }
+    } catch (error) {
+      if (!isDisposed) {
+        panel.webview.html = `<h1>${escapeHtml(l10n.t("Error reading file: {0}", String(error)))}</h1>`;
+      }
+    } finally {
+      isUpdating = false;
+
+      if (queuedTrigger) {
+        const nextTrigger = queuedTrigger;
+        queuedTrigger = undefined;
+        scheduleUpdate(nextTrigger);
+      }
+    }
+  };
+
+  const documentSubscription = vscode.workspace.onDidChangeTextDocument((e) => {
+    if (!currentState) {
+      return;
+    }
+
+    const watchedUris = currentState.watchUris.filter(
+      (uri) => uri.scheme === "file",
+    );
+    if (
+      watchedUris.some((uri) => uri.toString() === e.document.uri.toString())
+    ) {
+      scheduleUpdate("document");
+    }
+  });
+
+  panel.onDidDispose(() => {
+    isDisposed = true;
+    documentSubscription.dispose();
+    repositorySubscription?.dispose();
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+  });
+
+  panel.webview.onDidReceiveMessage(async (message) => {
+    if (message.command === "runtimeDiagnostics") {
+      appendRuntimeDiagnostics(
+        panel,
+        currentState,
+        message.payload as RuntimeDiagnosticsPayload,
+      );
+      return;
+    }
+
+    if (message.command !== "openSource" || !currentState) {
+      return;
+    }
+
+    const uriToOpen =
+      message.side === "original"
+        ? currentState.originalUri
+        : (currentState.modifiedUri ?? currentState.fallbackSourceUri);
+
+    if (!uriToOpen) {
+      vscode.window.showInformationMessage(
+        l10n.t("No source is available for this side of the diff."),
+      );
+      return;
+    }
+
+    try {
+      const document = await vscode.workspace.openTextDocument(uriToOpen);
+      const editor = await vscode.window.showTextDocument(document, {
+        viewColumn: vscode.ViewColumn.One,
+        preserveFocus: false,
+      });
+
+      if (typeof message.line === "number") {
+        const range = new vscode.Range(message.line, 0, message.line, 0);
+        editor.revealRange(range, vscode.TextEditorRevealType.InCenter);
+        editor.selection = new vscode.Selection(range.start, range.start);
+      }
+    } catch (error) {
+      if (message.side === "original") {
+        vscode.window.showWarningMessage(
+          l10n.t(
+            "Could not open the original version. Opening the current file instead.",
+          ),
+        );
+
+        const fallbackDocument = await vscode.workspace.openTextDocument(
+          currentState.fallbackSourceUri,
+        );
+        const editor = await vscode.window.showTextDocument(fallbackDocument, {
+          viewColumn: vscode.ViewColumn.One,
+        });
+
+        if (typeof message.line === "number") {
+          const range = new vscode.Range(message.line, 0, message.line, 0);
+          editor.revealRange(range, vscode.TextEditorRevealType.InCenter);
+          editor.selection = new vscode.Selection(range.start, range.start);
+        }
+      } else {
+        vscode.window.showErrorMessage(
+          l10n.t("Could not open file: {0}", String(error)),
+        );
+      }
+    }
+  });
+
+  await update("initial");
+}
+
+async function createAndBindDiffPanel(
+  title: string,
+  context: vscode.ExtensionContext,
+  resolveState: ResolveDiffPanelState,
+) {
+  const panel = vscode.window.createWebviewPanel(
+    "markdownDiff",
+    title,
+    vscode.ViewColumn.Active,
+    getDiffPanelOptions(context),
+  );
+
+  await bindDiffPanel(panel, context, resolveState);
+  return panel;
+}
+
 /**
  * Activates the extension.
  * Sets up commands, custom editors, and context keys.
@@ -136,7 +821,7 @@ function getWebviewTranslations() {
  */
 export function activate(context: vscode.ExtensionContext) {
   l10n.config({
-    uri: vscode.Uri.joinPath(context.extensionUri, "l10n").toString(),
+    uri: getL10nBundleUri(context).toString(),
   });
 
   // Initialize Context Key
@@ -145,6 +830,33 @@ export function activate(context: vscode.ExtensionContext) {
     "rich-markdown-diff.hasSelectedForCompare",
     false,
   );
+  vscode.commands.executeCommand(
+    "setContext",
+    "rich-markdown-diff.canShowRenderedDiff",
+    false,
+  );
+
+  context.subscriptions.push(
+    vscode.window.onDidChangeActiveTextEditor((editor) => {
+      void updateRenderedDiffContext(editor);
+    }),
+    vscode.window.onDidChangeVisibleTextEditors(() => {
+      void updateRenderedDiffContext();
+    }),
+    vscode.workspace.onDidChangeTextDocument((event) => {
+      if (
+        vscode.window.activeTextEditor?.document.uri.toString() ===
+        event.document.uri.toString()
+      ) {
+        void updateRenderedDiffContext(vscode.window.activeTextEditor);
+      }
+    }),
+    new vscode.Disposable(() => {
+      activeEditorRepositorySubscription?.dispose();
+      activeEditorRepositorySubscription = undefined;
+    }),
+  );
+  void updateRenderedDiffContext();
   vscode.commands.executeCommand(
     "setContext",
     "rich-markdown-diff.isDiffActive",
@@ -173,7 +885,9 @@ export function activate(context: vscode.ExtensionContext) {
         if (activePanel) {
           activePanel.webview.postMessage({ command: "toggleInline" });
         } else {
-          vscode.window.showWarningMessage(l10n.t("No active diff panel found."));
+          vscode.window.showWarningMessage(
+            l10n.t("No active diff panel found."),
+          );
         }
       },
     ),
@@ -191,58 +905,7 @@ export function activate(context: vscode.ExtensionContext) {
   const disposableDiff = vscode.commands.registerCommand(
     "rich-markdown-diff.diffClipboard",
     async (uri?: vscode.Uri) => {
-      let document: vscode.TextDocument | undefined;
-
-      // 1. Try URI argument (e.g. from context menu)
-      if (uri) {
-        try {
-          document = await vscode.workspace.openTextDocument(uri);
-        } catch (e) {
-          console.error("Failed to open document from URI:", e);
-        }
-      }
-
-      // 2. Try Active Tab (Handles generic Markdown Preview)
-      if (!document) {
-        const activeTab = vscode.window.tabGroups.activeTabGroup.activeTab;
-        if (activeTab) {
-          if (
-            activeTab.input instanceof vscode.TabInputCustom &&
-            activeTab.input.viewType === "vscode.markdown.preview.editor"
-          ) {
-            try {
-              document = await vscode.workspace.openTextDocument(
-                activeTab.input.uri,
-              );
-            } catch (e) {
-              console.error("Failed to open document from Preview Tab:", e);
-            }
-          } else if (activeTab.input instanceof vscode.TabInputText) {
-            try {
-              document = await vscode.workspace.openTextDocument(
-                activeTab.input.uri,
-              );
-            } catch (e) {
-              console.error("Failed to open document from Text Tab:", e);
-            }
-          }
-        }
-      }
-
-      // 3. Fallback: Active Text Editor
-      if (!document && vscode.window.activeTextEditor) {
-        document = vscode.window.activeTextEditor.document;
-      }
-
-      // 4. Fallback: Visible Text Editors (Last Resort)
-      if (!document) {
-        const visibleMarkdown = vscode.window.visibleTextEditors.find(
-          (editor) => editor.document.languageId === "markdown",
-        );
-        if (visibleMarkdown) {
-          document = visibleMarkdown.document;
-        }
-      }
+      const document = await resolveMarkdownDocument(uri);
 
       if (!document) {
         vscode.window.showErrorMessage(
@@ -293,13 +956,12 @@ export function activate(context: vscode.ExtensionContext) {
         docText,
         resolver,
       );
-      const katexCssUri = panel.webview.asWebviewUri(
-        vscode.Uri.joinPath(
-          context.extensionUri,
-          "media",
-          "katex",
-          "katex.min.css",
-        ),
+      const katexFontBaseUri = panel.webview.asWebviewUri(
+        vscode.Uri.joinPath(context.extensionUri, "media", "katex", "fonts"),
+      );
+      const katexCssInline = await buildKatexCssInline(
+        context.extensionUri,
+        katexFontBaseUri,
       );
       const mermaidJsUri = panel.webview.asWebviewUri(
         vscode.Uri.joinPath(
@@ -328,7 +990,7 @@ export function activate(context: vscode.ExtensionContext) {
 
       const webviewContent = diffProvider.getWebviewContent(
         diffHtml,
-        katexCssUri.toString(),
+        katexCssInline,
         mermaidJsUri.toString(),
         hljsLightCssUri.toString(),
         hljsDarkCssUri.toString(),
@@ -399,7 +1061,7 @@ export function activate(context: vscode.ExtensionContext) {
             vscode.window
               .showTextDocument(editor.document, vscode.ViewColumn.One)
               .then((e) => {
-                if (line) {
+                if (typeof line === "number") {
                   const range = new vscode.Range(line, 0, line, 0);
                   e.revealRange(range, vscode.TextEditorRevealType.InCenter);
                 }
@@ -422,7 +1084,7 @@ export function activate(context: vscode.ExtensionContext) {
         webviewOptions: {
           enableFindWidget: true,
         },
-      }
+      },
     ),
   );
 
@@ -448,20 +1110,14 @@ export function activate(context: vscode.ExtensionContext) {
     }
 
     // 2. Resolve single target URI
-    let targetUri: vscode.Uri | undefined;
-    if (args && args.length > 0) {
-      if (args[0] instanceof vscode.Uri) {
-        targetUri = args[0];
-      } else if (args[0].resourceUri) {
-        targetUri = args[0].resourceUri;
-      }
-    }
+    const commandTarget =
+      args && args.length > 0 ? getCommandTarget(args[0]) : undefined;
+    let targetUri = commandTarget?.targetUri;
+    const comparisonHint = commandTarget?.comparisonHint ?? "auto";
 
     if (!targetUri) {
-      const activeEditor = vscode.window.activeTextEditor;
-      if (activeEditor) {
-        targetUri = activeEditor.document.uri;
-      }
+      const targetDocument = await resolveMarkdownDocument();
+      targetUri = targetDocument?.uri;
     }
 
     if (!targetUri) {
@@ -473,28 +1129,49 @@ export function activate(context: vscode.ExtensionContext) {
 
     // --- Graceful Validation ---
     const ext = path.extname(targetUri.fsPath).toLowerCase();
-    const markdownExtensions = [
-      ".md",
-      ".markdown",
-      ".mdown",
-      ".mkdn",
-      ".mdwn",
-      ".mdtxt",
-      ".mdtext",
-    ];
-    if (!markdownExtensions.includes(ext)) {
+    if (!isMarkdownPath(targetUri.fsPath)) {
       vscode.window.showInformationMessage(
-        l10n.t("Markdown Diff only works for Markdown files (found '{0}').", ext),
+        l10n.t(
+          "Markdown Diff only works for Markdown files (found '{0}').",
+          ext,
+        ),
       );
       return;
     }
     // ---------------------------
 
-    // Open with our custom editor (Git Diff mode)
-    await vscode.commands.executeCommand(
-      "vscode.openWith",
+    const initialComparison = await resolveSingleFileComparison(
       targetUri,
-      DiffEditorProvider.viewType,
+      comparisonHint,
+    );
+    if (
+      !isActionableSingleFileComparison(
+        initialComparison,
+        isDocumentDirty(targetUri),
+      )
+    ) {
+      vscode.window.showInformationMessage(
+        l10n.t("No Markdown changes are available for this file."),
+      );
+      return;
+    }
+
+    let initialStateConsumed = false;
+    await createAndBindDiffPanel(
+      `${l10n.t("Markdown Diff")}: ${path.basename(targetUri.fsPath)}`,
+      context,
+      async () => {
+        if (!initialStateConsumed) {
+          initialStateConsumed = true;
+          return toDiffPanelState(initialComparison);
+        }
+
+        const comparison = await resolveSingleFileComparison(
+          targetUri,
+          comparisonHint,
+        );
+        return toDiffPanelState(comparison);
+      },
     );
   };
 
@@ -509,17 +1186,18 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.commands.registerCommand(
       "rich-markdown-diff.selectForCompare",
-      (uri: vscode.Uri | undefined) => {
-        if (!uri && vscode.window.activeTextEditor) {
-          uri = vscode.window.activeTextEditor.document.uri;
+      (uri: unknown) => {
+        let targetUri = getFileUriFromCommandArg(uri);
+        if (!targetUri && vscode.window.activeTextEditor) {
+          targetUri = vscode.window.activeTextEditor.document.uri;
         }
-        if (!uri) {
+        if (!targetUri) {
           vscode.window.showErrorMessage(
             l10n.t("No file selected for comparison."),
           );
           return;
         }
-        selectedForCompareUri = uri;
+        selectedForCompareUri = targetUri;
         vscode.commands.executeCommand(
           "setContext",
           "rich-markdown-diff.hasSelectedForCompare",
@@ -527,7 +1205,10 @@ export function activate(context: vscode.ExtensionContext) {
         );
 
         vscode.window.setStatusBarMessage(
-          l10n.t("Selected '{0}' for Markdown diff.", path.basename(uri.fsPath)),
+          l10n.t(
+            "Selected '{0}' for Markdown diff.",
+            path.basename(targetUri.fsPath),
+          ),
           5000,
         );
       },
@@ -538,11 +1219,12 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.commands.registerCommand(
       "rich-markdown-diff.compareWithSelected",
-      (uri: vscode.Uri | undefined) => {
-        if (!uri && vscode.window.activeTextEditor) {
-          uri = vscode.window.activeTextEditor.document.uri;
+      (uri: unknown) => {
+        let targetUri = getFileUriFromCommandArg(uri);
+        if (!targetUri && vscode.window.activeTextEditor) {
+          targetUri = vscode.window.activeTextEditor.document.uri;
         }
-        if (!uri) {
+        if (!targetUri) {
           vscode.window.showErrorMessage(
             l10n.t("No file selected for comparison."),
           );
@@ -558,13 +1240,13 @@ export function activate(context: vscode.ExtensionContext) {
           return;
         }
 
-        if (selectedForCompareUri.toString() === uri.toString()) {
+        if (selectedForCompareUri.toString() === targetUri.toString()) {
           vscode.window.showInformationMessage(
             l10n.t("You are comparing the same file."),
           );
         }
 
-        showTwoFilesDiff(selectedForCompareUri, uri, context);
+        void showTwoFilesDiff(selectedForCompareUri, targetUri, context);
 
         // Reset state
         selectedForCompareUri = undefined;
@@ -586,184 +1268,49 @@ export function activate(context: vscode.ExtensionContext) {
  * @param _context - The extension context.
  */
 async function showTwoFilesDiff(
-  originalUri: vscode.Uri,
-  modifiedUri: vscode.Uri,
+  originalUri: vscode.Uri | undefined,
+  modifiedUri: vscode.Uri | undefined,
   _context: vscode.ExtensionContext,
 ) {
-  const minimalPaths = getMinimalPathForDisplay(
-    originalUri.fsPath,
-    modifiedUri.fsPath,
-  );
-
-  const panel = vscode.window.createWebviewPanel(
-    "markdownDiff",
-    `Diff: ${minimalPaths.left} ↔ ${minimalPaths.right}`,
-    vscode.ViewColumn.Active,
-    {
-      enableScripts: true,
-      enableFindWidget: true,
-      localResourceRoots: [
-        vscode.Uri.joinPath(_context.extensionUri, "media"),
-        vscode.Uri.joinPath(_context.extensionUri, "node_modules"),
-        ...(vscode.workspace.workspaceFolders?.map((f) => f.uri) ?? []),
-      ],
-    },
-  );
-
-  // Track active panel
-  panel.onDidChangeViewState((e) => {
-    if (e.webviewPanel.active) {
-      activePanel = e.webviewPanel;
-      vscode.commands.executeCommand(
-        "setContext",
-        "rich-markdown-diff.isDiffActive",
-        true,
-      );
-    } else {
-      if (activePanel === e.webviewPanel) {
-        activePanel = undefined;
-        vscode.commands.executeCommand(
-          "setContext",
-          "rich-markdown-diff.isDiffActive",
-          false,
-        );
-      }
-    }
-  });
-
-  panel.onDidDispose(() => {
-    if (activePanel === panel) {
-      activePanel = undefined;
-      vscode.commands.executeCommand(
-        "setContext",
-        "rich-markdown-diff.isDiffActive",
-        false,
-      );
-    }
-  });
-
-  if (panel.active) {
-    activePanel = panel;
-    vscode.commands.executeCommand(
-      "setContext",
-      "rich-markdown-diff.isDiffActive",
-      true,
+  const imageBaseUri = modifiedUri ?? originalUri;
+  if (!imageBaseUri) {
+    vscode.window.showErrorMessage(
+      l10n.t("No file selected for Markdown Diff."),
     );
+    return;
   }
 
-  const diffProvider = new MarkdownDiffProvider();
+  const minimalPaths =
+    originalUri && modifiedUri
+      ? getMinimalPathForDisplay(originalUri.fsPath, modifiedUri.fsPath)
+      : {
+          left: originalUri
+            ? path.basename(originalUri.fsPath)
+            : l10n.t("Empty"),
+          right: modifiedUri
+            ? path.basename(modifiedUri.fsPath)
+            : l10n.t("Empty"),
+        };
 
-  const update = async () => {
-    try {
-      const doc1 = await vscode.workspace.openTextDocument(originalUri);
-      const doc2 = await vscode.workspace.openTextDocument(modifiedUri);
-      const content1 = doc1.getText();
-      const content2 = doc2.getText();
-
-      await diffProvider.waitForReady();
-
-      const resolver = createImageResolver(modifiedUri, panel.webview);
-      const diffHtml = diffProvider.computeDiff(content1, content2, resolver);
-
-      const leftLabel = path.basename(originalUri.fsPath);
-      const rightLabel = path.basename(modifiedUri.fsPath);
-
-      const katexCssUri = panel.webview.asWebviewUri(
-        vscode.Uri.joinPath(
-          _context.extensionUri,
-          "media",
-          "katex",
-          "katex.min.css",
-        ),
-      );
-      const mermaidJsUri = panel.webview.asWebviewUri(
-        vscode.Uri.joinPath(
-          _context.extensionUri,
-          "media",
-          "mermaid",
-          "mermaid.min.js",
-        ),
-      );
-      const hljsLightCssUri = panel.webview.asWebviewUri(
-        vscode.Uri.joinPath(
-          _context.extensionUri,
-          "media",
-          "highlight",
-          "github.min.css",
-        ),
-      );
-      const hljsDarkCssUri = panel.webview.asWebviewUri(
-        vscode.Uri.joinPath(
-          _context.extensionUri,
-          "media",
-          "highlight",
-          "github-dark.min.css",
-        ),
-      );
-
-      panel.webview.html = diffProvider.getWebviewContent(
-        diffHtml,
-        katexCssUri.toString(),
-        mermaidJsUri.toString(),
-        hljsLightCssUri.toString(),
-        hljsDarkCssUri.toString(),
-        leftLabel,
-        rightLabel,
-        panel.webview.cspSource,
-        getWebviewTranslations(),
-      );
-    } catch (e) {
-      panel.webview.html = `<h1>${escapeHtml(l10n.t("Error reading files"))}</h1><p>${escapeHtml(String(e))}</p>`;
-    }
-  };
-
-  // Initial render
-  await update();
-
-  // Watchers
-  const watcher = vscode.workspace.onDidChangeTextDocument((e) => {
-    if (
-      e.document.uri.toString() === originalUri.toString() ||
-      e.document.uri.toString() === modifiedUri.toString()
-    ) {
-      update();
-    }
-  });
-
-  panel.onDidDispose(() => {
-    watcher.dispose();
-  });
-
-  // Handle Double Click (Open Modified)
-  panel.webview.onDidReceiveMessage(async (message) => {
-    if (message.command === "openSource") {
-      const side = message.side;
-      const line = message.line;
-
-      let uriToOpen = modifiedUri;
-      if (side === "original") {
-        uriToOpen = originalUri;
-      }
-
-      try {
-        const doc = await vscode.workspace.openTextDocument(uriToOpen);
-        const editor = await vscode.window.showTextDocument(doc, {
-          viewColumn: vscode.ViewColumn.One,
-          preserveFocus: false,
-        });
-
-        if (line) {
-          const range = new vscode.Range(line, 0, line, 0);
-          editor.revealRange(range, vscode.TextEditorRevealType.InCenter);
-          editor.selection = new vscode.Selection(range.start, range.start);
-        }
-      } catch (e) {
-        vscode.window.showErrorMessage(
-          l10n.t("Could not open source file: {0}", String(e)),
-        );
-      }
-    }
-  });
+  await createAndBindDiffPanel(
+    `Diff: ${minimalPaths.left} ↔ ${minimalPaths.right}`,
+    _context,
+    async () => ({
+      originalUri,
+      modifiedUri,
+      leftLabel: originalUri
+        ? path.basename(originalUri.fsPath)
+        : l10n.t("Empty"),
+      rightLabel: modifiedUri
+        ? path.basename(modifiedUri.fsPath)
+        : l10n.t("Empty"),
+      watchUris: [originalUri, modifiedUri].filter(
+        (uri): uri is vscode.Uri => !!uri && uri.scheme === "file",
+      ),
+      imageBaseUri,
+      fallbackSourceUri: modifiedUri ?? originalUri ?? imageBaseUri,
+    }),
+  );
 }
 
 /**
@@ -772,7 +1319,6 @@ async function showTwoFilesDiff(
  */
 class DiffEditorProvider implements vscode.CustomReadonlyEditorProvider {
   public static readonly viewType = "rich-markdown-diff.diffPreview";
-  private diffProvider = new MarkdownDiffProvider();
 
   constructor(private readonly context: vscode.ExtensionContext) {}
 
@@ -807,215 +1353,10 @@ class DiffEditorProvider implements vscode.CustomReadonlyEditorProvider {
       ],
     };
 
-    // Track active panel
-    webviewPanel.onDidChangeViewState((e) => {
-      if (e.webviewPanel.active) {
-        activePanel = e.webviewPanel;
-        vscode.commands.executeCommand(
-          "setContext",
-          "rich-markdown-diff.isDiffActive",
-          true,
-        );
-      } else {
-        if (activePanel === e.webviewPanel) {
-          activePanel = undefined;
-          vscode.commands.executeCommand(
-            "setContext",
-            "rich-markdown-diff.isDiffActive",
-            false,
-          );
-        }
-      }
+    await bindDiffPanel(webviewPanel, this.context, async () => {
+      const comparison = await resolveSingleFileComparison(document.uri);
+      return toDiffPanelState(comparison);
     });
-
-    webviewPanel.onDidDispose(() => {
-      if (activePanel === webviewPanel) {
-        activePanel = undefined;
-        vscode.commands.executeCommand(
-          "setContext",
-          "rich-markdown-diff.isDiffActive",
-          false,
-        );
-      }
-    });
-
-    // Always set as active panel when first opened
-    activePanel = webviewPanel;
-    vscode.commands.executeCommand(
-      "setContext",
-      "rich-markdown-diff.isDiffActive",
-      true,
-    );
-
-    const modifiedUri = document.uri;
-
-    // Initial Render
-    await this.updateWebview(webviewPanel, modifiedUri);
-
-    // Listen for changes (Auto-refresh with Debounce)
-    const debounceDelay = 500; // ms
-    let timeout: NodeJS.Timeout;
-
-    const changeDocumentSubscription = vscode.workspace.onDidChangeTextDocument(
-      (e) => {
-        if (e.document.uri.toString() === modifiedUri.toString()) {
-          // Debounce
-          clearTimeout(timeout);
-          timeout = setTimeout(() => {
-            this.updateWebview(webviewPanel, modifiedUri);
-          }, debounceDelay);
-        }
-      },
-    );
-
-    // Make sure to dispose the listener when the panel is closed
-    webviewPanel.onDidDispose(() => {
-      changeDocumentSubscription.dispose();
-    });
-
-    // Handle Double Click
-    webviewPanel.webview.onDidReceiveMessage(async (message) => {
-      if (message.command === "openSource") {
-        const side = message.side;
-        const line = message.line;
-
-        let uriToOpen = modifiedUri;
-        if (side === "original") {
-          // Construct git URI same as updateWebview
-          const query = JSON.stringify({ path: modifiedUri.fsPath, ref: "~" });
-          uriToOpen = modifiedUri.with({ scheme: "git", query });
-        }
-
-        try {
-          const doc = await vscode.workspace.openTextDocument(uriToOpen);
-          const editor = await vscode.window.showTextDocument(doc, {
-            viewColumn: vscode.ViewColumn.One,
-            preserveFocus: false,
-          });
-
-          if (line) {
-            const range = new vscode.Range(line, 0, line, 0);
-            editor.revealRange(range, vscode.TextEditorRevealType.InCenter);
-            editor.selection = new vscode.Selection(range.start, range.start);
-          }
-        } catch (e) {
-          if (side === "original") {
-            vscode.window.showWarningMessage(
-              l10n.t(
-                "Could not open original version (it might be a Git revision). Opening modified version instead.",
-              ),
-            );
-            // Fallback to modified
-            const doc = await vscode.workspace.openTextDocument(modifiedUri);
-            const editor = await vscode.window.showTextDocument(doc, {
-              viewColumn: vscode.ViewColumn.One,
-            });
-            if (line) {
-              const range = new vscode.Range(line, 0, line, 0);
-              editor.revealRange(range, vscode.TextEditorRevealType.InCenter);
-            }
-          } else {
-            vscode.window.showErrorMessage(
-              l10n.t("Could not open file: {0}", String(e)),
-            );
-          }
-        }
-      }
-    });
-  }
-
-  /**
-   * Updates the webview content with the rendered diff.
-   *
-   * @param panel - The webview panel to update.
-   * @param modifiedUri - The URI of the modified file to compare.
-   */
-  private async updateWebview(
-    panel: vscode.WebviewPanel,
-    modifiedUri: vscode.Uri,
-  ) {
-    let originalContent = "";
-    let modifiedContent = "";
-
-    try {
-      // Get Modified Content
-      const modifiedDoc = await vscode.workspace.openTextDocument(modifiedUri);
-      modifiedContent = modifiedDoc.getText();
-
-      // Get Original Content (Git)
-      // Construct git URI: git:/path/to/file?{"path":"/path/to/file","ref":"~"}
-      const query = JSON.stringify({ path: modifiedUri.fsPath, ref: "~" });
-      const originalUri = modifiedUri.with({ scheme: "git", query });
-
-      try {
-        const originalDoc =
-          await vscode.workspace.openTextDocument(originalUri);
-        originalContent = originalDoc.getText();
-      } catch {
-        // If git lookup fails, show modified version only
-        originalContent = "";
-        vscode.window.showWarningMessage(
-          l10n.t(
-            "Could not load original version from Git. Showing modified version only.",
-          ),
-        );
-      }
-
-      await this.diffProvider.waitForReady();
-
-      const resolver = createImageResolver(modifiedUri, panel.webview);
-      const diffHtml = this.diffProvider.computeDiff(
-        originalContent,
-        modifiedContent,
-        resolver,
-      );
-      const katexCssUri = panel.webview.asWebviewUri(
-        vscode.Uri.joinPath(
-          this.context.extensionUri,
-          "media",
-          "katex",
-          "katex.min.css",
-        ),
-      );
-      const mermaidJsUri = panel.webview.asWebviewUri(
-        vscode.Uri.joinPath(
-          this.context.extensionUri,
-          "media",
-          "mermaid",
-          "mermaid.min.js",
-        ),
-      );
-      const hljsLightCssUri = panel.webview.asWebviewUri(
-        vscode.Uri.joinPath(
-          this.context.extensionUri,
-          "media",
-          "highlight",
-          "github.min.css",
-        ),
-      );
-      const hljsDarkCssUri = panel.webview.asWebviewUri(
-        vscode.Uri.joinPath(
-          this.context.extensionUri,
-          "media",
-          "highlight",
-          "github-dark.min.css",
-        ),
-      );
-
-      panel.webview.html = this.diffProvider.getWebviewContent(
-        diffHtml,
-        katexCssUri.toString(),
-        mermaidJsUri.toString(),
-        hljsLightCssUri.toString(),
-        hljsDarkCssUri.toString(),
-        undefined,
-        undefined,
-        panel.webview.cspSource,
-        getWebviewTranslations(),
-      );
-    } catch (e) {
-      panel.webview.html = `<h1>${escapeHtml(l10n.t("Error reading file: {0}", String(e)))}</h1>`;
-    }
   }
 }
 

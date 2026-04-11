@@ -25,8 +25,7 @@
 import MarkdownIt = require("markdown-it");
 // @ts-ignore
 import * as htmldiff from "htmldiff-js";
-// @ts-ignore
-const wikilinks = require("markdown-it-wikilinks");
+const wikilinks = require("./wikilinksPlugin");
 // @ts-ignore
 const katex = require("@iktakahiro/markdown-it-katex");
 // @ts-ignore
@@ -60,7 +59,7 @@ export class MarkdownDiffProvider {
           try {
             return hljs.highlight(str, { language: lang, ignoreIllegals: true })
               .value;
-          } catch (__) {
+          } catch {
             /* ignore highlight errors and fallback */
           }
         }
@@ -70,7 +69,7 @@ export class MarkdownDiffProvider {
 
     // Plugin Configuration
     // Wikilinks: default options
-    this.md.use(wikilinks({ uriSuffix: "" }));
+    this.md.use(wikilinks, { uriSuffix: "" });
 
     // Math: KaTeX
     this.md.use(katex);
@@ -96,7 +95,7 @@ export class MarkdownDiffProvider {
 
       if (info === "mermaid") {
         const escapedContent = this.md.utils.escapeHtml(token.content);
-        return `<div class="mermaid" data-original-content="${escapedContent}">\n${token.content}\n</div>`;
+        return `<div class="mermaid" data-original-content="${escapedContent}">\n${escapedContent}\n</div>`;
       }
 
       return defaultFence(tokens, idx, options, env, self);
@@ -266,6 +265,7 @@ export class MarkdownDiffProvider {
         "img",
         "del",
         "ins",
+        "mark",
         "s",
         "input",
         "sup",
@@ -344,7 +344,6 @@ export class MarkdownDiffProvider {
           "width",
           "height",
           "class",
-          "style",
           "title",
           "alt",
           "rel",
@@ -398,7 +397,56 @@ export class MarkdownDiffProvider {
           "offset",
           "stop-color",
           "stop-opacity",
+          // KaTeX inline style + accessibility
+          "style",
+          "aria-hidden",
         ],
+      },
+      allowedStyles: {
+        "*": {
+          height: [/.*/],
+          width: [/.*/],
+          "min-width": [/.*/],
+          "max-width": [/.*/],
+          "vertical-align": [/.*/],
+          "margin-right": [/.*/],
+          "margin-left": [/.*/],
+          "margin-top": [/.*/],
+          "margin-bottom": [/.*/],
+          top: [/.*/],
+          left: [/.*/],
+          "padding-left": [/.*/],
+          "padding-right": [/.*/],
+          "border-bottom-width": [/.*/],
+          position: [/^relative$/, /^absolute$/],
+          display: [/^inline-block$/, /^block$/, /^none$/, /^inline$/],
+          "text-align": [/.*/],
+          color: [/.*/],
+          "background-color": [/.*/],
+        },
+      },
+      transformTags: {
+        a: (tagName: string, attribs: Record<string, string>) => {
+          const nextAttribs = { ...attribs };
+
+          if (nextAttribs.target === "_blank") {
+            const relValues = new Set(
+              (nextAttribs.rel ?? "")
+                .split(/\s+/)
+                .map((value) => value.trim())
+                .filter(Boolean),
+            );
+
+            relValues.add("noopener");
+            relValues.add("noreferrer");
+            nextAttribs.rel = Array.from(relValues).join(" ");
+          }
+
+          return {
+            tagName,
+            attribs: nextAttribs,
+          };
+        },
       },
       allowedSchemes: [
         "http",
@@ -454,7 +502,13 @@ export class MarkdownDiffProvider {
     oldHtml = this.sanitizeHtml(oldHtml);
     newHtml = this.sanitizeHtml(newHtml);
 
-    // Tokenize Mermaid blocks and Checkboxes to prevent internal diffing
+    // Strip data-line attributes before diffing to prevent htmldiff from
+    // fragmenting identical block elements whose only difference is the
+    // source-line number (e.g. headings that moved due to additions above).
+    oldHtml = this.stripDataLineAttributes(oldHtml);
+    newHtml = this.stripDataLineAttributes(newHtml);
+
+    // Tokenize complex blocks before diffing so htmldiff does not fragment them.
     const { html: oldHtmlTokenized, tokens: tokens1 } =
       this.replaceComplexBlocksWithTokens(oldHtml);
     const { html: newHtmlTokenized, tokens: tokens2 } =
@@ -481,6 +535,7 @@ export class MarkdownDiffProvider {
     if (typeof execute === "function") {
       bodyDiffHtml = execute(oldHtmlChecked, newHtmlChecked);
       bodyDiffHtml = this.fixInvalidNesting(bodyDiffHtml);
+      bodyDiffHtml = this.normalizeListContainerChanges(bodyDiffHtml);
       // Consolidate fragmented diffs for block elements
       bodyDiffHtml = this.consolidateBlockDiffs(bodyDiffHtml);
       // Cleanup artifacts where checkboxes remain outside of deleted blocks (List -> Text diff)
@@ -498,8 +553,24 @@ export class MarkdownDiffProvider {
     // Consolidate Block Diffs (Tables, Lists, Blockquotes, Divs)
     bodyDiffHtml = this.consolidateBlockDiffs(bodyDiffHtml);
 
+    // Split ins/del blocks that span both headings and non-heading content
+    bodyDiffHtml = this.splitMixedBlockInsertions(bodyDiffHtml);
+
+    // Wrap leading number prefixes in headings so they don't wrap separately
+    bodyDiffHtml = this.wrapHeadingPrefixes(bodyDiffHtml);
+
+    // When a nested list is reparented out of a changed list item but its
+    // content stays the same, keep the shared list neutral instead of showing
+    // it as deleted on the left and re-inserted on the right.
+    bodyDiffHtml = this.extractSharedReparentedLists(bodyDiffHtml);
+
+    // Mark list items whose content is entirely inside <ins> or <del> so CSS
+    // can hide the ghost bullet without relying on JS timing.
+    bodyDiffHtml = this.markGhostListItems(bodyDiffHtml);
+
     // Fix Invalid Nesting
     bodyDiffHtml = this.fixInvalidNesting(bodyDiffHtml);
+    bodyDiffHtml = this.normalizeListContainerChanges(bodyDiffHtml);
 
     // 2. Render Frontmatter Diff
     const fmKeys = new Set([
@@ -695,13 +766,175 @@ export class MarkdownDiffProvider {
       },
     );
 
+    // Refine structural list-container changes. If the list tag changed
+    // (for example dl -> ul), keep it as a structural replacement so unchanged
+    // text is not churned by invalid nested markup. If the tag stayed the same,
+    // diff the list fragment on its own so same-type list edits remain granular.
+    const listContainerRegex =
+      /<del[^>]*>\s*<(ol|ul|dl)([^>]*)>([\s\S]*?)<\/\1>\s*<\/del>\s*<ins[^>]*>\s*<(ol|ul|dl)([^>]*)>([\s\S]*?)<\/\4>\s*<\/ins>/gi;
+
+    html = html.replace(
+      listContainerRegex,
+      (match, oldTag, oldAttrs, oldContent, newTag, newAttrs, newContent) => {
+        if (oldTag.toLowerCase() !== newTag.toLowerCase()) {
+          return this.createStructuralListContainerDiff(
+            oldTag,
+            oldAttrs,
+            oldContent,
+            newTag,
+            newAttrs,
+            newContent,
+          );
+        }
+
+        return this.diffHtmlFragments(
+          `<${oldTag}${oldAttrs}>${oldContent}</${oldTag}>`,
+          `<${newTag}${newAttrs}>${newContent}</${newTag}>`,
+          execute,
+        );
+      },
+    );
+
     // Refine Footnotes
-    const footnoteRegex =
-      /(<del[^>]*>\s*(<li[^>]*class=["']footnote-item["'][^>]*>[\s\S]*?<\/li>)\s*<\/del>)\s*(<ins[^>]*>\s*(<li[^>]*class=["']footnote-item["'][^>]*>[\s\S]*?<\/li>)\s*<\/ins>)/gi;
+    // Same-type footnote lists are refined through listContainerRegex above.
+    // That inner list diff can still group an updated footnote item and newly
+    // added items inside one <ins>. Pair footnotes by id so the existing item
+    // is diffed against its updated version and extra items stay standalone
+    // insertions.
+    const footnoteBundleRegex =
+      /<del[^>]*>\s*((?:<li[^>]*class=["']footnote-item["'][^>]*>[\s\S]*?<\/li>\s*)+)<\/del>\s*<ins[^>]*>\s*((?:<li[^>]*class=["']footnote-item["'][^>]*>[\s\S]*?<\/li>\s*)+)<\/ins>/gi;
+    const footnoteItemRegex =
+      /<li[^>]*class=["']footnote-item["'][^>]*>[\s\S]*?<\/li>/gi;
+    const getFootnoteId = (itemHtml: string) =>
+      itemHtml.match(/\bid=["']([^"']+)["']/i)?.[1] ?? null;
 
-    // console.log("refineBlockDiffs Input:", html.substring(html.indexOf("footnotes-list"), html.indexOf("footnotes-list") + 1000));
+    html = html.replace(footnoteBundleRegex, (match, oldBundle, newBundle) => {
+      const oldFootnotes = oldBundle.match(footnoteItemRegex) || [];
+      const newFootnotes = newBundle.match(footnoteItemRegex) || [];
 
-    html = html.replace(footnoteRegex, replacer);
+      if (oldFootnotes.length === 0 || newFootnotes.length === 0) {
+        return match;
+      }
+
+      const usedNewFootnotes = new Set<number>();
+      let result = "";
+
+      oldFootnotes.forEach((oldFootnote: string) => {
+        const oldId = getFootnoteId(oldFootnote);
+        let matchedIndex = -1;
+
+        if (oldId) {
+          matchedIndex = newFootnotes.findIndex(
+            (newFootnote: string, index: number) =>
+              !usedNewFootnotes.has(index) &&
+              getFootnoteId(newFootnote) === oldId,
+          );
+        }
+
+        if (
+          matchedIndex === -1 &&
+          oldFootnotes.length === newFootnotes.length
+        ) {
+          matchedIndex = newFootnotes.findIndex(
+            (_newFootnote: string, index: number) =>
+              !usedNewFootnotes.has(index),
+          );
+        }
+
+        if (matchedIndex !== -1) {
+          usedNewFootnotes.add(matchedIndex);
+          result += execute(oldFootnote, newFootnotes[matchedIndex]);
+        } else {
+          result += `<del class="diffdel">${oldFootnote}</del>`;
+        }
+      });
+
+      newFootnotes.forEach((newFootnote: string, index: number) => {
+        if (!usedNewFootnotes.has(index)) {
+          result += `<ins class="diffins">${newFootnote}</ins>`;
+        }
+      });
+
+      return result;
+    });
+
+    // Refine Headings
+    // When headings are tokenized as atomic blocks, changed headings appear as
+    // full <del>heading</del><ins>heading</ins> replacements. Re-diff the inner
+    // content to show character-level changes within the heading.
+    // The <ins> block must contain ONLY a single heading — when htmldiff groups
+    // multiple elements in one <ins> (e.g. a new heading + list + another
+    // heading), the inner re-diff would cross heading boundaries and break
+    // both panes.
+    const headingRegex =
+      /<del[^>]*>\s*<(h[1-6])([^>]*)>([\s\S]*?)<\/\1>\s*<\/del>\s*<ins[^>]*>\s*<(h[1-6])([^>]*)>([\s\S]*?)<\/\4>\s*<\/ins>/gi;
+
+    html = html.replace(
+      headingRegex,
+      (match, oldTag, oldAttrs, oldContent, newTag, newAttrs, newContent) => {
+        if (oldTag.toLowerCase() !== newTag.toLowerCase()) {
+          return match;
+        }
+        // Guard: if the new content contains another heading tag, the <ins>
+        // spans multiple elements and the regex over-captured.  Fall back to
+        // the full block replacement so the left pane stays intact.
+        if (/<\/?h[1-6][\s>]/i.test(newContent)) {
+          return match;
+        }
+        const innerDiff = execute(oldContent, newContent);
+        return `<${newTag}${newAttrs}>${innerDiff}</${newTag}>`;
+      },
+    );
+
+    // Refine Code Blocks
+    // When pre blocks are tokenized as atomic blocks, changed code appears as
+    // full <del>pre</del><ins>pre</ins> replacements. Re-diff the inner
+    // content to show line-level changes within the code block.
+    const preRegex =
+      /<del[^>]*>\s*(<pre([^>]*)>[\s\S]*?<\/pre>)\s*<\/del>\s*<ins[^>]*>\s*(<pre([^>]*)>[\s\S]*?<\/pre>)\s*<\/ins>/gi;
+
+    html = html.replace(
+      preRegex,
+      (_match, oldPre, _oldAttrs, newPre, _newAttrs) => {
+        return execute(oldPre, newPre);
+      },
+    );
+
+    // Refine bold-paragraph ↔ heading structural promotions/demotions.
+    // When `**Bold Text**` is promoted to `#### Bold Text` (or demoted), the
+    // rendered text is identical — only the structural role changed.  The diff
+    // engine sees two different HTML tokens and marks them as a modification,
+    // causing both panes to highlight the heading text in red/green even though
+    // no wording changed.  Detect this by comparing stripped text content: if
+    // text is the same, strip the diff markers and show the heading neutrally.
+    //
+    // Pattern A (promotion): <p><strong><del>TEXT</del></p><ins><hN>TEXT</hN></ins>
+    const boldToHeadingRe =
+      /<p[^>]*>\s*<strong[^>]*>\s*<del[^>]*>([\s\S]*?)<\/del>\s*(?:<\/strong>)?\s*<\/p>\s*<ins[^>]*>\s*<(h[1-6])([^>]*)>([\s\S]*?)<\/\2>\s*<\/ins>/gi;
+
+    html = html.replace(
+      boldToHeadingRe,
+      (match, delInner, newTag, newAttrs, insInner) => {
+        const delText = delInner.replace(/<[^>]+>/g, "").trim();
+        const insText = insInner.replace(/<[^>]+>/g, "").trim();
+        if (delText !== insText) return match;
+        return `<${newTag}${newAttrs}>${insInner}</${newTag}>`;
+      },
+    );
+
+    // Pattern B (demotion): <del><hN>TEXT</hN></del><p><strong><ins>TEXT</ins></strong></p>
+    const headingToBoldRe =
+      /<del[^>]*>\s*<(h[1-6])([^>]*)>([\s\S]*?)<\/\1>\s*<\/del>\s*<p[^>]*>\s*<strong[^>]*>\s*<ins[^>]*>([\s\S]*?)<\/ins>\s*(?:<\/strong>)?\s*<\/p>/gi;
+
+    html = html.replace(
+      headingToBoldRe,
+      (match, _oldTag, _oldAttrs, delInner, insInner) => {
+        const delText = delInner.replace(/<[^>]+>/g, "").trim();
+        const insText = insInner.replace(/<[^>]+>/g, "").trim();
+        if (delText !== insText) return match;
+        return `<p><strong>${insInner}</strong></p>`;
+      },
+    );
 
     return html;
   }
@@ -728,12 +961,15 @@ export class MarkdownDiffProvider {
    * @param html - The HTML content to tokenize.
    * @returns An object containing the tokenized HTML and a map of tokens to original content.
    */
-  private replaceComplexBlocksWithTokens(html: string): {
+  private replaceComplexBlocksWithTokens(
+    html: string,
+    options: { tokenizeListContainers?: boolean } = {},
+  ): {
     html: string;
     tokens: Record<string, string>;
   } {
     const tokens: Record<string, string> = {};
-    return this.replaceBalancedTags(html, tokens);
+    return this.replaceBalancedTags(html, tokens, options);
   }
 
   /**
@@ -767,6 +1003,7 @@ export class MarkdownDiffProvider {
   private replaceBalancedTags(
     html: string,
     tokens: Record<string, string>,
+    options: { tokenizeListContainers?: boolean } = {},
   ): { html: string; tokens: Record<string, string> } {
     let result = "";
     let i = 0;
@@ -842,6 +1079,44 @@ export class MarkdownDiffProvider {
           result += token;
           i = end;
           continue;
+        }
+      }
+
+      if (options.tokenizeListContainers !== false && html[i] === "<") {
+        const listMatch = html.substring(i).match(/^<(ol|ul|dl)(\s[^>]*)?>/i);
+        if (listMatch) {
+          const tagName = listMatch[1].toLowerCase();
+          const start = i;
+          const end = this.findClosing(html, i, tagName);
+          if (end > -1) {
+            const content = html.substring(start, end);
+            const token = this.createToken(
+              content,
+              `LIST_${tagName.toUpperCase()}`,
+              tokens,
+            );
+            result += token;
+            i = end;
+            continue;
+          }
+        }
+      }
+
+      // Detect headings (h1-h6) and tokenize them to prevent htmldiff from
+      // fragmenting heading content when headings shift position.
+      if (html[i] === "<") {
+        const headingMatch = html.substring(i).match(/^<(h[1-6])(\s[^>]*)?>/);
+        if (headingMatch) {
+          const tagName = headingMatch[1];
+          const start = i;
+          const end = this.findClosing(html, i, tagName);
+          if (end > -1) {
+            const content = html.substring(start, end);
+            const token = this.createToken(content, "HEADING", tokens);
+            result += token;
+            i = end;
+            continue;
+          }
         }
       }
 
@@ -928,6 +1203,241 @@ export class MarkdownDiffProvider {
    * @param html - The HTML to check and fix.
    * @returns The fixed HTML.
    */
+  private stripDataLineAttributes(html: string): string {
+    return html.replace(/ data-line="\d+"/g, "");
+  }
+
+  /**
+   * Splits ins/del blocks that contain a mix of headings and non-heading content
+   * so each heading gets its own insertion/deletion wrapper.
+   */
+  private splitMixedBlockInsertions(html: string): string {
+    const tagTypes: Array<"ins" | "del"> = ["ins", "del"];
+    let result = html;
+
+    for (const diffTag of tagTypes) {
+      const diffClass = diffTag === "ins" ? "diffins" : "diffdel";
+      const regex = new RegExp(
+        `<${diffTag}\\b[^>]*>([\\s\\S]*?)<\\/${diffTag}>`,
+        "gi",
+      );
+
+      result = result.replace(regex, (match, inner: string) => {
+        // Headings must never be grouped with anything else.
+        // If there is any heading in the wrapper, try to isolate it.
+        const headingCount = (inner.match(/<h[1-6][\s>]/gi) || []).length;
+
+        if (headingCount === 0) {
+          return match;
+        }
+
+        // Split on block-level opening tags AND after closing heading tags,
+        // so that trailing text/inline content after a </h2> becomes its own piece.
+        const parts = inner.split(
+          /(?=<(?:h[1-6]|p|ul|ol|dl|blockquote|pre|table|hr)[\s>/])|(?<=<\/h[1-6]>)\s*(?=\S)/i,
+        );
+
+        if (parts.length <= 1) {
+          return match;
+        }
+
+        return parts
+          .map((part) => {
+            const trimmed = part.trim();
+            if (!trimmed) {
+              return "";
+            }
+            return `<${diffTag} class="${diffClass}">${trimmed}</${diffTag}>`;
+          })
+          .join("\n");
+      });
+    }
+
+    return result;
+  }
+
+  /**
+   * Wraps leading number prefixes in headings (e.g. "3. ", "10.2.3 ", "[1.2.0] ")
+   * in a nowrap span so that numbering and the following period/bracket stay
+   * together as a single unbreakable unit when the heading text wraps.
+   *
+   * Only applies to headings that contain diff markers (<ins>/<del>) — those
+   * create separate inline boxes that the browser may wrap between.  Plain-text
+   * headings don't need the wrapper.
+   */
+  private wrapHeadingPrefixes(html: string): string {
+    return html.replace(
+      /(<h[1-6][^>]*>)((?:\s*(?:<(?:del|ins)[^>]*>)?\s*[\d\.\[\]]+\s*(?:<\/(?:del|ins)>)?\s*)+(?:\]\s*)?(?=\S))/gi,
+      (match, tag, prefix) => {
+        // Only wrap when diff markers are present — without them, the browser
+        // keeps the text in a single inline formatting context and wraps fine.
+        if (!/<(ins|del)\b/.test(prefix)) {
+          return match;
+        }
+        // Do not wrap if the prefix crosses an unclosed <ins> or <del>
+        // boundary — that would produce invalid HTML.
+        const openIns = (prefix.match(/<ins\b/g) || []).length;
+        const closeIns = (prefix.match(/<\/ins>/g) || []).length;
+        const openDel = (prefix.match(/<del\b/g) || []).length;
+        const closeDel = (prefix.match(/<\/del>/g) || []).length;
+        if (openIns !== closeIns || openDel !== closeDel) {
+          return match;
+        }
+        return tag + '<span class="heading-prefix">' + prefix + "</span>";
+      },
+    );
+  }
+
+  /**
+   * Marks list items whose visible content is entirely wrapped in insertion or
+   * deletion markers.  On the left pane, such items show only a ghost bullet
+   * because the <ins> content is CSS-hidden.  Adding data attributes lets CSS
+   * hide the entire <li> element without depending on JS ghost-hiding timing.
+   *
+   * Adds `data-all-inserted="true"` when stripping all <ins> leaves no visible
+   * content, and `data-all-deleted="true"` when stripping all <del> leaves
+   * nothing.  Simple (non-nested) list items only — nested items are already
+   * handled by the JS cleanupGhosts() function.
+   */
+  private markGhostListItems(html: string): string {
+    return html.replace(
+      /<li([^>]*)>([\s\S]*?)<\/li>/gi,
+      (match, attrs: string, content: string) => {
+        // Skip items that contain nested <li> — the regex would over-capture
+        // them and the JS ghost-hiding handles nested structures correctly.
+        if (/<li\b/i.test(content)) return match;
+
+        const stripInline = (s: string) =>
+          s.replace(/<\/?(strong|em|b|i|s|span|a)\b[^>]*>/gi, "").trim();
+
+        const withoutIns = content.replace(/<ins\b[^>]*>[\s\S]*?<\/ins>/gi, "");
+        const withoutDel = content.replace(/<del\b[^>]*>[\s\S]*?<\/del>/gi, "");
+
+        let newAttrs = attrs;
+        if (stripInline(withoutIns) === "") {
+          newAttrs += ' data-all-inserted="true"';
+        }
+        if (stripInline(withoutDel) === "") {
+          newAttrs += ' data-all-deleted="true"';
+        }
+
+        if (newAttrs === attrs) return match;
+        return `<li${newAttrs}>${content}</li>`;
+      },
+    );
+  }
+
+  /**
+   * Extracts unchanged nested lists that were reparented out of a changed list
+   * item. Example: `4. **Run/Debug:**` with nested bullets becomes
+   * `1. **Run and debug.**` followed by the same top-level bullets.
+   *
+   * htmldiff often renders this as:
+   * - old nested list inside a deleted parent list item, and
+   * - the same list inside an inserted block after the new parent item.
+   *
+   * That makes the left pane look like the bullet content was removed even when
+   * only the parent structure changed. If the nested list HTML matches the new
+   * trailing list HTML (ignoring whitespace and `&nbsp;`), pull the shared list
+   * out of the diff wrappers so both panes show it neutrally.
+   */
+  private extractSharedReparentedLists(html: string): string {
+    const normalizeListFragment = (fragment: string) =>
+      fragment
+        .replace(/&nbsp;/gi, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+
+    const findMatchingDeletedNestedListWrapper = (
+      sourceHtml: string,
+      beforeIndex: number,
+      normalizedSharedList: string,
+    ): string | null => {
+      const prefix = sourceHtml.slice(0, beforeIndex);
+      const deletedNestedListRegex =
+        /(?:<del[^>]*>\s*<\/del>\s*)?<del[^>]*class="[^"]*diff-block[^"]*"[^>]*>\s*(<(ul|ol|dl)[^>]*>[\s\S]*?<\/\2>)\s*<\/del>(?:\s*<del[^>]*>\s*<\/del>)?/gi;
+
+      let deletedMatch: RegExpExecArray | null;
+      let matchedDeletedWrapper: string | null = null;
+
+      while ((deletedMatch = deletedNestedListRegex.exec(prefix)) !== null) {
+        const deletedList = deletedMatch[1];
+        if (normalizeListFragment(deletedList) === normalizedSharedList) {
+          matchedDeletedWrapper = deletedMatch[0];
+        }
+      }
+
+      return matchedDeletedWrapper;
+    };
+
+    const insertedCompositeRegex =
+      /<ins([^>]*)>\s*(<(ol|ul|dl)[^>]*>\s*<li[\s\S]*?<\/li>\s*<\/\3>)\s*(<(ul|ol|dl)[^>]*>[\s\S]*?<\/\5>)\s*<\/ins>/gi;
+
+    let result = html;
+    let compositeMatch: RegExpExecArray | null;
+
+    while ((compositeMatch = insertedCompositeRegex.exec(html)) !== null) {
+      const fullInsertedBlock = compositeMatch[0];
+      const insertedAttrs = compositeMatch[1];
+      const newParentList = compositeMatch[2];
+      const sharedList = compositeMatch[4];
+      const normalizedSharedList = normalizeListFragment(sharedList);
+
+      const insertedBlockIndex = result.indexOf(fullInsertedBlock);
+      if (insertedBlockIndex === -1) {
+        continue;
+      }
+
+      const matchedDeletedWrapper = findMatchingDeletedNestedListWrapper(
+        result,
+        insertedBlockIndex,
+        normalizedSharedList,
+      );
+
+      if (!matchedDeletedWrapper) {
+        continue;
+      }
+
+      result = result.replace(matchedDeletedWrapper, "");
+      result = result.replace(
+        fullInsertedBlock,
+        `<ins${insertedAttrs}>${newParentList}</ins>\n${sharedList}`,
+      );
+    }
+
+    const insertedListOnlyRegex =
+      /<ins([^>]*)>\s*(<(ul|ol|dl)[^>]*>[\s\S]*?<\/\3>)\s*<\/ins>/gi;
+
+    let insertedListOnlyMatch: RegExpExecArray | null;
+    while (
+      (insertedListOnlyMatch = insertedListOnlyRegex.exec(result)) !== null
+    ) {
+      const fullInsertedBlock = insertedListOnlyMatch[0];
+      const sharedList = insertedListOnlyMatch[2];
+      const normalizedSharedList = normalizeListFragment(sharedList);
+
+      const insertedBlockIndex = result.indexOf(fullInsertedBlock);
+      if (insertedBlockIndex === -1) {
+        continue;
+      }
+
+      const matchedDeletedWrapper = findMatchingDeletedNestedListWrapper(
+        result,
+        insertedBlockIndex,
+        normalizedSharedList,
+      );
+
+      if (!matchedDeletedWrapper) {
+        continue;
+      }
+
+      result = result.replace(matchedDeletedWrapper, "");
+      result = result.replace(fullInsertedBlock, sharedList);
+    }
+
+    return result;
+  }
+
   private fixInvalidNesting(html: string): string {
     // htmldiff-js often produces crossing tags like <ins><em>text</ins></em>
     // We need to swap them to <ins><em>text</em></ins>
@@ -948,13 +1458,92 @@ export class MarkdownDiffProvider {
     return fixed;
   }
 
+  private createStructuralListContainerDiff(
+    oldTag: string,
+    oldAttrs: string,
+    oldBody: string,
+    newTag: string,
+    newAttrs: string,
+    newBody: string,
+  ): string {
+    const oldList = `<${oldTag}${oldAttrs}>${oldBody}</${oldTag}>`;
+    const newList = `<${newTag}${newAttrs}>${newBody}</${newTag}>`;
+    return `<del class="diffdel diff-block diff-list-container-change diff-list-container-change-old">${oldList}</del><ins class="diffins diff-block diff-list-container-change diff-list-container-change-new">${newList}</ins>`;
+  }
+
+  private diffHtmlFragments(
+    oldHtml: string,
+    newHtml: string,
+    execute: (oldHtml: string, newHtml: string) => string,
+  ): string {
+    const { html: oldHtmlTokenized, tokens: tokens1 } =
+      this.replaceComplexBlocksWithTokens(oldHtml, {
+        tokenizeListContainers: false,
+      });
+    const { html: newHtmlTokenized, tokens: tokens2 } =
+      this.replaceComplexBlocksWithTokens(newHtml, {
+        tokenizeListContainers: false,
+      });
+    const { html: oldHtmlChecked, tokens: tokens1Checked } =
+      this.replaceCheckboxesWithTokens(oldHtmlTokenized);
+    const { html: newHtmlChecked, tokens: tokens2Checked } =
+      this.replaceCheckboxesWithTokens(newHtmlTokenized);
+
+    const allTokens = {
+      ...tokens1,
+      ...tokens2,
+      ...tokens1Checked,
+      ...tokens2Checked,
+    };
+
+    let diffHtml = execute(oldHtmlChecked, newHtmlChecked);
+    diffHtml = this.fixInvalidNesting(diffHtml);
+    diffHtml = this.normalizeListContainerChanges(diffHtml);
+    diffHtml = this.restoreComplexTokens(diffHtml, allTokens);
+    diffHtml = this.cleanupCheckboxArtifacts(diffHtml);
+    return diffHtml;
+  }
+
+  private normalizeListContainerChanges(html: string): string {
+    return html.replace(
+      /<(ol|ul|dl)([^>]*)>\s*<(ol|ul|dl)([^>]*)>([\s\S]*?)<\/\1>\s*<\/\3>/gi,
+      (match, oldTag, oldAttrs, newTag, newAttrs, listBody) => {
+        if (String(oldTag).toLowerCase() === String(newTag).toLowerCase()) {
+          return match;
+        }
+
+        return this.createStructuralListContainerDiff(
+          oldTag,
+          oldAttrs,
+          listBody,
+          newTag,
+          newAttrs,
+          listBody,
+        );
+      },
+    );
+  }
+
   /**
    * Consolidates fragmented diff tags for block elements like tables.
    * If an entire block (e.g., table) consists only of deletions or only of insertions,
    * it wraps the entire block in <del> or <ins> and removes internal diff tags.
    */
   private consolidateBlockDiffs(html: string): string {
-    const blocks = ["table", "ul", "ol", "blockquote", "div", "pre"];
+    const blocks = [
+      "table",
+      "ul",
+      "ol",
+      "dl",
+      "blockquote",
+      "div",
+      "h1",
+      "h2",
+      "h3",
+      "h4",
+      "h5",
+      "h6",
+    ];
     let result = html;
 
     blocks.forEach((tag) => {
@@ -1018,7 +1607,7 @@ export class MarkdownDiffProvider {
    */
   public getWebviewContent(
     diffHtml: string,
-    katexCssUri: string,
+    katexCssInline: string,
     mermaidJsUri: string,
     hljsLightCssUri: string,
     hljsDarkCssUri: string,
@@ -1037,24 +1626,28 @@ export class MarkdownDiffProvider {
       return text;
     };
 
-    const safeLeft = this.escapeHtml(leftLabel === "Original" ? t("Original") : leftLabel);
-    const safeRight = this.escapeHtml(rightLabel === "Modified" ? t("Modified") : rightLabel);
+    const safeLeft = this.escapeHtml(
+      leftLabel === "Original" ? t("Original") : leftLabel,
+    );
+    const safeRight = this.escapeHtml(
+      rightLabel === "Modified" ? t("Modified") : rightLabel,
+    );
 
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}'; img-src ${cspSource} https: data:; font-src ${cspSource};">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; base-uri 'none'; connect-src 'none'; form-action 'none'; style-src-elem ${cspSource} 'nonce-${nonce}'; style-src-attr 'unsafe-inline'; script-src 'nonce-${nonce}'; img-src ${cspSource} https: data:; font-src ${cspSource};">
     <title>${this.escapeHtml(t("Markdown Diff"))}</title>
-    <!-- KaTeX CSS -->
-    <link rel="stylesheet" href="${katexCssUri}">
+    <!-- KaTeX CSS (inlined with absolute font URIs for webview compatibility) -->
+    <style nonce="${nonce}">${katexCssInline}</style>
     <!-- Highlight.js CSS -->
     <link rel="stylesheet" href="${hljsLightCssUri}" media="(prefers-color-scheme: light)">
     <link rel="stylesheet" href="${hljsDarkCssUri}" media="(prefers-color-scheme: dark)">
     <!-- Mermaid JS -->
     <script nonce="${nonce}" src="${mermaidJsUri}"></script>
-    <style>
+    <style nonce="${nonce}">
         :root { /* VRT_THEME_VARS */ }
         html, body {
             height: 100%;
@@ -1065,17 +1658,31 @@ export class MarkdownDiffProvider {
             font-family: var(--vscode-font-family); 
             padding: 0; 
             margin: 0;
-            background-color: var(--vscode-editor-background);
-            color: var(--vscode-editor-foreground);
+            background-color: var(--markdown-surface-background);
+            color: var(--markdown-foreground);
             display: flex;
             flex-direction: column;
+          --markdown-surface-background: var(--vscode-editor-background, #1e1e1e);
+          --markdown-raised-background: var(--vscode-editorWidget-background, #252526);
+          --markdown-foreground: var(--vscode-foreground, var(--vscode-editor-foreground, #d4d4d4));
+          --markdown-base-font-size: 14px;
+          --markdown-base-line-height: 1.6;
+          --markdown-code-font-size: 13px;
+          --markdown-h1-size: 27px;
+          --markdown-h2-size: 20px;
+          --markdown-h3-size: 17px;
+          --markdown-h4-size: 15px;
+          --markdown-h5-size: 14px;
+          --markdown-h6-size: 12px;
+          --markdown-block-spacing: 0.6em;
         }
         /* Toolbar */
         .toolbar {
             display: flex;
             align-items: center;
             padding: 5px 10px;
-            background-color: var(--vscode-editor-background);
+          background-color: var(--markdown-surface-background);
+          color: var(--markdown-foreground);
             border-bottom: 1px solid var(--vscode-panel-border);
             flex-shrink: 0;
             gap: 10px;
@@ -1096,61 +1703,86 @@ export class MarkdownDiffProvider {
         }
 
         .header {
-            display: flex;
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+          gap: 0;
             height: 30px;
             flex-shrink: 0;
             border-bottom: 1px solid var(--vscode-panel-border);
-            background-color: var(--vscode-editor-background);
+          background-color: var(--markdown-surface-background);
         }
         .header-item {
-            flex: 1;
+          min-width: 0;
             padding: 5px 10px;
             font-weight: bold;
-            border-right: 1px solid var(--vscode-panel-border);
             display: flex;
             align-items: center;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
+          background-color: var(--markdown-surface-background);
+          color: var(--markdown-foreground);
+        }
+        .header-item + .header-item {
+          border-left: 1px solid var(--vscode-panel-border);
         }
         .container {
-            display: flex;
-            flex-direction: row;
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+          grid-template-rows: minmax(0, 1fr);
+          gap: 0;
             flex: 1;
-            flex-basis: 0; /* Important for nested scrolling */
             min-height: 0;
             overflow: hidden;
             width: 100%;
-            position: relative;
+          background-color: var(--markdown-surface-background);
         }
         .pane {
-            flex: 1;
             min-width: 0;
-            overflow-y: auto;
+          min-height: 0;
+          height: 100%;
+          max-height: 100%;
+          align-self: stretch;
+            overflow-y: scroll;
             overflow-x: auto;
+            scrollbar-gutter: stable both-edges;
             padding: 20px;
-            border-right: 1px solid var(--vscode-panel-border);
             box-sizing: border-box;
-            height: 100%;
             position: relative; /* Ensure offsetTop is relative to pane */
-            background-color: var(--vscode-editor-background);
-            color: var(--vscode-editor-foreground);
+          background-color: var(--markdown-surface-background);
+          color: var(--markdown-foreground);
+          font-weight: normal;
+          font-size: var(--markdown-base-font-size);
+          line-height: var(--markdown-base-line-height);
         }
-        .pane:last-child {
-            border-right: none;
+        .pane + .pane {
+          border-left: 1px solid var(--vscode-panel-border);
+        }
+        .pane-content {
+          position: relative;
+          color: inherit;
+        }
+        .pane-content > :first-child {
+          margin-top: 0;
+        }
+        .pane-content > :last-child {
+          margin-bottom: 0;
         }
         
         /* Inline Mode Styles */
         body.inline-mode .container {
+          display: flex;
             flex-direction: column;
+          gap: 0;
+          background-color: transparent;
         }
         body.inline-mode #left-pane {
             display: none !important;
         }
         body.inline-mode #right-pane {
-            flex: 1;
+          flex: 1 1 auto;
             width: 100%;
-            border-right: none;
+            max-width: 100%;
         }
         body.inline-mode .header {
             display: none !important; /* Hide Original/Modified header in inline */
@@ -1161,7 +1793,7 @@ export class MarkdownDiffProvider {
             display: inline; /* Make visible */
             background-color: rgba(248, 113, 113, 0.2); 
             text-decoration: line-through; /* Strikethrough for inline del */
-            border-bottom: 2px solid #ef4444;
+            border-bottom: 1px solid #ef4444;
             color: inherit;
             opacity: 0.8;
         }
@@ -1169,20 +1801,200 @@ export class MarkdownDiffProvider {
         body.inline-mode #right-pane ins {
             background-color: rgba(74, 222, 128, 0.2); 
             text-decoration: none; 
-            border-bottom: 2px solid #22c55e;
+            border-bottom: 1px solid #22c55e;
             color: inherit;
         }
 
         /* Scrollbar Styling */
         ::-webkit-scrollbar { width: 10px; height: 10px; }
+        ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: var(--vscode-scrollbarSlider-background); }
         ::-webkit-scrollbar-thumb:hover { background: var(--vscode-scrollbarSlider-hoverBackground); }
         ::-webkit-scrollbar-thumb:active { background: var(--vscode-scrollbarSlider-activeBackground); }
         
         /* Markdown Styles */
-        code { font-family: var(--vscode-editor-font-family); }
-        pre { background-color: var(--vscode-textBlockQuote-background); padding: 10px; }
-        img { max-width: 100%; }
+        p,
+        ul,
+        ol,
+        dl,
+        blockquote,
+        pre,
+        table,
+        hr,
+        .markdown-alert,
+        .katex-block,
+        .footnotes {
+          margin-top: 0;
+          margin-bottom: var(--markdown-block-spacing);
+        }
+        p {
+          font-weight: 400;
+        }
+        ul,
+        ol {
+          padding-left: 1.75em;
+        }
+        ul {
+          list-style-type: disc;
+        }
+        ol {
+          list-style-type: decimal;
+        }
+        ul,
+        ol,
+        li {
+          font-weight: 400;
+        }
+        li::marker {
+          font-weight: 400;
+          color: inherit;
+        }
+        li + li {
+          margin-top: 0.15em;
+        }
+        li, dt, dd {
+          overflow-wrap: break-word;
+          word-wrap: break-word;
+        }
+        li > p {
+          margin-top: 0.2em;
+          margin-bottom: 0.2em;
+        }
+        dt {
+          font-weight: 600;
+        }
+        dd {
+          margin-left: 1.5em;
+        }
+        code {
+          font-family: var(--vscode-editor-font-family);
+          font-size: var(--markdown-code-font-size);
+          overflow-wrap: break-word;
+          background-color: var(--vscode-textCodeBlock-background, var(--markdown-raised-background));
+          padding: 0.15em 0.35em;
+          border-radius: 3px;
+        }
+        pre code {
+          font-size: inherit;
+          overflow-wrap: normal;
+          background-color: transparent;
+          padding: 0;
+          border-radius: 0;
+        }
+        pre {
+          background-color: var(--vscode-textCodeBlock-background, var(--markdown-raised-background));
+          padding: 8px 10px;
+          font-size: var(--markdown-code-font-size);
+          line-height: 1.5;
+          overflow-x: auto;
+          width: 100%;
+          max-width: 100%;
+          min-width: 0;
+          box-sizing: border-box;
+          border: 1px solid var(--vscode-panel-border);
+          border-radius: 4px;
+        }
+        .katex-block {
+          background-color: var(--vscode-textCodeBlock-background, var(--markdown-raised-background));
+          padding: 8px 10px;
+          overflow-x: auto;
+          overflow-y: hidden;
+          width: 100%;
+          max-width: 100%;
+          min-width: 0;
+          box-sizing: border-box;
+          border: 1px solid var(--vscode-panel-border);
+          border-radius: 4px;
+        }
+        .katex-block .katex-display {
+          margin: 0;
+          min-width: max-content;
+          padding: 0.15em 0;
+        }
+        .katex-block .katex {
+          max-width: none;
+        }
+        h1, h2, h3, h4, h5, h6 {
+          overflow-wrap: break-word;
+          display: block;
+          width: auto;
+          max-width: 100%;
+          box-sizing: border-box;
+          line-height: 1.3;
+          font-weight: 600;
+          margin-top: 1em;
+          margin-bottom: 0.3em;
+          color: var(--markdown-foreground);
+        }
+        .heading-prefix {
+          display: inline-block;
+          white-space: nowrap;
+          vertical-align: baseline;
+        }
+        h1, h2 {
+          padding-bottom: 0.25em;
+          border-bottom: 1px solid var(--vscode-panel-border);
+        }
+        h1 { font-size: var(--markdown-h1-size); }
+        h2 { font-size: var(--markdown-h2-size); }
+        h3 { font-size: var(--markdown-h3-size); }
+        h4 { font-size: var(--markdown-h4-size); }
+        h5 { font-size: var(--markdown-h5-size); }
+        h6 {
+          font-size: var(--markdown-h6-size);
+          color: var(--vscode-descriptionForeground);
+        }
+        /* Remove noisy bottom borders for inline diff markers inside code blocks */
+        pre ins,
+        pre del {
+          border-bottom: none !important;
+        }
+        img {
+          max-width: 100%;
+          height: auto;
+        }
+        p > img:only-child {
+          display: block;
+        }
+        table {
+          width: max-content;
+          min-width: 100%;
+          max-width: 100%;
+          border-collapse: collapse;
+          line-height: 1.5;
+          background-color: var(--vscode-editor-background);
+        }
+        th,
+        td {
+          border: 1px solid var(--vscode-panel-border);
+          padding: 0.5em 0.75em;
+          text-align: left;
+          vertical-align: top;
+          line-height: 1.5;
+        }
+        th {
+          font-weight: 600;
+          background-color: var(--vscode-textBlockQuote-background);
+        }
+        tbody tr:nth-child(even) {
+          background-color: rgba(127, 127, 127, 0.08);
+        }
+        caption {
+          caption-side: top;
+          margin-bottom: 0.5em;
+          text-align: left;
+          font-weight: 600;
+        }
+        hr {
+          border: none;
+          border-top: 1px solid var(--vscode-panel-border);
+          margin: 1em 0;
+        }
+        .toolbar-status {
+          margin-left: auto;
+          font-size: 11px;
+          opacity: 0.7;
+        }
 
         /* Split View Coloring Strategy (Default) */
         /* Left Pane (Original): Hide insertions, show deletions in Red */
@@ -1190,8 +2002,16 @@ export class MarkdownDiffProvider {
         body:not(.inline-mode) #left-pane del { 
             background-color: rgba(248, 113, 113, 0.2); 
             text-decoration: none; 
-            border-bottom: 2px solid #ef4444;
+            border-bottom: 1px solid #ef4444;
             color: inherit;
+        }
+        body:not(.inline-mode) #left-pane h1 del,
+        body:not(.inline-mode) #left-pane h2 del,
+        body:not(.inline-mode) #left-pane h3 del,
+        body:not(.inline-mode) #left-pane h4 del,
+        body:not(.inline-mode) #left-pane h5 del,
+        body:not(.inline-mode) #left-pane h6 del {
+            border-bottom: none;
         }
 
         /* Right Pane (Modified): Hide deletions, show insertions in Green */
@@ -1199,8 +2019,16 @@ export class MarkdownDiffProvider {
         body:not(.inline-mode) #right-pane ins {
             background-color: rgba(74, 222, 128, 0.2); 
             text-decoration: none; 
-            border-bottom: 2px solid #22c55e;
+            border-bottom: 1px solid #22c55e;
             color: inherit;
+        }
+        body:not(.inline-mode) #right-pane h1 ins,
+        body:not(.inline-mode) #right-pane h2 ins,
+        body:not(.inline-mode) #right-pane h3 ins,
+        body:not(.inline-mode) #right-pane h4 ins,
+        body:not(.inline-mode) #right-pane h5 ins,
+        body:not(.inline-mode) #right-pane h6 ins {
+            border-bottom: none;
         }
 
         /* Full Document Diff Styling (for comparisons with empty files) */
@@ -1210,11 +2038,11 @@ export class MarkdownDiffProvider {
         }
         ins.diffins {
             background-color: rgba(74, 222, 128, 0.2); 
-            border-bottom: 2px solid #22c55e;
+            border-bottom: 1px solid #22c55e;
         }
         del.diffdel {
             background-color: rgba(248, 113, 113, 0.2); 
-            border-bottom: 2px solid #ef4444;
+            border-bottom: 1px solid #ef4444;
         }
 
         /* Ensure diff styling is visible for tokenized blocks with their own backgrounds (Alerts) */
@@ -1222,7 +2050,7 @@ export class MarkdownDiffProvider {
             position: relative; /* For pseudo-element overlay */
         }
         ins.diffins .markdown-alert {
-            border: 2px solid #22c55e;
+            border: 1px solid #22c55e;
         }
         ins.diffins .markdown-alert::after {
             content: "";
@@ -1232,7 +2060,7 @@ export class MarkdownDiffProvider {
             pointer-events: none;
         }
         del.diffdel .markdown-alert {
-            border: 2px solid #ef4444;
+            border: 1px solid #ef4444;
         }
         del.diffdel .markdown-alert::after {
             content: "";
@@ -1260,6 +2088,14 @@ export class MarkdownDiffProvider {
             margin-left: -2.5em; /* Pull box left to cover marker area */
             padding-left: 2.5em; /* Push content back to alignment */
             /* Ensure the box spans the full width including the negative margin area */
+        }
+
+        /* Force block display for ins/del wrapping block-level headings */
+        ins:has(> h1, > h2, > h3, > h4, > h5, > h6),
+        del:has(> h1, > h2, > h3, > h4, > h5, > h6) {
+            display: block;
+          width: auto;
+          max-width: 100%;
         }
 
         /* Task Lists */
@@ -1298,11 +2134,13 @@ export class MarkdownDiffProvider {
         /* Block-Level Diffs (Tables, Lists, Blockquotes) */
         del.diffdel.diff-block, ins.diffins.diff-block {
             display: block;
-            border: 4px solid; /* Full border to match Images/Mermaid */
-            padding: 10px;
-            margin: 1em 0;
-            width: fit-content; 
-            min-width: 100%;
+            border: 1px solid;
+            border-radius: 4px;
+            padding: 8px 10px;
+            margin: 0.5em 0;
+          width: 100%;
+          max-width: 100%;
+          min-width: 0;
             box-sizing: border-box;
         }
         del.diffdel.diff-block {
@@ -1314,8 +2152,87 @@ export class MarkdownDiffProvider {
             border-color: rgba(34, 197, 94, 0.6);
         }
 
+        /* Structural list-container swaps (ol <-> ul) should highlight marker changes,
+           not make unchanged list text look deleted/inserted. */
+        del.diff-list-container-change,
+        ins.diff-list-container-change {
+          background-color: transparent !important;
+          border: none !important;
+          text-decoration: none !important;
+          color: inherit !important;
+          opacity: 1 !important;
+          padding: 0 !important;
+        }
+        del.diff-list-container-change > ol,
+        del.diff-list-container-change > ul,
+        del.diff-list-container-change > dl,
+        ins.diff-list-container-change > ol,
+        ins.diff-list-container-change > ul,
+        ins.diff-list-container-change > dl {
+          margin-top: 0;
+          margin-bottom: 0;
+          background-color: transparent;
+          color: inherit;
+          box-sizing: border-box;
+          padding-top: 0.15em;
+          padding-bottom: 0.15em;
+        }
+        del.diff-list-container-change > ol,
+        del.diff-list-container-change > ul,
+        ins.diff-list-container-change > ol,
+        ins.diff-list-container-change > ul {
+          padding-left: calc(1.75em - 3px + 0.55em);
+        }
+        del.diff-list-container-change > dl,
+        ins.diff-list-container-change > dl {
+          padding-left: 0.85em;
+        }
+        del.diff-list-container-change li,
+        del.diff-list-container-change li > p,
+        del.diff-list-container-change dt,
+        del.diff-list-container-change dd,
+        ins.diff-list-container-change li,
+        ins.diff-list-container-change li > p,
+        ins.diff-list-container-change dt,
+        ins.diff-list-container-change dd {
+          color: inherit;
+          background-color: transparent;
+          text-decoration: none;
+        }
+        del.diff-list-container-change li::marker,
+        ins.diff-list-container-change li::marker {
+          font-weight: 600;
+        }
+        body:not(.inline-mode) #left-pane del.diff-list-container-change > ol,
+        body:not(.inline-mode) #left-pane del.diff-list-container-change > ul,
+        body:not(.inline-mode) #left-pane del.diff-list-container-change > dl,
+        body.inline-mode #right-pane del.diff-list-container-change > ol,
+        body.inline-mode #right-pane del.diff-list-container-change > ul,
+        body.inline-mode #right-pane del.diff-list-container-change > dl {
+          border-left: 3px solid rgba(239, 68, 68, 0.65);
+        }
+        body:not(.inline-mode) #right-pane ins.diff-list-container-change > ol,
+        body:not(.inline-mode) #right-pane ins.diff-list-container-change > ul,
+        body:not(.inline-mode) #right-pane ins.diff-list-container-change > dl,
+        body.inline-mode #right-pane ins.diff-list-container-change > ol,
+        body.inline-mode #right-pane ins.diff-list-container-change > ul,
+        body.inline-mode #right-pane ins.diff-list-container-change > dl {
+          border-left: 3px solid rgba(34, 197, 94, 0.65);
+        }
+        body:not(.inline-mode) #left-pane del.diff-list-container-change li::marker,
+        body.inline-mode #right-pane del.diff-list-container-change li::marker {
+          color: #ef4444;
+        }
+        body:not(.inline-mode) #right-pane ins.diff-list-container-change li::marker,
+        body.inline-mode #right-pane ins.diff-list-container-change li::marker {
+          color: #22c55e;
+        }
+
         /* Ghost Element Hiding */
         .ghost-hidden { display: none !important; }
+        /* CSS safety net: hide ghost list-item bullets added by markGhostListItems() */
+        body:not(.inline-mode) #left-pane  li[data-all-inserted] { display: none !important; }
+        body:not(.inline-mode) #right-pane li[data-all-deleted]  { display: none !important; }
 
         /* Folded Region Styles */
         .folded-region {
@@ -1345,7 +2262,8 @@ export class MarkdownDiffProvider {
         .frontmatter-diff table {
             width: 100%;
             border-collapse: collapse;
-            font-size: 13px;
+          font-size: 12px;
+          line-height: 1.5;
         }
         .frontmatter-diff th, .frontmatter-diff td {
             border: 1px solid var(--vscode-textBlockQuote-border);
@@ -1385,34 +2303,52 @@ export class MarkdownDiffProvider {
         .mermaid.selected-change, 
         .katex-block.selected-change {
             background-color: rgba(255, 235, 59, 0.2) !important; /* Yellow tint for focus */
-            border: 4px solid rgba(255, 165, 0, 0.9) !important;   /* Thick Orange border for focus */
-            box-shadow: 0 0 20px rgba(255, 165, 0, 0.6) !important; /* Glow */
+          border: 1px solid rgba(255, 165, 0, 0.9) !important;
+          box-shadow: 0 0 0 2px rgba(255, 165, 0, 0.45) !important;
             overflow: visible !important;
             display: block; 
         }
 
         /* Image Focus Style (same as Mermaid) */
         .selected-change img {
-            border: 4px solid rgba(255, 165, 0, 0.9) !important;   /* Thick Orange border for focus */
-            box-shadow: 0 0 20px rgba(255, 165, 0, 0.6) !important; /* Glow */
+          border: 1px solid rgba(255, 165, 0, 0.9) !important;
+          box-shadow: 0 0 0 2px rgba(255, 165, 0, 0.45) !important;
         }
 
-        /* Persistent Visibility for UNSELECTED complex changes */
-        /* Insertions (Green) */
-        ins .mermaid, ins .katex-block, ins svg {
-            border: 4px solid rgba(34, 197, 94, 0.6); /* Unified 4px border */
-            background-color: rgba(34, 197, 94, 0.1);  /* Unified 0.1 bg alpha */
-            display: block;
-            margin: 1em 0;
-            padding: 10px;
+        /* Complex block wrappers should not draw their own inline highlight;
+           the inner block container owns the border/background styling. */
+        ins.diffins:has(> .mermaid),
+        del.diffdel:has(> .mermaid),
+        ins.diffins:has(> .katex-block),
+        del.diffdel:has(> .katex-block) {
+          display: block;
+          border: none !important;
+          background-color: transparent !important;
+          padding: 0 !important;
+          margin: 0.5em 0 !important;
+          text-decoration: none !important;
         }
-        /* Deletions (Red) */
-        del .mermaid, del .katex-block, del svg {
-            border: 4px solid rgba(239, 68, 68, 0.6); /* Unified 4px border */
-            background-color: rgba(239, 68, 68, 0.1);  /* Unified 0.1 bg alpha */
+
+        /* Persistent Visibility for unselected complex changes */
+        ins.diffins > .mermaid,
+        ins.diffins > .katex-block {
+          border: 1px solid rgba(34, 197, 94, 0.6);
+          background-color: rgba(34, 197, 94, 0.1);
             display: block;
-            margin: 1em 0;
-            padding: 10px;
+          margin: 0;
+          padding: 8px 10px;
+          border-radius: 4px;
+          box-sizing: border-box;
+        }
+        del.diffdel > .mermaid,
+        del.diffdel > .katex-block {
+          border: 1px solid rgba(239, 68, 68, 0.6);
+          background-color: rgba(239, 68, 68, 0.1);
+            display: block;
+          margin: 0;
+          padding: 8px 10px;
+          border-radius: 4px;
+          box-sizing: border-box;
             opacity: 0.8; /* Persistent fade for deleted content */
         }
         
@@ -1438,7 +2374,7 @@ export class MarkdownDiffProvider {
             padding: 8px 16px;
             margin-bottom: 16px;
             border-left: 0.25em solid;
-            background-color: var(--vscode-textBlockQuote-background);
+          background-color: var(--markdown-raised-background);
         }
 
         /* Image Diff Styles */
@@ -1517,7 +2453,7 @@ export class MarkdownDiffProvider {
 <body class="VRT_LAYOUT_CLASS">
     <div class="toolbar">
         <!-- Buttons removed, moved to VS Code View Actions -->
-        <span id="status-msg" style="margin-left: auto; font-size: 11px; opacity: 0.7;"></span>
+    <span id="status-msg" class="toolbar-status"></span>
     </div>
     <div class="header">
         <div class="header-item" title="${safeLeft}">${safeLeft}</div>
@@ -1525,10 +2461,14 @@ export class MarkdownDiffProvider {
     </div>
     <div class="container">
         <div class="pane" id="left-pane">
-            ${diffHtml}
+        <div class="pane-content" id="left-content">
+          ${diffHtml}
+        </div>
         </div>
         <div class="pane" id="right-pane">
-            ${diffHtml}
+        <div class="pane-content" id="right-content">
+          ${diffHtml}
+        </div>
         </div>
     </div>
     <script nonce="${nonce}">
@@ -1544,7 +2484,177 @@ export class MarkdownDiffProvider {
         const vscode = acquireVsCodeApi();
         const leftPane = document.getElementById('left-pane');
         const rightPane = document.getElementById('right-pane');
+        const leftContent = document.getElementById('left-content');
+        const rightContent = document.getElementById('right-content');
         const statusMsg = document.getElementById('status-msg');
+
+        const runtimeDiagnostics = {
+          events: [],
+          maxEvents: 40,
+          hasReported: false,
+          lastSignature: '',
+          reportId: 0,
+        };
+
+        const noteRuntimeEvent = (name, extra = {}) => {
+          runtimeDiagnostics.events.push({
+            time: Math.round(performance.now()),
+            name,
+            extra,
+          });
+
+          if (runtimeDiagnostics.events.length > runtimeDiagnostics.maxEvents) {
+            runtimeDiagnostics.events.shift();
+          }
+        };
+
+        const snapshotPaneMetrics = (name, pane, content) => {
+          const style = window.getComputedStyle(pane);
+          return {
+            name,
+            clientHeight: pane.clientHeight,
+            scrollHeight: pane.scrollHeight,
+            clientWidth: pane.clientWidth,
+            scrollWidth: pane.scrollWidth,
+            scrollTop: pane.scrollTop,
+            offsetWidth: pane.offsetWidth,
+            offsetHeight: pane.offsetHeight,
+            contentHeight: Math.round(content.getBoundingClientRect().height),
+            contentWidth: Math.round(content.getBoundingClientRect().width),
+            scrollbarWidth: pane.offsetWidth - pane.clientWidth,
+            overflowX: style.overflowX,
+            overflowY: style.overflowY,
+            verticalScrollNeeded: pane.scrollHeight > pane.clientHeight + 2,
+            horizontalScrollNeeded: pane.scrollWidth > pane.clientWidth + 2,
+          };
+        };
+
+        const snapshotViewportMetrics = () => {
+          const documentElement = document.documentElement;
+          const container = document.querySelector('.container');
+          return {
+            innerHeight: window.innerHeight,
+            innerWidth: window.innerWidth,
+            devicePixelRatio: window.devicePixelRatio,
+            documentClientHeight: documentElement.clientHeight,
+            documentScrollHeight: documentElement.scrollHeight,
+            documentClientWidth: documentElement.clientWidth,
+            documentScrollWidth: documentElement.scrollWidth,
+            bodyClientHeight: document.body.clientHeight,
+            bodyScrollHeight: document.body.scrollHeight,
+            bodyClientWidth: document.body.clientWidth,
+            bodyScrollWidth: document.body.scrollWidth,
+            containerClientHeight: container ? container.clientHeight : null,
+            containerScrollHeight: container ? container.scrollHeight : null,
+            containerClientWidth: container ? container.clientWidth : null,
+            containerScrollWidth: container ? container.scrollWidth : null,
+          };
+        };
+
+        const emitRuntimeDiagnostics = (reason, extra = {}, options = {}) => {
+          const metrics = {
+            inline: isInline,
+            folded: isFolded,
+            left: snapshotPaneMetrics('left', leftPane, leftContent),
+            right: snapshotPaneMetrics('right', rightPane, rightContent),
+            viewport: snapshotViewportMetrics(),
+          };
+
+          const verticalScrollNeeded =
+            metrics.left.verticalScrollNeeded || metrics.right.verticalScrollNeeded;
+          const suspiciousNoScroll =
+            !verticalScrollNeeded &&
+            (
+              metrics.left.clientHeight === 0 ||
+              metrics.right.clientHeight === 0 ||
+              metrics.left.contentHeight > metrics.left.clientHeight + 2 ||
+              metrics.right.contentHeight > metrics.right.clientHeight + 2 ||
+              metrics.viewport.documentScrollHeight > metrics.viewport.documentClientHeight + 2 ||
+              metrics.viewport.bodyScrollHeight > metrics.viewport.bodyClientHeight + 2
+            );
+          const shouldEmit =
+            options.force ||
+            !runtimeDiagnostics.hasReported ||
+            verticalScrollNeeded ||
+            suspiciousNoScroll;
+
+          if (!shouldEmit) {
+            return;
+          }
+
+          const signature = JSON.stringify({
+            reason,
+            inline: metrics.inline,
+            folded: metrics.folded,
+            left: {
+              clientHeight: metrics.left.clientHeight,
+              scrollHeight: metrics.left.scrollHeight,
+              scrollbarWidth: metrics.left.scrollbarWidth,
+            },
+            right: {
+              clientHeight: metrics.right.clientHeight,
+              scrollHeight: metrics.right.scrollHeight,
+              scrollbarWidth: metrics.right.scrollbarWidth,
+            },
+            viewport: {
+              documentClientHeight: metrics.viewport.documentClientHeight,
+              documentScrollHeight: metrics.viewport.documentScrollHeight,
+              bodyClientHeight: metrics.viewport.bodyClientHeight,
+              bodyScrollHeight: metrics.viewport.bodyScrollHeight,
+              containerClientHeight: metrics.viewport.containerClientHeight,
+              containerScrollHeight: metrics.viewport.containerScrollHeight,
+            },
+            flags: {
+              verticalScrollNeeded,
+              suspiciousNoScroll,
+            },
+          });
+
+          if (runtimeDiagnostics.lastSignature === signature) {
+            return;
+          }
+
+          runtimeDiagnostics.hasReported = true;
+          runtimeDiagnostics.lastSignature = signature;
+          runtimeDiagnostics.reportId += 1;
+          vscode.postMessage({
+            command: 'runtimeDiagnostics',
+            payload: {
+              reason,
+              reportId: runtimeDiagnostics.reportId,
+              metrics,
+              recentEvents: runtimeDiagnostics.events.slice(-20),
+              extra,
+            },
+          });
+        };
+
+        window.addEventListener('error', event => {
+          noteRuntimeEvent('window-error', {
+            message: event.message,
+            filename: event.filename,
+            line: event.lineno,
+            column: event.colno,
+          });
+          emitRuntimeDiagnostics(
+            'window-error',
+            {
+              message: event.message,
+              filename: event.filename,
+              line: event.lineno,
+              column: event.colno,
+            },
+            { force: true },
+          );
+        });
+
+        window.addEventListener('unhandledrejection', event => {
+          const reason = event.reason instanceof Error
+            ? { message: event.reason.message, stack: event.reason.stack }
+            : { value: String(event.reason) };
+          noteRuntimeEvent('unhandled-rejection', reason);
+          emitRuntimeDiagnostics('unhandled-rejection', reason, { force: true });
+        });
 
         let isInline = false;
         let isFolded = false;
@@ -1554,13 +2664,16 @@ export class MarkdownDiffProvider {
 
         const toggleInline = () => {
             isInline = !isInline;
+          noteRuntimeEvent('toggle-inline', { isInline });
             if (isInline) {
                 document.body.classList.add('inline-mode');
                 resetGhosts(); // Inline mode shows everything
                 // Fix Mermaid diagrams that were hidden
-                setTimeout(() => {
-                    fixMermaid(rightPane);
-                }, 50);
+            requestAnimationFrame(() => {
+              requestAnimationFrame(() => {
+                fixMermaid(rightContent);
+              });
+            });
             } else {
                 document.body.classList.remove('inline-mode');
                 // Defer cleanup to ensure class removal processed? No, sync is fine.
@@ -1568,7 +2681,7 @@ export class MarkdownDiffProvider {
                 cleanupGhosts();
             }
             // Recalculate changes because visibility changed
-            collectChanges(); 
+            scheduleLayoutRefresh();
         };
         
         /**
@@ -1577,6 +2690,8 @@ export class MarkdownDiffProvider {
          */
         const fixMermaid = (container) => {
              const mermaids = container.querySelectorAll('.mermaid[data-original-content]');
+             const renderPasses = [];
+             noteRuntimeEvent('fix-mermaid', { count: mermaids.length });
              mermaids.forEach(el => {
                  // Only fix if it looks broken (e.g. small height) or just force it?
                  // Force restoration is safer for "hidden -> visible" transitions.
@@ -1588,17 +2703,24 @@ export class MarkdownDiffProvider {
                      // But we should only do this if it's actually visible now.
                      if (el.offsetParent !== null) { // is visible
                          el.removeAttribute('data-processed'); // Mermaid marker
-                         el.innerHTML = original; // Restore source
-                         mermaid.init(undefined, el);
+                       el.textContent = original; // Restore source as text, not HTML
+                         renderPasses.push(
+                           Promise.resolve().then(() => mermaid.init(undefined, el)),
+                         );
                      }
                  }
              });
+
+             if (renderPasses.length > 0) {
+               Promise.allSettled(renderPasses).finally(() => scheduleAsyncLayoutRefresh());
+             }
         };
         
         const toggleFold = () => {
              isFolded = !isFolded;
-             const c1 = applyFolding(leftPane, isFolded, 'original');
-             const c2 = applyFolding(rightPane, isFolded, 'modified');
+             noteRuntimeEvent('toggle-fold', { isFolded });
+             const c1 = applyFolding(leftContent, isFolded, 'original');
+             const c2 = applyFolding(rightContent, isFolded, 'modified');
              
              if (isFolded) {
                  statusMsg.textContent = t("Folded {0} (Original) / {1} (Modified) blocks", c1, c2);
@@ -1606,7 +2728,7 @@ export class MarkdownDiffProvider {
 
                  statusMsg.textContent = '';
              }
-             collectChanges(); // Re-collect visible changes
+               scheduleAsyncLayoutRefresh();
         };
 
         function applyFolding(pane, enable, paneType) {
@@ -1821,12 +2943,12 @@ export class MarkdownDiffProvider {
                 let all = [];
 
                 if (isInline) {
-                    const changes = rightPane.querySelectorAll('ins, del, .fm-new, .fm-old');
+                  const changes = rightContent.querySelectorAll('ins, del, .fm-new, .fm-old');
                     all = processNodeList(changes, rightPane);
                 } else {
                     // Split Mode
-                    const leftDels = leftPane.querySelectorAll('del, .fm-old');
-                    const rightIns = rightPane.querySelectorAll('ins, .fm-new');
+                  const leftDels = leftContent.querySelectorAll('del, .fm-old');
+                  const rightIns = rightContent.querySelectorAll('ins, .fm-new');
                     
                     all = [
                         ...processNodeList(leftDels, leftPane),
@@ -1911,31 +3033,189 @@ export class MarkdownDiffProvider {
             }
         }
 
-        // --- Layout Stability & ResizeObserver ---
+        // --- Layout Stability ---
         let resizeTimeout;
+        let layoutRefreshTimeout;
+        let layoutStabilizeFrame = 0;
+        let layoutRefreshQueued = false;
+        let layoutRefreshRunning = false;
+        let asyncLayoutRefreshShortTimeout;
+        let asyncLayoutRefreshLongTimeout;
+        const flushPaneLayout = (pane) => {
+          void pane.scrollHeight;
+          void pane.scrollWidth;
+          pane.getBoundingClientRect();
+        };
+        const measureLayout = () => {
+          return [
+            leftPane.scrollHeight,
+            leftPane.clientHeight,
+            leftPane.scrollWidth,
+            leftPane.clientWidth,
+            leftContent.scrollHeight,
+            leftContent.scrollWidth,
+            rightPane.scrollHeight,
+            rightPane.clientHeight,
+            rightPane.scrollWidth,
+            rightPane.clientWidth,
+            rightContent.scrollHeight,
+            rightContent.scrollWidth,
+            document.documentElement.clientHeight,
+            document.documentElement.clientWidth,
+          ].join(':');
+        };
+        const refreshGhostLayout = () => {
+          if (!isInline) {
+            cleanupGhosts();
+          }
+        };
+        const refreshLayout = () => {
+          flushPaneLayout(leftPane);
+          flushPaneLayout(rightPane);
+          collectChanges();
+        };
+        const stabilizeLayout = () => {
+          if (layoutRefreshRunning) {
+            layoutRefreshQueued = true;
+            noteRuntimeEvent('stabilize-queued');
+            return;
+          }
+
+          layoutRefreshRunning = true;
+          layoutRefreshQueued = false;
+          noteRuntimeEvent('stabilize-start');
+
+          flushPaneLayout(leftContent);
+          if (layoutStabilizeFrame) {
+          flushPaneLayout(rightContent);
+            cancelAnimationFrame(layoutStabilizeFrame);
+            layoutStabilizeFrame = 0;
+          }
+
+          let stableFrames = 0;
+          let remainingFrames = 24;
+          let previousMetrics = '';
+
+          const step = () => {
+            refreshLayout();
+            const metrics = measureLayout();
+            if (metrics === previousMetrics) {
+              stableFrames += 1;
+            } else {
+              previousMetrics = metrics;
+              stableFrames = 0;
+            }
+
+            remainingFrames -= 1;
+            if (stableFrames >= 2 || remainingFrames <= 0) {
+              layoutStabilizeFrame = 0;
+              layoutRefreshRunning = false;
+              noteRuntimeEvent('stabilize-complete', {
+                stableFrames,
+                remainingFrames,
+              });
+              emitRuntimeDiagnostics('stabilize-complete', {
+                stableFrames,
+                remainingFrames,
+              });
+              if (layoutRefreshQueued) {
+                layoutRefreshQueued = false;
+                stabilizeLayout();
+              }
+              return;
+            }
+
+            layoutStabilizeFrame = requestAnimationFrame(step);
+          };
+
+          layoutStabilizeFrame = requestAnimationFrame(step);
+        };
+        const scheduleLayoutRefresh = (delay = 0) => {
+          clearTimeout(layoutRefreshTimeout);
+          noteRuntimeEvent('schedule-layout-refresh', { delay });
+          layoutRefreshTimeout = setTimeout(() => {
+            stabilizeLayout();
+          }, delay);
+        };
+        const scheduleAsyncLayoutRefresh = () => {
+          noteRuntimeEvent('schedule-async-layout-refresh');
+          refreshGhostLayout();
+          scheduleLayoutRefresh();
+
+          clearTimeout(asyncLayoutRefreshShortTimeout);
+          clearTimeout(asyncLayoutRefreshLongTimeout);
+
+          asyncLayoutRefreshShortTimeout = setTimeout(() => {
+            refreshGhostLayout();
+            scheduleLayoutRefresh();
+          }, 180);
+          asyncLayoutRefreshLongTimeout = setTimeout(() => {
+            refreshGhostLayout();
+            scheduleLayoutRefresh();
+          }, 700);
+        };
         const onResize = () => {
-            clearTimeout(resizeTimeout);
-            resizeTimeout = setTimeout(() => {
-                collectChanges();
-            }, 200);
+          clearTimeout(resizeTimeout);
+          resizeTimeout = setTimeout(() => {
+            scheduleLayoutRefresh();
+          }, 120);
         };
 
         if (window.ResizeObserver) {
-            const ro = new ResizeObserver(onResize);
-            ro.observe(leftPane);
-            ro.observe(rightPane);
-            // Also observe body to catch general layout shifts?
-            ro.observe(document.body);
-        } else {
-            window.addEventListener('resize', onResize);
+          const contentHeights = new WeakMap();
+          const contentResizeObserver = new ResizeObserver((entries) => {
+            const heightChanged = entries.some((entry) => {
+              const nextHeight = entry.contentRect.height;
+              const previousHeight = contentHeights.get(entry.target);
+              contentHeights.set(entry.target, nextHeight);
+              return previousHeight === undefined || Math.abs(previousHeight - nextHeight) > 0.5;
+            });
+
+            if (heightChanged) {
+              noteRuntimeEvent('content-resize', { entries: entries.length });
+              scheduleAsyncLayoutRefresh();
+            }
+          });
+          contentResizeObserver.observe(leftContent);
+          contentResizeObserver.observe(rightContent);
         }
-        
-        // Retries for image loading
-        window.onload = () => {
-            setTimeout(collectChanges, 100);
-            setTimeout(collectChanges, 500);
-            setTimeout(collectChanges, 1500); // Late load safety
-        };
+
+        window.addEventListener('resize', onResize);
+
+        const contentObserver = new MutationObserver((mutations) => {
+          if (
+            mutations.some(
+              (mutation) =>
+                (mutation.type === 'childList' &&
+                  (mutation.addedNodes.length > 0 || mutation.removedNodes.length > 0)) ||
+                mutation.type === 'attributes',
+            )
+          ) {
+            noteRuntimeEvent('content-mutation', { count: mutations.length });
+            scheduleLayoutRefresh();
+          }
+        });
+        contentObserver.observe(leftContent, {
+          attributes: true,
+          attributeFilter: ['data-processed', 'height', 'src', 'viewBox', 'width'],
+          childList: true,
+          subtree: true,
+        });
+        contentObserver.observe(rightContent, {
+          attributes: true,
+          attributeFilter: ['data-processed', 'height', 'src', 'viewBox', 'width'],
+          childList: true,
+          subtree: true,
+        });
+
+        window.addEventListener('load', () => {
+          noteRuntimeEvent('window-load');
+          scheduleAsyncLayoutRefresh();
+        });
+        window.setTimeout(() => {
+          noteRuntimeEvent('startup-watchdog');
+          emitRuntimeDiagnostics('startup-watchdog', { timeoutMs: 1500 }, { force: true });
+        }, 1500);
 
         function scrollToChange(index) {
             if (index < 0 || index >= changeElements.length) return;
@@ -1976,6 +3256,17 @@ export class MarkdownDiffProvider {
             const targetScrollTop = elTop - (paneHeight / 2) + (elHeight / 2);
             
             targetPane.scrollTop = Math.max(0, targetScrollTop);
+
+            // Sync the other pane proportionally to keep side-by-side aligned
+            if (!isInline) {
+                const otherPane = targetPane === leftPane ? rightPane : leftPane;
+                const sourceMax = targetPane.scrollHeight - targetPane.clientHeight;
+                const otherMax = otherPane.scrollHeight - otherPane.clientHeight;
+                if (sourceMax > 0 && otherMax > 0) {
+                    const pct = targetPane.scrollTop / sourceMax;
+                    otherPane.scrollTop = pct * otherMax;
+                }
+            }
         }
 
         function goNext() {
@@ -2019,22 +3310,40 @@ export class MarkdownDiffProvider {
             
             const sourceMax = sourcePane.scrollHeight - sourcePane.clientHeight;
             const targetMax = targetPane.scrollHeight - targetPane.clientHeight;
+          const sourceHorizontalMax = sourcePane.scrollWidth - sourcePane.clientWidth;
+          const targetHorizontalMax = targetPane.scrollWidth - targetPane.clientWidth;
 
-            if (sourceMax <= 0 || targetMax <= 0) return;
-
+          if (sourceMax > 0 && targetMax > 0) {
             let targetScrollTop = 0;
             // Larger 2px margin for subpixel snapping
             if (sourcePane.scrollTop <= 2) {
-                targetScrollTop = 0;
+              targetScrollTop = 0;
             } else if (sourcePane.scrollTop >= sourceMax - 2) {
-                targetScrollTop = targetMax;
+              targetScrollTop = targetMax;
             } else {
-                const percentage = sourcePane.scrollTop / sourceMax;
-                targetScrollTop = percentage * targetMax;
+              const percentage = sourcePane.scrollTop / sourceMax;
+              targetScrollTop = percentage * targetMax;
             }
-            
+                
             if (Math.abs(targetPane.scrollTop - targetScrollTop) > 0.5) {
-                targetPane.scrollTop = targetScrollTop;
+              targetPane.scrollTop = targetScrollTop;
+            }
+            }
+
+          if (sourceHorizontalMax > 0 && targetHorizontalMax > 0) {
+            let targetScrollLeft = 0;
+            if (sourcePane.scrollLeft <= 2) {
+              targetScrollLeft = 0;
+            } else if (sourcePane.scrollLeft >= sourceHorizontalMax - 2) {
+              targetScrollLeft = targetHorizontalMax;
+            } else {
+              const percentage = sourcePane.scrollLeft / sourceHorizontalMax;
+              targetScrollLeft = percentage * targetHorizontalMax;
+            }
+
+            if (Math.abs(targetPane.scrollLeft - targetScrollLeft) > 0.5) {
+              targetPane.scrollLeft = targetScrollLeft;
+            }
             }
         };
 
@@ -2093,15 +3402,16 @@ export class MarkdownDiffProvider {
              resetGhosts();
              if (document.body.classList.contains('inline-mode')) return;
 
-             const leftPane = document.getElementById('left-pane');
-             const rightPane = document.getElementById('right-pane');
+             const leftContent = document.getElementById('left-content');
+             const rightContent = document.getElementById('right-content');
 
-             hideGhostsInPane(leftPane, 'INS');
-             hideGhostsInPane(rightPane, 'DEL');
+             hideGhostsInPane(leftContent, 'INS');
+             hideGhostsInPane(rightContent, 'DEL');
              
-             // Extra cleanup for complex blocks
-             // Only for Left Pane (Original) to hide empty container shells (Alerts, Pre, etc.)
-             hideEmptyContainers(leftPane, 'INS');
+             // Extra cleanup for complex blocks (Alerts, Pre, etc.)
+             // Hide containers whose visible content is entirely the opposite diff type.
+             hideEmptyContainers(leftContent, 'INS');
+             hideEmptyContainers(rightContent, 'DEL');
         }
 
         function resetGhosts() {
@@ -2142,16 +3452,11 @@ export class MarkdownDiffProvider {
         }
 
         function isGraphicallyEmpty(el, hiddenTagName) {
-             // For void elements like HR, check if they should be hidden
+             // HR is a void element that always renders a visible line.
+             // It should never be considered "empty" — ins/del wrapping
+             // is already handled by CSS display:none rules.
              if (el.tagName === 'HR') {
-                 // HR has no children, so loop below would return true (empty).
-                 // However, we only want to hide it if logic dictates.
-                 // In hideEmptyContainers, we are iterating candidates to hide them if they are empty.
-                 // For HR, it IS empty (graphically).
-                 // So returning true here causes it to be hidden.
-                 // This effectively hides ALL non-connected HRs in the cleanup phase.
-                 // Since cleanup is usually strict for Left Pane artifacts, this is desired for "orphan" HRs.
-                 return true;
+                 return false;
              }
              
              for (let i = 0; i < el.childNodes.length; i++) {
@@ -2213,7 +3518,69 @@ export class MarkdownDiffProvider {
         });
 
         // Initialize Mermaid
-        mermaid.initialize({ startOnLoad: true });
+    mermaid.initialize({ startOnLoad: true, securityLevel: 'strict' });
+
+      scheduleAsyncLayoutRefresh();
+      if (document.fonts && document.fonts.ready) {
+        document.fonts.ready.finally(() => {
+          scheduleAsyncLayoutRefresh();
+        });
+      }
+
+      // Re-trigger layout stabilization when the webview tab becomes visible again.
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) {
+      noteRuntimeEvent('visibility-visible');
+        scheduleAsyncLayoutRefresh();
+        }
+    });
+
+      const trackedImages = new WeakSet();
+      const trackImageLayout = (image) => {
+        if (!image || trackedImages.has(image)) {
+          return;
+        }
+
+        trackedImages.add(image);
+
+        const finalizeImageLayout = () => {
+          noteRuntimeEvent('image-finalize-layout');
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+              scheduleAsyncLayoutRefresh();
+            });
+          });
+        };
+
+        if (typeof image.decode === 'function') {
+          Promise.resolve()
+            .then(() => image.decode())
+            .catch(() => undefined)
+            .finally(() => noteRuntimeEvent('image-decode-finished'))
+            .finally(finalizeImageLayout);
+          return;
+        }
+
+        finalizeImageLayout();
+      };
+
+      document.querySelectorAll('img').forEach(trackImageLayout);
+
+      // Listen for async image loads that may change scroll dimensions.
+      document.addEventListener('load', event => {
+        if (event.target && event.target.tagName === 'IMG') {
+        noteRuntimeEvent('image-load');
+        trackImageLayout(event.target);
+        scheduleAsyncLayoutRefresh();
+        }
+      }, true);
+      document.addEventListener('error', event => {
+        if (event.target && event.target.tagName === 'IMG') {
+        noteRuntimeEvent('image-error');
+        scheduleAsyncLayoutRefresh();
+        }
+      }, true);
+    </script>
     <script>/* VRT_SCRIPT_PLACEHOLDER */</script>
 </body>
 </html>`;

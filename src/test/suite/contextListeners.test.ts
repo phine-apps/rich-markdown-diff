@@ -38,14 +38,8 @@ describe("Context Listeners Test Suite", () => {
     await ext?.activate();
   });
 
-  afterEach(async () => {
-    // Close all editors
-    await vscode.commands.executeCommand("workbench.action.closeAllEditors");
-  });
-
   it("Should activate extension on Markdown file open", async () => {
-    const doc = await vscode.workspace.openTextDocument(testMdUri);
-    await vscode.window.showTextDocument(doc);
+    await vscode.workspace.openTextDocument(testMdUri);
 
     const ext = vscode.extensions.getExtension("phine-apps.rich-markdown-diff");
     assert.strictEqual(
@@ -58,8 +52,7 @@ describe("Context Listeners Test Suite", () => {
   // We can't easily test 'when' clauses for menus without UI automation,
   // but we CAN test that the commands themselves function when context is correct.
   it("showRenderedDiff command should run on Markdown file", async () => {
-    const doc = await vscode.workspace.openTextDocument(testMdUri);
-    await vscode.window.showTextDocument(doc);
+    await vscode.workspace.openTextDocument(testMdUri);
 
     // This mostly verifies it doesn't crash
     try {
