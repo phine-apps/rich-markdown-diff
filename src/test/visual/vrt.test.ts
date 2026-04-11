@@ -31,6 +31,7 @@ test.describe("Visual Regression Tests", () => {
       
       const html = await generateVRTHtml(provider, v1, v2, { theme: "light", inline: false });
       await page.setViewportSize({ width: 1280, height: 1000 });
+      await page.emulateMedia({ colorScheme: 'light' });
       await page.setContent(html, { waitUntil: "load" });
       
       // Mermaid is mocked via CSS, no need to wait for SVG.
@@ -54,6 +55,7 @@ test.describe("Visual Regression Tests", () => {
       
       const html = await generateVRTHtml(provider, v1, v2, { theme: "dark", inline: false });
       await page.setViewportSize({ width: 1280, height: 1000 });
+      await page.emulateMedia({ colorScheme: 'dark' });
       await page.setContent(html, { waitUntil: "load" });
       
       // Mermaid is mocked via CSS, no need to wait for SVG.
@@ -70,6 +72,7 @@ test.describe("Visual Regression Tests", () => {
       
       const html = await generateVRTHtml(provider, v1, v2, { theme: "light", inline: true });
       await page.setViewportSize({ width: 1280, height: 1000 });
+      await page.emulateMedia({ colorScheme: 'light' });
       await page.setContent(html, { waitUntil: "load" });
       
       // Mermaid is mocked via CSS, no need to wait for SVG.
@@ -86,6 +89,7 @@ test.describe("Visual Regression Tests", () => {
       
       const html = await generateVRTHtml(provider, v1, v2, { theme: "dark", inline: true });
       await page.setViewportSize({ width: 1280, height: 1000 });
+      await page.emulateMedia({ colorScheme: 'dark' });
       await page.setContent(html, { waitUntil: "load" });
       
       // Mermaid is mocked via CSS, no need to wait for SVG.

@@ -49,15 +49,20 @@ export async function generateVRTHtml(
     --vscode-scrollbarSlider-background: rgba(100, 100, 100, 0.4);
     --vscode-descriptionForeground: #707070;
     --vscode-editor-inactiveSelectionBackground: #e5e5e5;
+    --vscode-editorWidget-background: #f3f3f3;
+    --vscode-textCodeBlock-background: #f3f3f3;
     --vscode-font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   `;
+
+  const hljsLightCss = fs.readFileSync(path.join(mediaDir, "highlight/github.min.css"), "utf8");
+  const hljsDarkCss = fs.readFileSync(path.join(mediaDir, "highlight/github-dark.min.css"), "utf8");
 
   let html = provider.getWebviewContent(
     diffHtml,
     "data:text/css;base64," + Buffer.from(katexCss).toString("base64"),
     "mock-mermaid.min.js", // Used so regex matches to inject local script
-    "data:text/css;base64," + Buffer.from(hljsCss).toString("base64"),
-    "data:text/css;base64," + Buffer.from(hljsCss).toString("base64"),
+    "data:text/css;base64," + Buffer.from(hljsLightCss).toString("base64"),
+    "data:text/css;base64," + Buffer.from(hljsDarkCss).toString("base64"),
     "Original",
     "Modified",
     "*",

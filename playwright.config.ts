@@ -23,7 +23,7 @@ export default defineConfig({
 
     /* Collect trace when retrying the failed test. See https://playwright.dev/docs/trace-viewer */
     trace: "on-first-retry",
-    
+
     /* Global Snapshot Path */
     screenshot: "only-on-failure",
   },
@@ -32,7 +32,7 @@ export default defineConfig({
   projects: [
     {
       name: "chromium",
-      use: { 
+      use: {
         ...devices["Desktop Chrome"],
         launchOptions: {
           args: ["--disable-lcd-text", "--force-device-scale-factor=1"],
@@ -45,8 +45,8 @@ export default defineConfig({
   snapshotDir: "./src/test/visual/__screenshots__",
   expect: {
     toHaveScreenshot: {
-      maxDiffPixelRatio: 0.15, // Accommodate for ARM/x86 font rendering differences
-      threshold: 0.2,
+      maxDiffPixelRatio: 0.1,
+      threshold: 0.1,
     },
   },
   /* Standardize snapshot paths to match existing files including OS suffix */
