@@ -678,7 +678,7 @@ export class MarkdownDiffProvider {
         </div>`;
     }
 
-    return { html: fmHtml + bodyDiffHtml, marpCss };
+    return { html: fmHtml + bodyDiffHtml, marpCss, marpJs };
   }
 
   /**
@@ -945,12 +945,24 @@ export class MarkdownDiffProvider {
     // full <del>pre</del><ins>pre</ins> replacements. Re-diff the inner
     // content to show line-level changes within the code block.
     const preRegex =
-      /<del[^>]*>\s*(<pre([^>]*)>[\s\S]*?<\/pre>)\s*<\/del>\s*<ins[^>]*>\s*(<pre([^>]*)>[\s\S]*?<\/pre>)\s*<\/ins>/gi;
+      /(<del[^>]*>\s*(<pre[^>]*>[\s\S]*?<\/pre>)\s*<\/del>)\s*(<ins[^>]*>\s*(<pre[^>]*>[\s\S]*?<\/pre>)\s*<\/ins>)/gi;
 
     html = html.replace(
       preRegex,
-      (_match, oldPre, _oldAttrs, newPre, _newAttrs) => {
-        return execute(oldPre, newPre);
+      (match, delBlock, oldInner, insBlock, newInner) => {
+        return this.diffHtmlFragments(oldInner, newInner, execute);
+      },
+    );
+
+    // Refine Blockquotes
+    // Same logic as Code Blocks: re-diff inner content for granular changes.
+    const blockquoteRegex =
+      /(<del[^>]*>\s*(<blockquote>[\s\S]*?<\/blockquote>)\s*<\/del>)\s*(<ins[^>]*>\s*(<blockquote>[\s\S]*?<\/blockquote>)\s*<\/ins>)/gi;
+
+    html = html.replace(
+      blockquoteRegex,
+      (match, delBlock, oldInner, insBlock, newInner) => {
+        return this.diffHtmlFragments(oldInner, newInner, execute);
       },
     );
 
@@ -971,7 +983,9 @@ export class MarkdownDiffProvider {
       (match, delInner, newTag, newAttrs, insInner) => {
         const delText = delInner.replace(/<[^>]+>/g, "").trim();
         const insText = insInner.replace(/<[^>]+>/g, "").trim();
-        if (delText !== insText) return match;
+        if (delText !== insText) {
+          return match;
+        }
         return `<${newTag}${newAttrs}>${insInner}</${newTag}>`;
       },
     );
@@ -985,8 +999,24 @@ export class MarkdownDiffProvider {
       (match, _oldTag, _oldAttrs, delInner, insInner) => {
         const delText = delInner.replace(/<[^>]+>/g, "").trim();
         const insText = insInner.replace(/<[^>]+>/g, "").trim();
-        if (delText !== insText) return match;
+        if (delText !== insText) {
+          return match;
+        }
         return `<p><strong>${insInner}</strong></p>`;
+      },
+    );
+
+    // Refine Tables
+    // When tables are tokenized as atomic blocks, changed tables appear as
+    // full <del><table>...</table></del><ins><table>...</table></ins> replacements.
+    // Detect this and perform a structural table diff.
+    const tableRegex =
+      /(<del[^>]*>\s*(<table[^>]*>[\s\S]*?<\/table>)\s*<\/del>)\s*(<ins[^>]*>\s*(<table[^>]*>[\s\S]*?<\/table>)\s*<\/ins>)/gi;
+
+    html = html.replace(
+      tableRegex,
+      (match, delBlock, oldInner, insBlock, newInner) => {
+        return this.diffTables(oldInner, newInner, execute);
       },
     );
 
@@ -1017,13 +1047,19 @@ export class MarkdownDiffProvider {
    */
   private replaceComplexBlocksWithTokens(
     html: string,
-    options: { tokenizeListContainers?: boolean } = {},
+    options: {
+      tokenizeListContainers?: boolean;
+      tokenizeCodeBlocks?: boolean;
+    } = {},
   ): {
     html: string;
     tokens: Record<string, string>;
   } {
     const tokens: Record<string, string> = {};
-    return this.replaceBalancedTags(html, tokens, options);
+    return this.replaceBalancedTags(html, tokens, {
+      tokenizeListContainers: options.tokenizeListContainers,
+      tokenizeCodeBlocks: options.tokenizeCodeBlocks ?? true,
+    });
   }
 
   /**
@@ -1057,7 +1093,10 @@ export class MarkdownDiffProvider {
   private replaceBalancedTags(
     html: string,
     tokens: Record<string, string>,
-    options: { tokenizeListContainers?: boolean } = {},
+    options: {
+      tokenizeListContainers?: boolean;
+      tokenizeCodeBlocks?: boolean;
+    } = {},
   ): { html: string; tokens: Record<string, string> } {
     let result = "";
     let i = 0;
@@ -1080,6 +1119,32 @@ export class MarkdownDiffProvider {
         if (end > -1) {
           const content = html.substring(start, end);
           const token = this.createToken(content, "ALERT", tokens);
+          result += token;
+          i = end;
+          continue;
+        }
+      }
+
+      // Detect code blocks
+      if (options.tokenizeCodeBlocks !== false && html.startsWith("<pre", i)) {
+        const start = i;
+        const end = this.findClosing(html, i, "pre");
+        if (end > -1) {
+          const content = html.substring(start, end);
+          const token = this.createToken(content, "CODEBLOCK", tokens);
+          result += token;
+          i = end;
+          continue;
+        }
+      }
+
+      // Detect horizontal rules
+      if (html.startsWith("<hr", i)) {
+        const start = i;
+        const end = html.indexOf(">", i) + 1;
+        if (end > 0) {
+          const content = html.substring(start, end);
+          const token = this.createToken(content, "HR", tokens);
           result += token;
           i = end;
           continue;
@@ -1137,16 +1202,17 @@ export class MarkdownDiffProvider {
       }
 
       if (options.tokenizeListContainers !== false && html[i] === "<") {
-        const listMatch = html.substring(i).match(/^<(ol|ul|dl)(\s[^>]*)?>/i);
+        const listMatch = html.substring(i).match(/^<(ol|ul|dl|table)(\s[^>]*)?>/i);
         if (listMatch) {
           const tagName = listMatch[1].toLowerCase();
           const start = i;
           const end = this.findClosing(html, i, tagName);
           if (end > -1) {
             const content = html.substring(start, end);
+            const prefix = tagName === "table" ? "TABLE" : `LIST_${tagName.toUpperCase()}`;
             const token = this.createToken(
               content,
-              `LIST_${tagName.toUpperCase()}`,
+              prefix,
               tokens,
             );
             result += token;
@@ -1359,7 +1425,9 @@ export class MarkdownDiffProvider {
       (match, attrs: string, content: string) => {
         // Skip items that contain nested <li> — the regex would over-capture
         // them and the JS ghost-hiding handles nested structures correctly.
-        if (/<li\b/i.test(content)) return match;
+        if (/<li\b/i.test(content)) {
+          return match;
+        }
 
         const stripInline = (s: string) =>
           s.replace(/<\/?(strong|em|b|i|s|span|a)\b[^>]*>/gi, "").trim();
@@ -1375,7 +1443,9 @@ export class MarkdownDiffProvider {
           newAttrs += ' data-all-deleted="true"';
         }
 
-        if (newAttrs === attrs) return match;
+        if (newAttrs === attrs) {
+          return match;
+        }
         return `<li${newAttrs}>${content}</li>`;
       },
     );
@@ -1533,10 +1603,12 @@ export class MarkdownDiffProvider {
     const { html: oldHtmlTokenized, tokens: tokens1 } =
       this.replaceComplexBlocksWithTokens(oldHtml, {
         tokenizeListContainers: false,
+        tokenizeCodeBlocks: false,
       });
     const { html: newHtmlTokenized, tokens: tokens2 } =
       this.replaceComplexBlocksWithTokens(newHtml, {
         tokenizeListContainers: false,
+        tokenizeCodeBlocks: false,
       });
     const { html: oldHtmlChecked, tokens: tokens1Checked } =
       this.replaceCheckboxesWithTokens(oldHtmlTokenized);
@@ -1615,7 +1687,9 @@ export class MarkdownDiffProvider {
     css: string,
     imageResolver?: (src: string) => string,
   ): string {
-    if (!imageResolver) return css;
+    if (!imageResolver) {
+      return css;
+    }
 
     return css.replace(/url\(['"]?(.*?)['"]?\)/gi, (match, src) => {
       if (src && !src.startsWith("data:") && !src.startsWith("http")) {
@@ -1670,8 +1744,28 @@ export class MarkdownDiffProvider {
       "h6",
       "section",
       "svg",
+      "pre",
+      "hr",
     ];
     let result = html;
+
+    // First, if htmldiff wrapped an entire block (or a sequence of blocks) in <ins> or <del>,
+    // ensure it has the diff-block class so the background color applies to the full area.
+    const blockTags = "table|ul|ol|dl|blockquote|div|h1|h2|h3|h4|h5|h6|section|svg|pre";
+    const selfClosingTags = "hr";
+    const blockElementPattern = `(?:<(?:${blockTags})[^>]*>[\\s\\S]*?<\\/(?:${blockTags})>|<(?:${selfClosingTags})[^>]*\\/?>)`;
+
+    // Improved regex: matches ins/del tags that ONLY contain one or more block elements
+    // We avoid backreferences (\4) inside the repetition to allow mixed block types.
+    result = result.replace(
+      new RegExp(`<(ins|del) class="([^"]*)">(\\s*(?:${blockElementPattern}\\s*)+)<\\/\\1>`, "gi"),
+      (match, tag, cls, inner) => {
+        if (!cls.includes("diff-block")) {
+          return `<${tag} class="${cls} diff-block">${inner}</${tag}>`;
+        }
+        return match;
+      }
+    );
 
     blocks.forEach((tag) => {
       // Non-greedy match for the block
@@ -1720,6 +1814,284 @@ export class MarkdownDiffProvider {
     const reOpen = new RegExp(`<${typeTag}[^>]*?>`, "gi");
     const reClose = new RegExp(`<\\/${typeTag}>`, "gi");
     return html.replace(reOpen, "").replace(reClose, "");
+  }
+
+  /**
+   * Performs a structural diff between two HTML tables.
+   * This method aligns rows and columns to prevent content "drift" when table structure changes.
+   */
+  private diffTables(
+    oldTableHtml: string,
+    newTableHtml: string,
+    execute: (old: string, newStr: string) => string,
+  ): string {
+    const oldTable = this.parseTable(oldTableHtml);
+    const newTable = this.parseTable(newTableHtml);
+
+    // 1. Align Columns by header name or index
+    const colMapping = this.alignColumns(oldTable.headers, newTable.headers);
+
+    // 2. Align Rows by content similarity or index
+    const rowMapping = this.alignRows(oldTable.rows, newTable.rows);
+
+    // 3. Generate Merged Table
+    return this.renderMergedTable(
+      oldTable,
+      newTable,
+      colMapping,
+      rowMapping,
+      execute,
+    );
+  }
+
+  /**
+   * Parses an HTML table string into a structured representation.
+   */
+  private parseTable(html: string) {
+    const rows: {
+      cells: { html: string; attrs: string; tag: string }[];
+      attrs: string;
+    }[] = [];
+    const headers: { html: string; attrs: string }[] = [];
+
+    // Extract headers from thead
+    const theadMatch = html.match(/<thead>([\s\S]*?)<\/thead>/i);
+    if (theadMatch) {
+      const trMatches = theadMatch[1].match(/<tr[^>]*>([\s\S]*?)<\/tr>/gi) || [];
+      trMatches.forEach((trHtml) => {
+        const thMatches = trHtml.match(/<th[^>]*>([\s\S]*?)<\/th>/gi) || [];
+        thMatches.forEach((thHtml) => {
+          const inner = thHtml.replace(/<th([^>]*)>([\s\S]*?)<\/th>/i, "$2");
+          const attrs = thHtml.replace(/<th([^>]*)>([\s\S]*?)<\/th>/i, "$1");
+          headers.push({ html: inner, attrs });
+        });
+      });
+    }
+
+    // Extract rows from tbody
+    const tbodyMatch = html.match(/<tbody>([\s\S]*?)<\/tbody>/i);
+    if (tbodyMatch) {
+      const trMatches = tbodyMatch[1].match(/<tr[^>]*>([\s\S]*?)<\/tr>/gi) || [];
+      trMatches.forEach((trHtml) => {
+        const trAttrs = trHtml.replace(/<tr([^>]*)>[\s\S]*?<\/tr>/i, "$1");
+        const cells: { html: string; attrs: string; tag: string }[] = [];
+        const tdMatches = trHtml.match(/<td[^>]*>([\s\S]*?)<\/td>/gi) || [];
+        tdMatches.forEach((tdHtml) => {
+          const inner = tdHtml.replace(/<td([^>]*)>([\s\S]*?)<\/td>/i, "$2");
+          const attrs = tdHtml.replace(/<td([^>]*)>([\s\S]*?)<\/td>/i, "$1");
+          cells.push({ html: inner, attrs, tag: "td" });
+        });
+        rows.push({ cells, attrs: trAttrs });
+      });
+    }
+
+    const tableAttrs =
+      html.match(/<table([^>]*)>/i)?.[1] || "";
+    return { headers, rows, tableAttrs };
+  }
+
+  /**
+   * Aligns columns between two tables based on header text or index.
+   */
+  private alignColumns(
+    oldHeaders: any[],
+    newHeaders: any[],
+  ): { oldIdx: number | null; newIdx: number | null }[] {
+    const mapping: { oldIdx: number | null; newIdx: number | null }[] = [];
+    const usedNew = new Set<number>();
+
+    oldHeaders.forEach((oldH, oldIdx) => {
+      const oldText = oldH.html.replace(/<[^>]+>/g, "").trim().toLowerCase();
+      let matchedIdx = -1;
+      if (oldText) {
+        matchedIdx = newHeaders.findIndex(
+          (newH, newIdx) =>
+            !usedNew.has(newIdx) &&
+            newH.html.replace(/<[^>]+>/g, "").trim().toLowerCase() === oldText,
+        );
+      }
+
+      if (matchedIdx !== -1) {
+        usedNew.add(matchedIdx);
+        mapping.push({ oldIdx, newIdx: matchedIdx });
+      } else {
+        mapping.push({ oldIdx, newIdx: null });
+      }
+    });
+
+    newHeaders.forEach((_, newIdx) => {
+      if (!usedNew.has(newIdx)) {
+        mapping.push({ oldIdx: null, newIdx });
+      }
+    });
+
+    return mapping.sort((a, b) => {
+      const aVal = a.newIdx !== null ? a.newIdx : 1000 + (a.oldIdx || 0);
+      const bVal = b.newIdx !== null ? b.newIdx : 1000 + (b.oldIdx || 0);
+      return aVal - bVal;
+    });
+  }
+
+  /**
+   * Aligns rows between two tables based on identity (first column) or index.
+   */
+  private alignRows(
+    oldRows: any[],
+    newRows: any[],
+  ): { oldIdx: number | null; newIdx: number | null }[] {
+    const mapping: { oldIdx: number | null; newIdx: number | null }[] = [];
+    const usedNew = new Set<number>();
+
+    oldRows.forEach((oldR, oldIdx) => {
+      const oldId = oldR.cells[0]?.html.replace(/<[^>]+>/g, "").trim();
+      let matchedIdx = -1;
+      if (oldId) {
+        matchedIdx = newRows.findIndex(
+          (newR, newIdx) =>
+            !usedNew.has(newIdx) &&
+            newR.cells[0]?.html.replace(/<[^>]+>/g, "").trim() === oldId,
+        );
+      }
+
+      if (matchedIdx !== -1) {
+        usedNew.add(matchedIdx);
+        mapping.push({ oldIdx, newIdx: matchedIdx });
+      } else {
+        // Fallback to index if content is somewhat similar or just keep it as deleted
+        // For now, simple identity match or unmatched.
+        mapping.push({ oldIdx, newIdx: null });
+      }
+    });
+
+    newRows.forEach((_, newIdx) => {
+      if (!usedNew.has(newIdx)) {
+        mapping.push({ oldIdx: null, newIdx });
+      }
+    });
+
+    return mapping.sort((a, b) => (a.newIdx ?? 1000) - (b.newIdx ?? 1000));
+  }
+
+  /**
+   * Renders a merged HTML table from structured diff data.
+   */
+  private renderMergedTable(
+    oldTable: any,
+    newTable: any,
+    colMapping: any[],
+    rowMapping: any[],
+    execute: any,
+  ): string {
+    let html = `<table${newTable.tableAttrs || oldTable.tableAttrs}>`;
+
+    // Render Header
+    html += "<thead><tr>";
+    colMapping.forEach((m) => {
+      const colClass =
+        m.newIdx === null
+          ? "diff-col-del"
+          : m.oldIdx === null
+            ? "diff-col-ins"
+            : "";
+
+      if (m.oldIdx !== null && m.newIdx !== null) {
+        const oldH = oldTable.headers[m.oldIdx];
+        const newH = newTable.headers[m.newIdx];
+        const diff = execute(oldH.html, newH.html);
+        html += `<th${this.appendClass(newH.attrs, colClass)}>${diff}</th>`;
+      } else if (m.oldIdx !== null) {
+        const oldH = oldTable.headers[m.oldIdx];
+        html += `<th${this.appendClass(oldH.attrs, colClass)}><del class="diffdel">${oldH.html}</del></th>`;
+      } else {
+        const newH = newTable.headers[m.newIdx!];
+        html += `<th${this.appendClass(newH.attrs, colClass)}><ins class="diffins">${newH.html}</ins></th>`;
+      }
+    });
+    html += "</tr></thead>";
+
+    // Render Body
+    html += "<tbody>";
+    rowMapping.forEach((rm) => {
+      if (rm.oldIdx !== null && rm.newIdx !== null) {
+        const oldR = oldTable.rows[rm.oldIdx];
+        const newR = newTable.rows[rm.newIdx];
+        html += `<tr${newR.attrs}>`;
+        colMapping.forEach((cm) => {
+          const colClass =
+            cm.newIdx === null
+              ? "diff-col-del"
+              : cm.oldIdx === null
+                ? "diff-col-ins"
+                : "";
+
+          if (cm.oldIdx !== null && cm.newIdx !== null) {
+            const oldC = oldR.cells[cm.oldIdx];
+            const newC = newR.cells[cm.newIdx];
+            const diff = execute(oldC.html, newC.html);
+            html += `<td${this.appendClass(newC.attrs, colClass)}>${diff}</td>`;
+          } else if (cm.oldIdx !== null) {
+            const oldC = oldR.cells[cm.oldIdx];
+            html += `<td${this.appendClass(oldC.attrs, colClass)}><del class="diffdel">${oldC.html}</del></td>`;
+          } else {
+            const newC = newR.cells[cm.newIdx!];
+            html += `<td${this.appendClass(newC.attrs, colClass)}><ins class="diffins">${newC.html}</ins></td>`;
+          }
+        });
+        html += "</tr>";
+      } else if (rm.oldIdx !== null) {
+        const oldR = oldTable.rows[rm.oldIdx];
+        html += `<tr${oldR.attrs} class="diffdel">`;
+        colMapping.forEach((cm) => {
+          const colClass =
+            cm.newIdx === null
+              ? "diff-col-del"
+              : cm.oldIdx === null
+                ? "diff-col-ins"
+                : "";
+          if (cm.oldIdx !== null) {
+            const oldC = oldR.cells[cm.oldIdx];
+            html += `<td${this.appendClass(oldC.attrs, colClass)}><del class="diffdel">${oldC.html}</del></td>`;
+          } else {
+            html += `<td${this.appendClass("", colClass)}></td>`;
+          }
+        });
+        html += "</tr>";
+      } else {
+        const newR = newTable.rows[rm.newIdx!];
+        html += `<tr${newR.attrs} class="diffins">`;
+        colMapping.forEach((cm) => {
+          const colClass =
+            cm.newIdx === null
+              ? "diff-col-del"
+              : cm.oldIdx === null
+                ? "diff-col-ins"
+                : "";
+          if (cm.newIdx !== null) {
+            const newC = newR.cells[cm.newIdx];
+            html += `<td${this.appendClass(newC.attrs, colClass)}><ins class="diffins">${newC.html}</ins></td>`;
+          } else {
+            html += `<td${this.appendClass("", colClass)}></td>`;
+          }
+        });
+        html += "</tr>";
+      }
+    });
+    html += "</tbody></table>";
+    return html;
+  }
+
+  /**
+   * Appends a class to an existing attributes string.
+   */
+  private appendClass(attrs: string, className: string): string {
+    if (!className) {
+      return attrs;
+    }
+    if (attrs.includes('class="')) {
+      return attrs.replace('class="', `class="${className} `);
+    } else {
+      return ` class="${className}"${attrs}`;
+    }
   }
 
   /**
@@ -2179,29 +2551,54 @@ export class MarkdownDiffProvider {
             background-color: rgba(74, 222, 128, 0.2); 
             border-bottom: 1px solid #22c55e;
         }
+        ins.diffins a {
+            background-color: rgba(74, 222, 128, 0.2); 
+        }
         del.diffdel {
             background-color: rgba(248, 113, 113, 0.2); 
             border-bottom: 1px solid #ef4444;
         }
+        del.diffdel a {
+            background-color: rgba(248, 113, 113, 0.2); 
+        }
 
-        /* Ensure diff styling is visible for tokenized blocks with their own backgrounds (Alerts) */
-        ins.diffins .markdown-alert, del.diffdel .markdown-alert {
+        /* Ensure diff styling is visible for tokenized blocks with their own backgrounds (Alerts, KaTeX, Mermaid) */
+        ins:has(.markdown-alert), del:has(.markdown-alert),
+        ins:has(.katex-block), del:has(.katex-block),
+        ins:has(.mermaid), del:has(.mermaid),
+        ins:has(.footnote-item), del:has(.footnote-item),
+        ins:has(pre), del:has(pre) {
+            display: block;
+            text-decoration: none;
+            border: none !important;
+            background-color: transparent !important;
+            padding: 0 !important;
+            margin: 0 !important;
+            margin-bottom: var(--markdown-block-spacing);
+        }
+
+        ins .markdown-alert, del .markdown-alert,
+        ins .katex-block, del .katex-block,
+        ins .mermaid, del .mermaid,
+        ins pre, del pre {
             position: relative; /* For pseudo-element overlay */
         }
-        ins.diffins .markdown-alert {
+
+        ins .markdown-alert, ins .katex-block, ins .mermaid, ins pre {
             border: 1px solid #22c55e;
         }
-        ins.diffins .markdown-alert::after {
+        ins .markdown-alert::after, ins .katex-block::after, ins .mermaid::after, ins pre::after {
             content: "";
             position: absolute;
             top: 0; left: 0; right: 0; bottom: 0;
             background-color: rgba(74, 222, 128, 0.2);
             pointer-events: none;
         }
-        del.diffdel .markdown-alert {
+
+        del .markdown-alert, del .katex-block, del .mermaid, del pre {
             border: 1px solid #ef4444;
         }
-        del.diffdel .markdown-alert::after {
+        del .markdown-alert::after, del .katex-block::after, del .mermaid::after, del pre::after {
             content: "";
             position: absolute;
             top: 0; left: 0; right: 0; bottom: 0;
@@ -2209,32 +2606,19 @@ export class MarkdownDiffProvider {
             pointer-events: none;
         }
 
-        /* Force block display and reset styles for ins/del containing valid blocks (Alerts) */
-        /* This prevents double borders/backgrounds since the inner alert already has them */
-        /* Using !important to ensure override of earlier ins.diffins styles */
-        ins.diffins:has(.markdown-alert), del.diffdel:has(.markdown-alert) {
-            display: block;
-            text-decoration: none;
-            border: none !important;
-            background-color: transparent !important;
-            padding: 0 !important;
-            margin: 0 !important;
-        }
-
-        /* Fix Footnote Navigation Highlight (ensure "2." marker is inside highlight box) */
-        ins.diffins:has(.footnote-item), del.diffdel:has(.footnote-item) {
-            display: block;
-            margin-left: -2.5em; /* Pull box left to cover marker area */
-            padding-left: 2.5em; /* Push content back to alignment */
-            /* Ensure the box spans the full width including the negative margin area */
-        }
-
-        /* Force block display for ins/del wrapping block-level headings */
-        ins:has(> h1, > h2, > h3, > h4, > h5, > h6),
-        del:has(> h1, > h2, > h3, > h4, > h5, > h6) {
+        ins:has(> h1, > h2, > h3, > h4, > h5, > h6, > table, > ul, > ol, > dl, > blockquote, > div, > pre, > hr),
+        del:has(> h1, > h2, > h3, > h4, > h5, > h6, > table, > ul, > ol, > dl, > blockquote, > div, > pre, > hr) {
             display: block;
           width: auto;
           max-width: 100%;
+        }
+
+        /* Table Column Hiding */
+        #left-pane .diff-col-ins {
+            display: none !important;
+        }
+        #right-pane .diff-col-del {
+            display: none !important;
         }
 
         /* Task Lists */
@@ -3057,7 +3441,7 @@ export class MarkdownDiffProvider {
                 const isMeaningfulChange = (el) => {
                      if (!el) return false;
                      if (el.tagName === 'IMG') return true;
-                     if (el.classList && (el.classList.contains('fm-old') || el.classList.contains('fm-new'))) return true;
+                     if (el.classList && el.classList.contains('fm-changed')) return true;
                      if (el.textContent && el.textContent.trim().length > 0) return true;
                      if (el.querySelector && el.querySelector('img')) return true;
                      if (el.querySelector && el.querySelector('table')) return true;
@@ -3139,12 +3523,12 @@ export class MarkdownDiffProvider {
                 let all = [];
 
                 if (isInline) {
-                  const changes = rightContent.querySelectorAll('ins, del, .fm-new, .fm-old');
+                  const changes = rightContent.querySelectorAll('ins, del, .fm-new.fm-changed, .fm-old.fm-changed');
                     all = processNodeList(changes, rightPane);
                 } else {
                     // Split Mode
-                  const leftDels = leftContent.querySelectorAll('del, .fm-old');
-                  const rightIns = rightContent.querySelectorAll('ins, .fm-new');
+                  const leftDels = leftContent.querySelectorAll('del, .fm-old.fm-changed');
+                  const rightIns = rightContent.querySelectorAll('ins, .fm-new.fm-changed');
                     
                     all = [
                         ...processNodeList(leftDels, leftPane),

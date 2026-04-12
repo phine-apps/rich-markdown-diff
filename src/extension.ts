@@ -245,7 +245,7 @@ function getDiffPanelOptions(context: vscode.ExtensionContext) {
     enableFindWidget: true,
     localResourceRoots: [
       vscode.Uri.joinPath(context.extensionUri, "media"),
-      vscode.Uri.joinPath(context.extensionUri, "node_modules"),
+      vscode.Uri.joinPath(context.extensionUri, "data"),
       ...(vscode.workspace.workspaceFolders?.map((folder) => folder.uri) ?? []),
     ],
   };
@@ -941,15 +941,7 @@ export function activate(context: vscode.ExtensionContext) {
         "markdownDiff",
         "Markdown Diff",
         vscode.ViewColumn.Active,
-        {
-          enableScripts: true,
-          enableFindWidget: true,
-          localResourceRoots: [
-            vscode.Uri.joinPath(context.extensionUri, "media"),
-            vscode.Uri.joinPath(context.extensionUri, "node_modules"),
-            ...(vscode.workspace.workspaceFolders?.map((f) => f.uri) ?? []),
-          ],
-        },
+        getDiffPanelOptions(context),
       );
 
       const resolver = createImageResolver(document.uri, panel.webview);
@@ -1347,14 +1339,7 @@ class DiffEditorProvider implements vscode.CustomReadonlyEditorProvider {
     webviewPanel: vscode.WebviewPanel,
     _token: vscode.CancellationToken,
   ): Promise<void> {
-    webviewPanel.webview.options = {
-      enableScripts: true,
-      localResourceRoots: [
-        vscode.Uri.joinPath(this.context.extensionUri, "media"),
-        vscode.Uri.joinPath(this.context.extensionUri, "node_modules"),
-        ...(vscode.workspace.workspaceFolders?.map((f) => f.uri) ?? []),
-      ],
-    };
+    webviewPanel.webview.options = getDiffPanelOptions(this.context);
 
     await bindDiffPanel(webviewPanel, this.context, async () => {
       const comparison = await resolveSingleFileComparison(document.uri);
