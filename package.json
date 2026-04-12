@@ -147,7 +147,7 @@
         },
         {
           "command": "rich-markdown-diff.showRenderedDiff",
-          "when": "editorLangId == markdown || resourceLangId == markdown"
+          "when": "(editorLangId == markdown || resourceLangId == markdown) && rich-markdown-diff.canShowRenderedDiff"
         },
         {
           "command": "rich-markdown-diff.showRenderedDiff",
@@ -202,11 +202,6 @@
           "title": "%rich-markdown-diff.showRenderedDiff.title%",
           "group": "modification",
           "when": "resourceLangId == markdown && listMultiSelection"
-        },
-        {
-          "command": "rich-markdown-diff.showRenderedDiff",
-          "group": "modification",
-          "when": "resourceLangId == markdown && !listMultiSelection"
         }
       ],
       "editor/context": [
@@ -228,7 +223,7 @@
         {
           "command": "rich-markdown-diff.showRenderedDiff",
           "group": "modification",
-          "when": "editorLangId == markdown || resourceLangId == markdown"
+          "when": "(editorLangId == markdown || resourceLangId == markdown) && rich-markdown-diff.canShowRenderedDiff"
         }
       ],
       "scm/resourceState/context": [
@@ -286,36 +281,34 @@
     "@types/glob": "^9.0.0",
     "@types/markdown-it": "^14.1.2",
     "@types/mocha": "^10.0.10",
-    "@types/node": "^25.5.2",
+    "@types/node": "^25.6.0",
     "@types/sanitize-html": "^2.16.1",
     "@types/vscode": "^1.100.0",
-    "@typescript-eslint/eslint-plugin": "^8.58.0",
-    "@typescript-eslint/parser": "^8.58.0",
+    "@typescript-eslint/eslint-plugin": "^8.58.1",
+    "@typescript-eslint/parser": "^8.58.1",
     "@vscode/l10n-dev": "^0.0.35",
     "@vscode/test-electron": "^2.5.2",
-    "@vscode/vsce": "^3.0.0",
+    "@vscode/vsce": "^3.7.1",
     "esbuild": "^0.28.0",
     "eslint": "^10.2.0",
-    "eslint-plugin-tsdoc": "^0.5.0",
-    "glob": "^13.0.1",
+    "eslint-plugin-tsdoc": "^0.5.2",
+    "glob": "^13.0.6",
     "globals": "^17.4.0",
     "mocha": "^11.7.5",
     "ovsx": "^0.10.10",
     "playwright": "^1.59.1",
     "ts-node": "^10.9.2",
     "typescript": "^6.0.2",
-    "typescript-eslint": "^8.58.0"
+    "typescript-eslint": "^8.58.1"
   },
   "dependencies": {
     "@iktakahiro/markdown-it-katex": "^4.0.1",
     "@marp-team/marp-core": "^4.3.0",
     "@vscode/l10n": "^0.0.18",
-    "entities": "8.0.0",
     "gray-matter": "^4.0.3",
     "highlight.js": "^11.11.1",
     "htmldiff-js": "^1.0.5",
-    "htmlparser2": "12.0.0",
-    "markdown-it": "^14.1.0",
+    "markdown-it": "^14.1.1",
     "markdown-it-deflist": "^3.0.0",
     "markdown-it-emoji": "^3.0.0",
     "markdown-it-footnote": "^4.0.0",
@@ -324,7 +317,6 @@
     "markdown-it-sub": "^2.0.0",
     "markdown-it-sup": "^2.0.0",
     "markdown-it-task-lists": "^2.1.1",
-    "markdown-it-wikilinks": "^1.4.0",
     "sanitize-html": "^2.17.2"
   },
   "pnpm": {

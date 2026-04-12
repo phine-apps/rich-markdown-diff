@@ -18,10 +18,10 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
 
-      - name: Use Node.js 20
+      - name: Use Node.js LTS
         uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version: 'lts/*'
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v5
@@ -62,7 +62,7 @@ jobs:
         run: pnpm run publish:ovsx
 
       - name: Create Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         if: success() && startsWith(github.ref, 'refs/tags/')
         with:
           draft: true

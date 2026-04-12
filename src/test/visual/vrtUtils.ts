@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import type { MarkdownDiffProvider as ProviderType } from "../../markdownDiff";
-const { MarkdownDiffProvider } = require("../../../out/markdownDiff");
+
 
 export async function generateVRTHtml(
   provider: ProviderType,
@@ -23,9 +23,7 @@ export async function generateVRTHtml(
   
   const mediaDir = path.join(__dirname, "../../../media");
   const katexCss = fs.readFileSync(path.join(mediaDir, "katex/katex.min.css"), "utf8");
-  const hljsCss = options.theme === "dark" 
-    ? fs.readFileSync(path.join(mediaDir, "highlight/github-dark.min.css"), "utf8")
-    : fs.readFileSync(path.join(mediaDir, "highlight/github.min.css"), "utf8");
+
   
   const translations = {
     "Markdown Diff": "Markdown Diff",
