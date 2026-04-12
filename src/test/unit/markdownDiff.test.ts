@@ -577,7 +577,7 @@ describe("MarkdownDiffProvider", () => {
       "heading-prefix class should prevent number prefixes from wrapping",
     );
     assert.ok(
-      /ins:has\(> h1, > h2, > h3, > h4, > h5, > h6\),[\s\S]*del:has\(> h1, > h2, > h3, > h4, > h5, > h6\) \{[\s\S]*display: block;/m.test(
+      /ins:has\(> h1, > h2, > h3, > h4, > h5, > h6, > table, > ul, > ol, > dl, > blockquote, > div, > pre, > hr\),[\s\S]*del:has\(> h1, > h2, > h3, > h4, > h5, > h6, > table, > ul, > ol, > dl, > blockquote, > div, > pre, > hr\) \{[\s\S]*display: block;/m.test(
         webviewContent,
       ),
       "Changed heading wrappers should be block-level",
