@@ -834,13 +834,14 @@ export function getWebviewContent(
             box-sizing: border-box;
         }
         
-        /* Diff Coloring for Interactive Blocks */
-        .image-diff-block .diff-image-old img {
+        /* Diff Coloring for Interactive Blocks - Applied only in Side-by-Side mode */
+        .image-diff-block[data-mode="side-by-side"] .diff-image-old img,
+        body:not(.inline-mode) #left-pane .image-diff-block .diff-image-old img {
             border: 4px solid rgba(239, 68, 68, 0.6);
             background-color: rgba(239, 68, 68, 0.1);
             padding: 4px;
         }
-        .image-diff-block .diff-image-new img {
+        .image-diff-block[data-mode="side-by-side"] .diff-image-new img {
             border: 4px solid rgba(34, 197, 94, 0.6);
             background-color: rgba(34, 197, 94, 0.1);
             padding: 4px;
