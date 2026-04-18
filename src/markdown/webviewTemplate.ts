@@ -798,6 +798,140 @@ export function getWebviewContent(
           box-shadow: 0 0 0 2px rgba(255, 165, 0, 0.45) !important;
         }
 
+        /* Image Comparison Enhancements */
+        .image-diff-block {
+            margin-top: 0;
+            margin-bottom: var(--markdown-block-spacing);
+            border: 1px solid var(--vscode-panel-border);
+            border-radius: 4px;
+            overflow: hidden;
+            background-color: var(--vscode-textCodeBlock-background, var(--markdown-raised-background));
+            position: relative;
+            display: block;
+            width: 100%;
+        }
+        .image-diff-wrapper {
+            position: relative;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100px;
+            overflow: hidden;
+            padding: 20px;
+            background-image: 
+                linear-gradient(45deg, rgba(128, 128, 128, 0.1) 25%, transparent 25%),
+                linear-gradient(-45deg, rgba(128, 128, 128, 0.1) 25%, transparent 25%),
+                linear-gradient(45deg, transparent 75%, rgba(128, 128, 128, 0.1) 75%),
+                linear-gradient(-45deg, transparent 75%, rgba(128, 128, 128, 0.1) 75%);
+            background-size: 20px 20px;
+            background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
+        }
+        .image-diff-wrapper img {
+            max-width: 100%;
+            height: auto;
+            display: block;
+            object-fit: contain;
+        }
+        
+        /* Pane-specific hiding for Side-by-Side Mode in Split View */
+        body:not(.inline-mode) #left-pane .image-diff-block[data-mode="side-by-side"] .diff-image-new { display: none !important; }
+        body:not(.inline-mode) #right-pane .image-diff-block[data-mode="side-by-side"] .diff-image-old { display: none !important; }
+        
+        /* Reset and display for image comparison containers (now using div instead of ins/del) */
+        .image-diff-block .diff-image-old, 
+        .image-diff-block .diff-image-new {
+            display: block;
+            background-color: transparent !important;
+            border: none !important;
+            padding: 0 !important;
+            margin: 0 !important;
+            text-decoration: none !important;
+        }
+
+        /* Mode: Onion Skin / Swipe */
+        .image-diff-block[data-mode="onion-skin"] .image-diff-wrapper,
+        .image-diff-block[data-mode="swipe"] .image-diff-wrapper {
+            display: block;
+            height: 400px; /* Fallback height for overlay modes */
+        }
+        
+        .image-diff-block[data-mode="onion-skin"] .diff-image-old,
+        .image-diff-block[data-mode="onion-skin"] .diff-image-new,
+        .image-diff-block[data-mode="swipe"] .diff-image-old,
+        .image-diff-block[data-mode="swipe"] .diff-image-new {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            margin: 0;
+        }
+        
+        .image-diff-block[data-mode="onion-skin"] .diff-image-new {
+            z-index: 10;
+        }
+        .image-diff-block[data-mode="onion-skin"] .diff-image-old {
+            z-index: 5;
+        }
+
+        .image-diff-block[data-mode="swipe"] .diff-image-new {
+            z-index: 10;
+            overflow: hidden;
+        }
+        .image-diff-block[data-mode="swipe"] .diff-image-old {
+            z-index: 5;
+        }
+
+        /* Controls UI */
+        .image-diff-controls {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            padding: 8px 12px;
+            background-color: var(--markdown-surface-background);
+            border-top: 1px solid var(--vscode-panel-border);
+            font-size: 11px;
+            user-select: none;
+        }
+        .image-diff-tabs {
+            display: flex;
+            background-color: var(--vscode-editorWidget-background);
+            border-radius: 4px;
+            padding: 2px;
+            border: 1px solid var(--vscode-panel-border);
+        }
+        .image-diff-tab {
+            padding: 3px 8px;
+            cursor: pointer;
+            border-radius: 3px;
+            color: var(--vscode-descriptionForeground);
+        }
+        .image-diff-tab:hover {
+            color: var(--vscode-foreground);
+            background-color: var(--vscode-toolbar-hoverBackground);
+        }
+        .image-diff-tab.active {
+            background-color: var(--vscode-button-secondaryBackground);
+            color: var(--vscode-button-secondaryForeground);
+        }
+        
+        .image-diff-slider-container {
+            display: none; /* Shown via JS when active */
+            align-items: center;
+            gap: 8px;
+            flex-grow: 1;
+        }
+        .image-diff-slider {
+            flex-grow: 1;
+            margin: 0;
+            height: 4px;
+        }
+        .image-diff-label {
+            min-width: 30px;
+            text-align: right;
+            opacity: 0.8;
+            font-variant-numeric: tabular-nums;
+        }
+
         /* Complex block wrappers should not draw their own inline highlight;
            the inner block container owns the border/background styling. */
         ins.diffins:has(> .mermaid),
@@ -2005,7 +2139,7 @@ export function getWebviewContent(
         // Targeted cleanup for complex blocks (Alerts, Code, Quotes)
         // Usually called for Left Pane (Original) to hide blocks that contain ONLY 'new' content (INS).
         function hideEmptyContainers(pane, hiddenTagName) {
-             const complexSelectors = '.markdown-alert, pre, blockquote, .katex-block, .mermaid, h1, h2, h3, h4, h5, h6, p, dt, dd, hr';
+             const complexSelectors = '.markdown-alert, pre, blockquote, .katex-block, .mermaid, .image-diff-block, h1, h2, h3, h4, h5, h6, p, dt, dd, hr';
              const candidates = pane.querySelectorAll(complexSelectors);
              
              candidates.forEach(el => {
@@ -2021,6 +2155,11 @@ export function getWebviewContent(
              // It should never be considered "empty" — ins/del wrapping
              // is already handled by CSS display:none rules.
              if (el.tagName === 'HR') {
+                 return false;
+             }
+
+             // Image diff blocks are complex and never "empty" in the traditional sense
+             if (el.classList.contains('image-diff-block')) {
                  return false;
              }
              
@@ -2041,8 +2180,152 @@ export function getWebviewContent(
              return true;
         }
 
+        // --- Image Comparison Controls ---
+        function initImageDiffs() {
+            const blocks = document.querySelectorAll('.image-diff-block:not([data-initialized])');
+            
+            blocks.forEach(block => {
+                block.setAttribute('data-initialized', 'true');
+                
+                const oldImg = block.querySelector('.diff-image-old img');
+                const newImg = block.querySelector('.diff-image-new img');
+                const wrapper = block.querySelector('.image-diff-wrapper');
+                
+                if (!oldImg || !newImg) return;
+
+                // Create Controls
+                const controls = document.createElement('div');
+                controls.className = 'image-diff-controls';
+                
+                const tabs = document.createElement('div');
+                tabs.className = 'image-diff-tabs';
+                
+                const modes = [
+                    { id: 'side-by-side', label: '${t("Side-by-Side")}' },
+                    { id: 'swipe', label: '${t("Swipe")}' },
+                    { id: 'onion-skin', label: '${t("Onion Skin")}' }
+                ];
+                
+                const sliderContainer = document.createElement('div');
+                sliderContainer.className = 'image-diff-slider-container';
+                
+                const slider = document.createElement('input');
+                slider.type = 'range';
+                slider.min = '0';
+                slider.max = '100';
+                slider.value = '50';
+                slider.className = 'image-diff-slider';
+                
+                const label = document.createElement('span');
+                label.className = 'image-diff-label';
+                label.textContent = '50%';
+                
+                sliderContainer.appendChild(slider);
+                sliderContainer.appendChild(label);
+
+                modes.forEach(mode => {
+                    const tab = document.createElement('div');
+                    tab.className = 'image-diff-tab';
+                    if (mode.id === 'side-by-side') tab.classList.add('active');
+                    tab.textContent = mode.label;
+                    tab.onclick = () => {
+                        tabs.querySelectorAll('.image-diff-tab').forEach(t => t.classList.remove('active'));
+                        tab.classList.add('active');
+                        setMode(block, mode.id, slider, label);
+                    };
+                    tabs.appendChild(tab);
+                });
+                
+                controls.appendChild(tabs);
+                controls.appendChild(sliderContainer);
+                block.appendChild(controls);
+
+                // Update logic
+                const update = () => {
+                    const mode = block.getAttribute('data-mode') || 'side-by-side';
+                    const val = parseInt(slider.value, 10);
+                    label.textContent = val + '%';
+                    
+                    if (mode === 'onion-skin') {
+                        newImg.parentElement.style.opacity = val / 100;
+                        newImg.parentElement.style.clipPath = 'none';
+                    } else if (mode === 'swipe') {
+                        const rect = newImg.getBoundingClientRect();
+                        const wrapperRect = wrapper.getBoundingClientRect();
+                        
+                        // Calculate clip position relative to the image
+                        // Since img is centered with translate(-50%, -50%)
+                        const width = rect.width;
+                        const clipWidth = (val / 100) * width;
+                        newImg.parentElement.style.clipPath = \`inset(0 \${width - clipWidth}px 0 0)\`;
+                        newImg.parentElement.style.opacity = '1';
+                    } else {
+                        newImg.parentElement.style.opacity = '1';
+                        newImg.parentElement.style.clipPath = 'none';
+                    }
+                };
+
+                slider.oninput = update;
+                
+                // Initial state
+                block.setAttribute('data-mode', 'side-by-side');
+
+                // Ensure images are loaded before calculating dimensions for Swipe
+                const onImgLoad = () => {
+                   if (oldImg.complete && newImg.complete) {
+                       update();
+                   }
+                };
+                oldImg.onload = onImgLoad;
+                newImg.onload = onImgLoad;
+            });
+        }
+
+        function setMode(block, mode, slider, label) {
+             block.setAttribute('data-mode', mode);
+             const sliderContainer = block.querySelector('.image-diff-slider-container');
+             const newImg = block.querySelector('.diff-image-new img');
+             const oldImg = block.querySelector('.diff-image-old img');
+             const wrapper = block.querySelector('.image-diff-wrapper');
+
+             // Reset styles to a clean state before mode-specific updates
+             if (newImg && newImg.parentElement) {
+                 newImg.parentElement.style.clipPath = 'none';
+                 newImg.parentElement.style.opacity = '1';
+             }
+
+             if (mode === 'side-by-side') {
+                sliderContainer.style.display = 'none';
+                wrapper.style.height = 'auto';
+            } else {
+                sliderContainer.style.display = 'flex';
+                
+                // Fix height for overlay modes based on the taller image
+                if (newImg && oldImg) {
+                    const maxHeight = Math.max(newImg.naturalHeight || 0, oldImg.naturalHeight || 0, 100);
+                    const maxWidth = Math.max(newImg.naturalWidth || 0, oldImg.naturalWidth || 0, 1);
+                    
+                    // Constrain by wrapper width
+                    const displayWidth = wrapper.clientWidth - 40;
+                    const targetHeight = Math.min(maxHeight, (maxHeight / maxWidth) * displayWidth);
+                    
+                    wrapper.style.height = (targetHeight + 40) + 'px';
+                }
+                
+                if (mode === 'swipe') {
+                    slider.value = '50';
+                } else if (mode === 'onion-skin') {
+                    slider.value = '50';
+                }
+            }
+            
+            // Trigger update
+            slider.oninput();
+        }
+
         // Initial cleanup
         cleanupGhosts();
+        initImageDiffs();
 
         // Listen for standard shortcut commands from Extension
         window.addEventListener('message', event => {
@@ -2087,6 +2370,14 @@ export function getWebviewContent(
             mermaid.initialize({ startOnLoad: true, securityLevel: 'strict' });
         }
 
+        // Global resize listener to refresh image layouts
+        window.addEventListener('resize', () => {
+             document.querySelectorAll('.image-diff-block[data-mode="swipe"], .image-diff-block[data-mode="onion-skin"]').forEach(block => {
+                 const slider = block.querySelector('.image-diff-slider');
+                 if (slider) slider.oninput();
+             });
+        });
+
       scheduleAsyncLayoutRefresh();
       if (document.fonts && document.fonts.ready) {
         document.fonts.ready.finally(() => {
@@ -2115,6 +2406,8 @@ export function getWebviewContent(
           requestAnimationFrame(() => {
             requestAnimationFrame(() => {
               scheduleAsyncLayoutRefresh();
+              // Also refresh image diffs if any
+              initImageDiffs();
             });
           });
         };

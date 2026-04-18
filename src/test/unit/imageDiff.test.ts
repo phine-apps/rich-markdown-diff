@@ -61,6 +61,27 @@ describe("MarkdownDiffProvider - Image Diff", () => {
     );
   });
 
+  it("should consolidated image changes into an .image-diff-block", () => {
+    const oldMd = "![Old](old.png)";
+    const newMd = "![New](new.png)";
+    const { html: diff } = provider.computeDiff(oldMd, newMd);
+
+    assert.ok(diff.includes('class="image-diff-block"'), "Should contain image-diff-block class");
+    assert.ok(diff.includes('div class="diff-image-old"'), "Should contain diff-image-old div");
+    assert.ok(diff.includes('div class="diff-image-new"'), "Should contain diff-image-new div");
+    assert.ok(diff.includes('src="old.png"'), "Should contain old image src");
+    assert.ok(diff.includes('src="new.png"'), "Should contain new image src");
+  });
+
+  it("should unwrap parent <p> tags when consolidating image changes", () => {
+    const oldMd = "![a](a.png)";
+    const newMd = "![b](b.png)";
+    const { html: diff } = provider.computeDiff(oldMd, newMd);
+
+    assert.ok(!diff.includes("<p><div"), "Should not have nested div inside p");
+    assert.ok(diff.includes('class="image-diff-block"'), "Should contain image-diff-block");
+  });
+
   it("should verify CSS class injection for image diffs", () => {
     // This tests if the getWebviewContent includes our new CSS
     const html = provider.getWebviewContent(
@@ -70,16 +91,12 @@ describe("MarkdownDiffProvider - Image Diff", () => {
       "light.css",
       "dark.css",
     );
-    assert.ok(html.includes("ins img {"), "Should include ins img CSS styles");
-    assert.ok(html.includes("del img {"), "Should include del img CSS styles");
-    assert.ok(html.includes("border: 4px solid"), "Should have border style");
+    assert.ok(html.includes(".image-diff-block"), "Should include .image-diff-block CSS styles");
+    assert.ok(html.includes(".image-diff-wrapper"), "Should include .image-diff-wrapper CSS styles");
+    assert.ok(html.includes("data-mode=\"onion-skin\""), "Should have onion-skin selector in CSS");
     assert.ok(
-      html.includes("p > img:only-child {"),
-      "Standalone markdown images should be promoted to block layout",
-    );
-    assert.ok(
-      html.includes("height: auto;"),
-      "Images should keep their aspect ratio when resized to fit the pane",
+      html.includes("object-fit: contain;"),
+      "Images should use object-fit: contain to maintain alignment",
     );
   });
 });

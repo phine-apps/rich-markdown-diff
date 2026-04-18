@@ -552,6 +552,23 @@ export function refineBlockDiffs(html: string): string {
     },
   );
 
+  const imageRegex =
+    /(?:<p[^>]*>\s*)?(<del[^>]*>\s*(<img[^>]*>)\s*<\/del>)\s*(<ins[^>]*>\s*(<img[^>]*>)\s*<\/ins>)(?:\s*<\/p>)?/gi;
+
+  resultHtml = resultHtml.replace(
+    imageRegex,
+    (match, delBlock, oldImg, insBlock, newImg) => {
+      // Wrap the changed image pair in a consolidated container
+      // Note: We intentionally discard the wrapping <p> if it was matched to prevent <div> inside <p>
+      return `<div class="image-diff-block" data-image-diff="true">
+        <div class="image-diff-wrapper">
+          <div class="diff-image-old">${oldImg}</div>
+          <div class="diff-image-new">${newImg}</div>
+        </div>
+      </div>`;
+    },
+  );
+
   return resultHtml;
 }
 
