@@ -40,7 +40,7 @@ export function run(): Promise<void> {
     // later we can make it glob better
     glob("**/*.test.js", {
       cwd: testsRoot,
-      ignore: ["unit/**", "**/unit/**"],
+      ignore: ["unit/**", "**/unit/**", "visual/**", "**/visual/**"],
     }).then(
       (files: string[]) => {
         // Add files to the test suite

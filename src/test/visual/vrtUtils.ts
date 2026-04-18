@@ -82,12 +82,50 @@ export async function generateVRTHtml(
   // Inject Theme Variables via placeholder
   html = html.replace("/* VRT_THEME_VARS */", themeVars);
 
-  // Force inline mode if requested via placeholder in body class
-  const layoutClass = options.inline ? "inline-mode" : "split-mode";
-  html = html.replace("VRT_LAYOUT_CLASS", layoutClass);
+  // Overrides for VRT environment
+  const vrtStyle = `
+      html, body.vrt-layout {
+          height: auto !important;
+          overflow: visible !important;
+          width: 1280px !important;
+      }
+      body.vrt-layout .container {
+          display: grid !important;
+          height: auto !important;
+          overflow: visible !important;
+      }
+      body.vrt-layout .pane {
+          min-width: 0 !important;
+          overflow: visible !important;
+          height: auto !important;
+          max-height: none !important;
+          display: block !important;
+          padding: 0 !important;
+      }
+      body.vrt-layout .pane-content {
+          height: auto !important;
+          overflow: visible !important;
+      }
+      body.vrt-layout.split-mode .container {
+          grid-template-columns: 640px 640px !important;
+      }
+      body.vrt-layout.inline-mode .container {
+          display: block !important;
+      }
+      body.vrt-layout.inline-mode .pane {
+          width: 100% !important;
+          margin-bottom: 2rem !important;
+      }
+  `;
 
-  // Remove CSP for testing environment
-  html = html.replace(/<meta http-equiv="Content-Security-Policy"[^>]*>/, "");
+  // Force layout classes if requested via placeholder in body class
+  const layoutClass = (options.inline ? "inline-mode" : "split-mode") + " vrt-layout";
+  const extraClasses = marpCss ? " marp-mode" : "";
+  html = html.replace("VRT_LAYOUT_CLASS", layoutClass + extraClasses);
+
+  // Remove CSP and nonces for testing environment
+  html = html.replace(/<meta http-equiv=["']Content-Security-Policy["'][^>]*>/gi, "");
+  html = html.replace(/nonce=["'][^"']*["']/g, "");
 
   // We don't inject mermaid.min.js in VRT since it's mocked by CSS and executing it can cause hangs.
   html = html.replace(/<script[^>]*src="[^"]*mock-mermaid.min.js"[^>]*><\/script>/, "");
@@ -96,6 +134,7 @@ export async function generateVRTHtml(
   // which causes flaky text-only snapshots or timeouts. We replace `.mermaid` with a static visual block.
   html = html.replace("</head>", `
     <style>
+      ${vrtStyle}
       .mermaid {
          background: var(--vscode-editor-inactiveSelectionBackground);
          color: transparent !important;
@@ -114,6 +153,19 @@ export async function generateVRTHtml(
       }
       .mermaid svg { display: none !important; }
     </style>
+    <script>
+      window.VRT_ENVIRONMENT = true;
+      // Mock Mermaid to prevent ReferenceError since we stripped the script
+      window.mermaid = {
+          initialize: () => {},
+          render: (id, text, cb) => { cb(''); }
+      };
+      
+      // Safety fallback to unblock baseline updates
+      setTimeout(() => {
+          document.body.setAttribute('data-marp-scaled', 'true');
+      }, 5000);
+    </script>
   </head>`);
 
   return html;

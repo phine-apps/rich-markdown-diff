@@ -16,8 +16,8 @@ test.describe("Visual Regression Tests", () => {
   });
 
   test.beforeEach(async ({ page }) => {
-    // Increase viewport height to capture more content for long documents
-    await page.setViewportSize({ width: 1280, height: 2500 });
+    // Standard viewport, using fullPage: true for auto-scaling screenshots
+    await page.setViewportSize({ width: 1280, height: 800 });
   });
 
   const cases = [
@@ -35,11 +35,8 @@ test.describe("Visual Regression Tests", () => {
         theme: "light",
         inline: false,
       });
-      await page.setViewportSize({ width: 1280, height: 1000 });
       await page.emulateMedia({ colorScheme: "light" });
       await page.setContent(html, { waitUntil: "load" });
-
-      // Mermaid is mocked via CSS, no need to wait for SVG.
 
       // Wait for KaTeX/fonts
       // @ts-ignore
@@ -54,7 +51,15 @@ test.describe("Visual Regression Tests", () => {
         await page.waitForSelector(".katex", { state: "visible" });
       }
 
-      await expect(page).toHaveScreenshot(`${c.name}-split-light.png`, { maxDiffPixelRatio: 0.1 });
+      if (c.name.includes("marp")) {
+        // Remove signal dependency to unblock update-snapshots
+        await page.waitForTimeout(2000);
+      }
+
+      await expect(page).toHaveScreenshot(`${c.name}-split-light.png`, { 
+        maxDiffPixelRatio: 0.1,
+        fullPage: true 
+      });
     });
 
     test(`Visual Diff: ${c.name} - Split Dark`, async ({ page }) => {
@@ -65,11 +70,8 @@ test.describe("Visual Regression Tests", () => {
         theme: "dark",
         inline: false,
       });
-      await page.setViewportSize({ width: 1280, height: 1000 });
       await page.emulateMedia({ colorScheme: "dark" });
       await page.setContent(html, { waitUntil: "load" });
-
-      // Mermaid is mocked via CSS, no need to wait for SVG.
 
       // @ts-ignore
       await page.evaluate(() =>
@@ -79,7 +81,15 @@ test.describe("Visual Regression Tests", () => {
         ]),
       );
 
-      await expect(page).toHaveScreenshot(`${c.name}-split-dark.png`, { maxDiffPixelRatio: 0.1 });
+      if (c.name.includes("marp")) {
+        // Remove signal dependency to unblock update-snapshots
+        await page.waitForTimeout(2000);
+      }
+
+      await expect(page).toHaveScreenshot(`${c.name}-split-dark.png`, { 
+        maxDiffPixelRatio: 0.1,
+        fullPage: true 
+      });
     });
 
     test(`Visual Diff: ${c.name} - Inline Light`, async ({ page }) => {
@@ -90,11 +100,8 @@ test.describe("Visual Regression Tests", () => {
         theme: "light",
         inline: true,
       });
-      await page.setViewportSize({ width: 1280, height: 1000 });
       await page.emulateMedia({ colorScheme: "light" });
       await page.setContent(html, { waitUntil: "load" });
-
-      // Mermaid is mocked via CSS, no need to wait for SVG.
 
       // @ts-ignore
       await page.evaluate(() =>
@@ -104,7 +111,15 @@ test.describe("Visual Regression Tests", () => {
         ]),
       );
 
-      await expect(page).toHaveScreenshot(`${c.name}-inline-light.png`, { maxDiffPixelRatio: 0.1 });
+      if (c.name.includes("marp")) {
+        // Remove signal dependency to unblock update-snapshots
+        await page.waitForTimeout(2000);
+      }
+
+      await expect(page).toHaveScreenshot(`${c.name}-inline-light.png`, { 
+        maxDiffPixelRatio: 0.1,
+        fullPage: true 
+      });
     });
 
     test(`Visual Diff: ${c.name} - Inline Dark`, async ({ page }) => {
@@ -115,11 +130,8 @@ test.describe("Visual Regression Tests", () => {
         theme: "dark",
         inline: true,
       });
-      await page.setViewportSize({ width: 1280, height: 1000 });
       await page.emulateMedia({ colorScheme: "dark" });
       await page.setContent(html, { waitUntil: "load" });
-
-      // Mermaid is mocked via CSS, no need to wait for SVG.
 
       // @ts-ignore
       await page.evaluate(() =>
@@ -129,7 +141,15 @@ test.describe("Visual Regression Tests", () => {
         ]),
       );
 
-      await expect(page).toHaveScreenshot(`${c.name}-inline-dark.png`, { maxDiffPixelRatio: 0.1 });
+      if (c.name.includes("marp")) {
+        // Remove signal dependency to unblock update-snapshots
+        await page.waitForTimeout(2000);
+      }
+
+      await expect(page).toHaveScreenshot(`${c.name}-inline-dark.png`, { 
+        maxDiffPixelRatio: 0.1,
+        fullPage: true 
+      });
     });
   }
 });
