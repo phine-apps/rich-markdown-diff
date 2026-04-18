@@ -831,6 +831,19 @@ export function getWebviewContent(
             height: auto;
             display: block;
             object-fit: contain;
+            box-sizing: border-box;
+        }
+        
+        /* Diff Coloring for Interactive Blocks */
+        .image-diff-block .diff-image-old img {
+            border: 4px solid rgba(239, 68, 68, 0.6);
+            background-color: rgba(239, 68, 68, 0.1);
+            padding: 4px;
+        }
+        .image-diff-block .diff-image-new img {
+            border: 4px solid rgba(34, 197, 94, 0.6);
+            background-color: rgba(34, 197, 94, 0.1);
+            padding: 4px;
         }
         
         /* Pane-specific hiding for Side-by-Side Mode in Split View */
