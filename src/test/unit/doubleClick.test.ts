@@ -42,8 +42,8 @@ describe("Double Click Navigation", () => {
 
     const { html: diff } = provider.computeDiff(md, md);
     assert.ok(
-      !diff.includes("data-line="),
-      "Diff output should not contain data-line attributes (stripped before diffing)",
+      diff.includes("data-line="),
+      "Diff output should contain data-line attributes (preserved for Quick Edit)",
     );
   });
 
@@ -51,8 +51,8 @@ describe("Double Click Navigation", () => {
     const md = "# Header 1";
     const { html: diff } = provider.computeDiff(md, md);
     assert.ok(
-      !diff.includes("data-line="),
-      "Header diff should not contain data-line attributes",
+      diff.includes("data-line="),
+      "Header diff should contain data-line attributes",
     );
   });
 
@@ -60,8 +60,8 @@ describe("Double Click Navigation", () => {
     const md = "- Item 1\n- Item 2";
     const { html: diff } = provider.computeDiff(md, md);
     assert.ok(
-      !diff.includes("data-line="),
-      "List diff should not contain data-line attributes",
+      diff.includes("data-line="),
+      "List diff should contain data-line attributes",
     );
   });
 });

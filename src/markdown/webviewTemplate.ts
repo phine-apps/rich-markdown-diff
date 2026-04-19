@@ -296,18 +296,40 @@ export function getWebviewContent(
           border-radius: 0;
         }
         pre {
-          background-color: var(--vscode-textCodeBlock-background, var(--markdown-raised-background));
-          padding: 8px 10px;
-          font-size: var(--markdown-code-font-size);
-          line-height: 1.5;
-          overflow-x: auto;
-          width: 100%;
-          max-width: 100%;
-          min-width: 0;
-          box-sizing: border-box;
-          border: 1px solid var(--vscode-panel-border);
-          border-radius: 4px;
+            background-color: var(--vscode-textCodeBlock-background, var(--markdown-raised-background));
+            padding: 8px 10px;
+            font-size: var(--markdown-code-font-size);
+            line-height: 1.5;
+            overflow-x: auto;
+            width: 100%;
+            max-width: 100%;
+            min-width: 0;
+            box-sizing: border-box;
+            border: 1px solid var(--vscode-panel-border);
+            border-radius: 4px;
         }
+        blockquote {
+            padding: 0 16px;
+            margin: 0 0 var(--markdown-block-spacing) 0;
+            border-left: 0.25em solid var(--vscode-textBlockQuote-border);
+            color: var(--vscode-textBlockQuote-foreground);
+            background-color: transparent;
+        }
+        /* Ensure alerts don't inherit or double-up on blockquote borders */
+        .markdown-alert {
+            border-left: 0.25em solid;
+            padding: 8px 16px;
+            margin-bottom: 16px;
+            background-color: var(--markdown-raised-background);
+        }
+        /* Guard against double vertical bars if alerts become nested during diffing */
+        .markdown-alert .markdown-alert {
+            border-left: none !important;
+            padding-left: 0 !important;
+            margin-bottom: 0 !important;
+            background-color: transparent !important;
+        }
+
         .katex-block {
           background-color: var(--vscode-textCodeBlock-background, var(--markdown-raised-background));
           padding: 8px 10px;
@@ -424,18 +446,20 @@ export function getWebviewContent(
         body:not(.inline-mode) #left-pane h3 del,
         body:not(.inline-mode) #left-pane h4 del,
         body:not(.inline-mode) #left-pane h5 del,
-        body:not(.inline-mode) #left-pane h6 del {
+        body:not(.inline-mode) #left-pane h6 del,
+        body:not(.inline-mode) #left-pane del.diff-block {
             border-bottom: none;
         }
 
         /* Right Pane (Modified): Hide deletions, show insertions in Green */
         body:not(.inline-mode) #right-pane del { display: none; }
         body:not(.inline-mode) #right-pane ins {
-            background-color: rgba(74, 222, 128, 0.2); 
+            background-color: rgba(34, 197, 94, 0.25); 
             text-decoration: none; 
             border-bottom: 1px solid #22c55e;
             color: inherit;
         }
+
         body:not(.inline-mode) #right-pane h1 ins,
         body:not(.inline-mode) #right-pane h2 ins,
         body:not(.inline-mode) #right-pane h3 ins,
@@ -451,21 +475,31 @@ export function getWebviewContent(
             color: inherit;
         }
         ins.diffins {
-            background-color: rgba(74, 222, 128, 0.2); 
+            background-color: rgba(34, 197, 94, 0.25); 
             border-bottom: 1px solid #22c55e;
         }
-        ins.diffins a {
-            background-color: rgba(74, 222, 128, 0.2); 
+
+        ins.diffins a, 
+        ins.diffins p, 
+        ins.diffins li, 
+        ins.diffins td {
+            background-color: transparent !important;
         }
+
+
         del.diffdel {
             background-color: rgba(248, 113, 113, 0.2); 
             border-bottom: 1px solid #ef4444;
         }
-        del.diffdel a {
-            background-color: rgba(248, 113, 113, 0.2); 
+        del.diffdel a,
+        del.diffdel p,
+        del.diffdel li,
+        del.diffdel td {
+            background-color: transparent !important;
         }
 
-        /* Ensure diff styling is visible for tokenized blocks with their own backgrounds (Alerts, KaTeX, Mermaid) */
+
+
         ins:has(.markdown-alert), del:has(.markdown-alert),
         ins:has(.katex-block), del:has(.katex-block),
         ins:has(.mermaid), del:has(.mermaid),
@@ -474,47 +508,128 @@ export function getWebviewContent(
             display: block;
             text-decoration: none;
             border: none !important;
-            background-color: transparent !important;
             padding: 0 !important;
             margin: 0 !important;
             margin-bottom: var(--markdown-block-spacing);
         }
 
-        ins .markdown-alert, del .markdown-alert,
-        ins .katex-block, del .katex-block,
-        ins .mermaid, del .mermaid,
-        ins pre, del pre {
-            position: relative; /* For pseudo-element overlay */
+
+        /* Container Borders for Block Diffs (Alerts, Code, Mermaid) */
+        :is(.markdown-alert, .mermaid, pre):is(:has(ins), :has(del), :parent(ins), :parent(del), .diffins, .diffdel) {
+            position: relative;
         }
 
-        ins .markdown-alert, ins .katex-block, ins .mermaid, ins pre {
-            border: 1px solid #22c55e;
+        /* Opaque blocks get a full border if they contain or are part of a diff */
+        /* NOTE: pre (code blocks) have granular line-level diffs, so we do NOT apply a
+           monochrome full border when ins/del are present inside — the inline markers
+           already convey the change. A border is only applied when the WHOLE block is
+           new/deleted (i.e. the pre itself is wrapped in ins/del, handled elsewhere). */
+        :is(.mermaid):is(:has(ins), :has(.diffins), :parent(:is(ins, .diffins))) {
+            border: 1px solid rgba(34, 197, 94, 0.6);
         }
-        ins .markdown-alert::after, ins .katex-block::after, ins .mermaid::after, ins pre::after {
+        :is(.mermaid):is(:has(del), :has(.diffdel), :parent(:is(del, .diffdel))) {
+            border: 1px solid rgba(239, 68, 68, 0.6);
+        }
+
+        /* Alerts get their characteristic left bar colored, but NO full border to avoid double lines */
+        :is(.markdown-alert):is(:has(ins), :has(.diffins), :parent(:is(ins, .diffins))) {
+            border-left-color: rgba(34, 197, 94, 0.8) !important;
+        }
+        :is(.markdown-alert):is(:has(del), :has(.diffdel), :parent(:is(del, .diffdel))) {
+            border-left-color: rgba(239, 68, 68, 0.8) !important;
+        }
+
+
+        /* Math Block (KaTeX) Specifics: Keep it clean and transparent by default */
+        .katex-block, .katex-display, .katex-display :not(ins, del, ins *, del *) {
+            background-color: transparent !important;
+        }
+
+
+        /* EXCEPT for granular diffs inside the math! */
+        .katex del.diffmod, .katex del.diffdel {
+            background-color: rgba(239, 68, 68, 0.35) !important;
+            display: inline-block !important;
+        }
+        .katex ins.diffmod, .katex ins.diffins {
+            background-color: rgba(34, 197, 94, 0.35) !important;
+            display: inline-block !important;
+        }
+
+        /* Ensure pane isolation for granular math diffs since they use !important */
+        body:not(.inline-mode) #left-pane .katex ins.diffmod,
+        body:not(.inline-mode) #left-pane .katex ins.diffins,
+        body:not(.inline-mode) #left-pane .katex ins {
+            display: none !important;
+        }
+
+        body:not(.inline-mode) #right-pane .katex del.diffmod,
+        body:not(.inline-mode) #right-pane .katex del.diffdel,
+        body:not(.inline-mode) #right-pane .katex del {
+            display: none !important;
+        }
+
+        /* Remove the background overlays (::after) by default, enabled only for diffs */
+        .markdown-alert::after, .mermaid::after, pre::after {
+            display: none;
+        }
+
+        /* 
+           Green/Red tints for complex blocks.
+           - Mermaid gets a full-block tint (SVG is opaque, we can't see through it).
+           - pre (code blocks) do NOT get the ::after overlay; granular ins/del markers
+             inside code are already coloured per-line and the overlay would hide them.
+           - Transparent blocks (Alerts) ONLY get tinted if the WHOLE block is changed.
+        */
+        :is(.mermaid):is(:has(ins), :has(.diffins), :parent(:is(ins, .diffins)))::after,
+        :is(.markdown-alert):is(:parent(:is(ins, .diffins)))::after {
             content: "";
             position: absolute;
             top: 0; left: 0; right: 0; bottom: 0;
             background-color: rgba(74, 222, 128, 0.2);
             pointer-events: none;
+            display: block !important;
+            z-index: 1;
         }
-
-        del .markdown-alert, del .katex-block, del .mermaid, del pre {
-            border: 1px solid #ef4444;
-        }
-        del .markdown-alert::after, del .katex-block::after, del .mermaid::after, del pre::after {
+        :is(.mermaid):is(:has(del), :has(.diffdel), :parent(:is(del, .diffdel)))::after,
+        :is(.markdown-alert):is(:parent(:is(del, .diffdel)))::after {
             content: "";
             position: absolute;
             top: 0; left: 0; right: 0; bottom: 0;
             background-color: rgba(248, 113, 113, 0.2);
             pointer-events: none;
+            display: block !important;
+            z-index: 1;
         }
 
-        ins:has(> h1, > h2, > h3, > h4, > h5, > h6, > table, > ul, > ol, > dl, > blockquote, > div, > pre, > hr),
-        del:has(> h1, > h2, > h3, > h4, > h5, > h6, > table, > ul, > ol, > dl, > blockquote, > div, > pre, > hr) {
+        /* Granular line-level diff highlights inside code blocks */
+        pre ins {
+            background-color: rgba(74, 222, 128, 0.25);
+            display: inline;
+            text-decoration: none;
+        }
+        pre del {
+            background-color: rgba(248, 113, 113, 0.25);
+            display: inline;
+            text-decoration: none;
+        }
+
+        /* Ensure text inside highlighted blocks is also transparency-friendly (if any parent still has bg) */
+        :is(p, h1, h2, h3, h4, h5, h6, li, td):is(ins, .diffins, del, .diffdel) * {
+            background-color: transparent !important;
+        }
+
+
+
+
+
+        ins:has(> h1, > h2, > h3, > h4, > h5, > h6, > p, > img, > table, > ul, > ol, > dl, > blockquote, > div, > pre, > hr, > section, > details, > summary, > figure),
+        del:has(> h1, > h2, > h3, > h4, > h5, > h6, > p, > img, > table, > ul, > ol, > dl, > blockquote, > div, > pre, > hr, > section, > details, > summary, > figure) {
             display: block;
           width: auto;
           max-width: 100%;
         }
+
 
         /* Table Column Hiding */
         #left-pane .diff-col-ins {
@@ -558,7 +673,10 @@ export function getWebviewContent(
         }
 
         /* Block-Level Diffs (Tables, Lists, Blockquotes) */
-        del.diffdel.diff-block, ins.diffins.diff-block {
+        /* htmldiff uses .diffdel/.diffins for pure adds/removes, and .diffmod for "modified"
+           blocks. All three should receive block-level styling when combined with .diff-block. */
+        del.diffdel.diff-block, del.diffmod.diff-block,
+        ins.diffins.diff-block, ins.diffmod.diff-block {
             display: block;
             border: 1px solid;
             border-radius: 4px;
@@ -569,13 +687,22 @@ export function getWebviewContent(
           min-width: 0;
             box-sizing: border-box;
         }
-        del.diffdel.diff-block {
-            background-color: rgba(239, 68, 68, 0.1); 
+        del.diffdel.diff-block, del.diffmod.diff-block {
+            background-color: rgba(248, 113, 113, 0.2); 
             border-color: rgba(239, 68, 68, 0.6);
         }
-        ins.diffins.diff-block {
-            background-color: rgba(34, 197, 94, 0.1); 
+        ins.diffins.diff-block, ins.diffmod.diff-block {
+            background-color: rgba(74, 222, 128, 0.2); 
             border-color: rgba(34, 197, 94, 0.6);
+        }
+
+        /* Let the red/green tint of a diff-block container show through table cells.
+           table, th, and striped rows have opaque background colors that would otherwise
+           completely cover the parent del/ins background. */
+        :is(del.diffdel, del.diffmod, ins.diffins, ins.diffmod).diff-block table,
+        :is(del.diffdel, del.diffmod, ins.diffins, ins.diffmod).diff-block th,
+        :is(del.diffdel, del.diffmod, ins.diffins, ins.diffmod).diff-block tbody tr {
+            background-color: transparent !important;
         }
 
         /* Structural list-container swaps (ol <-> ul) should highlight marker changes,
@@ -798,6 +925,86 @@ export function getWebviewContent(
           box-shadow: 0 0 0 2px rgba(255, 165, 0, 0.45) !important;
         }
 
+        /* Quick Edit Styles */
+        body:not(.marp-mode) #right-pane [data-line]:hover {
+            outline: 2px dashed rgba(255, 165, 0, 0.4);
+            outline-offset: 2px;
+            cursor: pointer;
+            position: relative;
+        }
+        body:not(.marp-mode) #right-pane [data-line]:hover::before {
+            content: "✎ " attr(data-line);
+            position: absolute;
+            top: -18px;
+            right: 0;
+            background-color: rgba(255, 165, 0, 0.8);
+            color: white;
+            font-size: 10px;
+            padding: 0 4px;
+            border-radius: 2px;
+            pointer-events: none;
+            z-index: 100;
+        }
+
+        .block-editor-overlay {
+            position: absolute;
+            z-index: 10000;
+            background-color: var(--markdown-surface-background);
+            border: 1px solid var(--vscode-focusBorder);
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
+            border-radius: 4px;
+            display: flex;
+            flex-direction: column;
+            padding: 8px;
+            gap: 8px;
+            animation: fadeIn 0.2s ease-out;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-5px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .block-editor-textarea {
+            background-color: var(--vscode-editor-background);
+            color: var(--vscode-editor-foreground);
+            font-family: var(--vscode-editor-font-family);
+            font-size: var(--vscode-editor-font-size);
+            border: 1px solid var(--vscode-panel-border);
+            padding: 8px;
+            resize: vertical;
+            min-height: 80px;
+            min-width: 300px;
+            outline: none;
+        }
+        .block-editor-textarea:focus {
+            border-color: var(--vscode-focusBorder);
+        }
+        .block-editor-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 8px;
+        }
+        .block-editor-btn {
+            padding: 4px 12px;
+            font-size: 12px;
+            cursor: pointer;
+            border-radius: 2px;
+            border: 1px solid transparent;
+        }
+        .block-editor-save {
+            background-color: var(--vscode-button-background);
+            color: var(--vscode-button-foreground);
+        }
+        .block-editor-save:hover {
+            background-color: var(--vscode-button-hoverBackground);
+        }
+        .block-editor-cancel {
+            background-color: var(--vscode-button-secondaryBackground);
+            color: var(--vscode-button-secondaryForeground);
+        }
+        .block-editor-cancel:hover {
+            background-color: var(--vscode-button-secondaryHoverBackground);
+        }
+
         /* Image Comparison Enhancements */
         .image-diff-block {
             margin-top: 0;
@@ -852,7 +1059,23 @@ export function getWebviewContent(
         body:not(.inline-mode) #right-pane .image-diff-block[data-mode="side-by-side"] .diff-image-old { display: none !important; }
         
         /* UX Refinement: In Split View, Left Pane always shows v1 and hides controls */
+        /* Image controls are hidden by default in left pane (always), 
+           and hidden by default in right pane until hover. */
         body:not(.inline-mode) #left-pane .image-diff-controls { display: none !important; }
+        #right-pane .image-diff-controls,
+        body.inline-mode #right-pane .image-diff-controls {
+            opacity: 0;
+            visibility: hidden;
+            transform: translateY(100%);
+            transition: transform 0.2s ease, opacity 0.2s ease, visibility 0.2s;
+        }
+        #right-pane .image-diff-block:hover .image-diff-controls,
+        body.inline-mode #right-pane .image-diff-block:hover .image-diff-controls {
+            opacity: 1;
+            visibility: visible;
+            transform: translateY(0);
+        }
+
         body:not(.inline-mode) #left-pane .image-diff-block .diff-image-new { display: none !important; }
         body:not(.inline-mode) #left-pane .image-diff-block .diff-image-old { 
             display: block !important; 
@@ -916,12 +1139,24 @@ export function getWebviewContent(
             display: flex;
             align-items: center;
             gap: 15px;
-            padding: 8px 12px;
-            background-color: var(--markdown-surface-background);
-            border-top: 1px solid var(--vscode-panel-border);
+            padding: 10px 16px;
+            background-color: rgba(30, 30, 30, 0.85);
+            backdrop-filter: blur(8px);
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
             font-size: 11px;
             user-select: none;
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            z-index: 100;
         }
+        /* Light mode adjustment for backdrop */
+        body.vscode-light .image-diff-controls {
+            background-color: rgba(240, 240, 240, 0.85);
+            border-top: 1px solid rgba(0, 0, 0, 0.1);
+        }
+
         .image-diff-tabs {
             display: flex;
             background-color: var(--vscode-editorWidget-background);
@@ -962,42 +1197,8 @@ export function getWebviewContent(
             font-variant-numeric: tabular-nums;
         }
 
-        /* Complex block wrappers should not draw their own inline highlight;
-           the inner block container owns the border/background styling. */
-        ins.diffins:has(> .mermaid),
-        del.diffdel:has(> .mermaid),
-        ins.diffins:has(> .katex-block),
-        del.diffdel:has(> .katex-block) {
-          display: block;
-          border: none !important;
-          background-color: transparent !important;
-          padding: 0 !important;
-          margin: 0.5em 0 !important;
-          text-decoration: none !important;
-        }
+         /* Complex block styling consolidated above */
 
-        /* Persistent Visibility for unselected complex changes */
-        ins.diffins > .mermaid,
-        ins.diffins > .katex-block {
-          border: 1px solid rgba(34, 197, 94, 0.6);
-          background-color: rgba(34, 197, 94, 0.1);
-            display: block;
-          margin: 0;
-          padding: 8px 10px;
-          border-radius: 4px;
-          box-sizing: border-box;
-        }
-        del.diffdel > .mermaid,
-        del.diffdel > .katex-block {
-          border: 1px solid rgba(239, 68, 68, 0.6);
-          background-color: rgba(239, 68, 68, 0.1);
-            display: block;
-          margin: 0;
-          padding: 8px 10px;
-          border-radius: 4px;
-          box-sizing: border-box;
-            opacity: 0.8; /* Persistent fade for deleted content */
-        }
         
         /* FIX: Prevent Double Borders (Container + SVG) */
         /* If we are highlighting the container (.mermaid/.katex-block), DO NOT highlight the inner SVG independently */
@@ -1016,13 +1217,7 @@ export function getWebviewContent(
             filter: drop-shadow(0 0 8px rgba(255, 140, 0, 0.8)) !important;
         }
 
-        /* GitHub Alerts (Admonitions) */
-        .markdown-alert {
-            padding: 8px 16px;
-            margin-bottom: 16px;
-            border-left: 0.25em solid;
-          background-color: var(--markdown-raised-background);
-        }
+        /* GitHub Alerts (Admonitions) styling consolidated above */
 
         /* Image Diff Styles */
         /* Unified with Table/Mermaid styles */
@@ -2096,10 +2291,10 @@ export function getWebviewContent(
              if (!isInline) syncScroll(rightPane, leftPane);
         });
 
-        // Double Click to Open Source
+        // Double Click to Open Source (Whole File)
         document.body.addEventListener('dblclick', (e) => {
             // Check if click originated from toolbar or buttons
-            if (e.target.closest('.toolbar')) {
+            if (e.target.closest('.toolbar') || e.target.closest('.block-editor-overlay')) {
                 return;
             }
 
@@ -2107,25 +2302,47 @@ export function getWebviewContent(
             const pane = target.closest('.pane');
             if (!pane) return;
 
-            let side = 'modified'; // Default
-            if (pane.id === 'left-pane') {
-                side = 'original';
-            } else if (pane.id === 'right-pane') {
-                side = 'modified';
-            }
+            let side = pane.id === 'left-pane' ? 'original' : 'modified';
 
             // Find closest element with data-line
             const lineEl = target.closest('[data-line]');
-            let line = 0;
-            if (lineEl) {
-                line = parseInt(lineEl.getAttribute('data-line'), 10);
-            }
+            if (!lineEl) return;
+            
+            const lineStart = parseInt(lineEl.getAttribute('data-line'), 10);
 
             vscode.postMessage({ 
                 command: 'openSource',
                 side: side,
-                line: line
+                line: lineStart
             });
+        });
+
+        // Single Click for Quick Edit (Modified Pane only)
+        document.body.addEventListener('click', (e) => {
+            // Guard against interactive elements
+            if (e.target.closest('.toolbar') || 
+                e.target.closest('a') || 
+                e.target.closest('button') || 
+                e.target.closest('input') ||
+                e.target.closest('.block-editor-overlay')) {
+                return;
+            }
+
+            const pane = e.target.closest('.pane');
+            if (!pane || pane.id !== 'right-pane' || document.body.classList.contains('marp-mode')) {
+                return;
+            }
+
+            const lineEl = e.target.closest('[data-line]');
+            if (!lineEl) return;
+
+            const lineStart = parseInt(lineEl.getAttribute('data-line'), 10);
+            const lineEnd = parseInt(lineEl.getAttribute('data-line-end'), 10) || lineStart + 1;
+
+            // Optional: Delay slightly to see if it's a double click
+            // For now, let's just open the editor on single click. 
+            // If the user double clicks, the jump will happen anyway.
+            BlockEditor.start(lineEl, lineStart, lineEnd);
         });
 
         // --- Ghost Element Cleanup ---
@@ -2380,22 +2597,128 @@ export function getWebviewContent(
                     const ratio = message.ratio;
                     if (ratio !== undefined && !isScrolling) {
                         isScrolling = true;
-                        // Scroll both panes to the ratio position
-                        // We use the Left Pane as the driver for logic usually, but here we drive both.
-                        // Calculate target scroll tops
                         const leftTarget = ratio * (leftPane.scrollHeight - leftPane.clientHeight);
                         const rightTarget = ratio * (rightPane.scrollHeight - rightPane.clientHeight);
-                        
                         leftPane.scrollTop = leftTarget;
                         rightPane.scrollTop = rightTarget;
-                        
                         setTimeout(() => isScrolling = false, 50);
                     }
+                    break;
+                case 'receiveBlockSource':
+                    BlockEditor.onSourceReceived(message.content);
                     break;
             }
         });
 
-        // Initialize Mermaid (Resilient to missing library in VRT environment)
+        // --- Quick Edit: BlockEditor ---
+        const BlockEditor = {
+            activeOverlay: null,
+            activeInfo: null,
+
+            start(el, lineStart, lineEnd) {
+                this.close();
+                this.activeInfo = { el, lineStart, lineEnd };
+                vscode.postMessage({
+                    command: 'requestBlockSource',
+                    lineStart,
+                    lineEnd
+                });
+                statusMsg.textContent = t("Loading source...");
+            },
+
+            onSourceReceived(content) {
+                if (!this.activeInfo) return;
+                statusMsg.textContent = '';
+                this.showOverlay(content);
+            },
+
+            showOverlay(content) {
+                const { el, lineStart, lineEnd } = this.activeInfo;
+                const rect = el.getBoundingClientRect();
+                const paneRect = rightPane.getBoundingClientRect();
+
+                const overlay = document.createElement('div');
+                overlay.className = 'block-editor-overlay';
+                
+                // Position overlay over the element but constrained to pane
+                overlay.style.top = (rect.top - paneRect.top + rightPane.scrollTop) + 'px';
+                overlay.style.left = '10px';
+                overlay.style.right = '10px';
+                overlay.style.width = 'calc(100% - 40px)';
+
+                const textarea = document.createElement('textarea');
+                textarea.className = 'block-editor-textarea';
+                textarea.value = content;
+                
+                // Auto-resize
+                const adjustHeight = () => {
+                    textarea.style.height = 'auto';
+                    textarea.style.height = (textarea.scrollHeight + 5) + 'px';
+                };
+                textarea.oninput = adjustHeight;
+
+                const openInEditorBtn = document.createElement('button');
+                openInEditorBtn.className = 'block-editor-btn block-editor-cancel'; // Use secondary style
+                openInEditorBtn.textContent = t("Open in Editor");
+                openInEditorBtn.onclick = () => {
+                    vscode.postMessage({
+                        command: 'openSource',
+                        side: 'modified',
+                        line: lineStart
+                    });
+                    this.close();
+                };
+
+                const actions = document.createElement('div');
+                actions.className = 'block-editor-actions';
+
+                const cancelBtn = document.createElement('button');
+                cancelBtn.className = 'block-editor-btn block-editor-cancel';
+                cancelBtn.textContent = t("Cancel");
+                cancelBtn.onclick = () => this.close();
+
+                const saveBtn = document.createElement('button');
+                saveBtn.className = 'block-editor-btn block-editor-save';
+                saveBtn.textContent = t("Save");
+                saveBtn.onclick = () => {
+                    vscode.postMessage({
+                        command: 'applyEdit',
+                        lineStart,
+                        lineEnd,
+                        newContent: textarea.value
+                    });
+                    this.close();
+                    statusMsg.textContent = t("Saving...");
+                };
+
+                actions.appendChild(openInEditorBtn);
+                actions.appendChild(document.createElement('div')).style.flex = "1"; // Spacer
+                actions.appendChild(cancelBtn);
+                actions.appendChild(saveBtn);
+                overlay.appendChild(textarea);
+                overlay.appendChild(actions);
+
+                rightContent.appendChild(overlay);
+                this.activeOverlay = overlay;
+
+                textarea.focus();
+                adjustHeight();
+
+                // Close on Escape
+                textarea.onkeydown = (e) => {
+                    if (e.key === 'Escape') this.close();
+                    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) saveBtn.click();
+                };
+            },
+
+            close() {
+                if (this.activeOverlay) {
+                    this.activeOverlay.remove();
+                    this.activeOverlay = null;
+                }
+                this.activeInfo = null;
+            }
+        };
         if (typeof mermaid !== 'undefined') {
             mermaid.initialize({ startOnLoad: true, securityLevel: 'strict' });
         }

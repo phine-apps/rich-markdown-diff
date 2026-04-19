@@ -31,12 +31,7 @@ import { getWebviewContent } from "./markdown/webviewTemplate";
 import { cleanMarpHtml, resolveCssUrls, scopeMarpCss } from "./markdown/marpRenderer";
 import { createMarkdownRenderer, loadMarkdownPlugins } from "./markdown/renderer";
 import {
-  replaceComplexBlocksWithTokens,
-  replaceCheckboxesWithTokens,
-  restoreComplexTokens,
-  applyPreRestorePipeline,
-  applyStructuralDiffPipeline,
-  stripDataLineAttributes,
+  executeWithFullPipeline,
 } from "./markdown/structuralDiff";
 
 /**
@@ -133,49 +128,14 @@ export class MarkdownDiffProvider {
     oldHtml = sanitizeHtml(oldHtml);
     newHtml = sanitizeHtml(newHtml);
 
-    // Strip data-line attributes before diffing to prevent htmldiff from
-    // fragmenting identical block elements whose only difference is the
-    // source-line number (e.g. headings that moved due to additions above).
-    oldHtml = stripDataLineAttributes(oldHtml);
-    newHtml = stripDataLineAttributes(newHtml);
-
-    // Tokenize complex blocks before diffing so htmldiff does not fragment them.
-    const { html: oldHtmlTokenized, tokens: tokens1 } =
-      replaceComplexBlocksWithTokens(oldHtml);
-    const { html: newHtmlTokenized, tokens: tokens2 } =
-      replaceComplexBlocksWithTokens(newHtml);
-
-    // Additional Tokenization for Checkboxes
-    const { html: oldHtmlChecked, tokens: tokens1Checked } =
-      replaceCheckboxesWithTokens(oldHtmlTokenized);
-    const { html: newHtmlChecked, tokens: tokens2Checked } =
-      replaceCheckboxesWithTokens(newHtmlTokenized);
-
-    // Merge tokens
-    const allTokens = {
-      ...tokens1,
-      ...tokens2,
-      ...tokens1Checked,
-      ...tokens2Checked,
-    };
-
-    let bodyDiffHtml = oldHtmlChecked;
     // @ts-ignore
     const execute =
       htmldiff.execute || (htmldiff as any).default?.execute || htmldiff;
+    
+    let bodyDiffHtml = oldHtml;
     if (typeof execute === "function") {
-      bodyDiffHtml = execute(oldHtmlChecked, newHtmlChecked);
-      // Run the initial structural pipeline (fixing nesting, normalization, consolidation)
-      // before token restoration.
-      bodyDiffHtml = applyPreRestorePipeline(bodyDiffHtml);
-    }
-
-    // Restore Complex Blocks (Mermaid + Math + Checkboxes + Alerts)
-    bodyDiffHtml = restoreComplexTokens(bodyDiffHtml, allTokens);
-
-    if (typeof execute === "function") {
-      // Run the full refinement pipeline on restored HTML
-      bodyDiffHtml = applyStructuralDiffPipeline(bodyDiffHtml);
+      const { diff } = executeWithFullPipeline(oldHtml, newHtml, execute, {});
+      bodyDiffHtml = diff;
     }
 
     // 2. Render Frontmatter Diff

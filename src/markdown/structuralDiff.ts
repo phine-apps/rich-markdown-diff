@@ -1,4 +1,3 @@
-import * as htmldiff from "htmldiff-js";
 import * as crypto from "crypto";
 import { diffTables } from "./tableDiff";
 
@@ -8,36 +7,78 @@ import { diffTables } from "./tableDiff";
 export function diffHtmlFragments(
   oldHtml: string,
   newHtml: string,
-  execute: (oldHtml: string, newHtml: string) => string,
+  execute: (old: string, newVal: string) => string,
+  options: {
+    allTokens?: Record<string, string>;
+    skipRefinement?: boolean;
+    tokenizeCodeBlocks?: boolean;
+  } = {},
 ): string {
-  const { html: oldHtmlTokenized, tokens: tokens1 } =
-    replaceComplexBlocksWithTokens(oldHtml, {
-      tokenizeListContainers: false,
-      tokenizeCodeBlocks: false,
-    });
-  const { html: newHtmlTokenized, tokens: tokens2 } =
-    replaceComplexBlocksWithTokens(newHtml, {
-      tokenizeListContainers: false,
-      tokenizeCodeBlocks: false,
-    });
-  const { html: oldHtmlChecked, tokens: tokens1Checked } =
-    replaceCheckboxesWithTokens(oldHtmlTokenized);
-  const { html: newHtmlChecked, tokens: tokens2Checked } =
-    replaceCheckboxesWithTokens(newHtmlTokenized);
+  // Use the full tokenization pipeline in fragments to prevent mangling complex blocks
+  return executeWithFullPipeline(
+    oldHtml,
+    newHtml,
+    execute,
+    options.allTokens || {},
+    {
+      skipRefinement: options.skipRefinement,
+      tokenizeCodeBlocks: options.tokenizeCodeBlocks,
+    },
+  ).diff;
+}
 
-  const allTokens = {
-    ...tokens1,
-    ...tokens2,
-    ...tokens1Checked,
-    ...tokens2Checked,
-  };
+/**
+ * Executes a diff with the full tokenization/restoration pipeline.
+ * Used by both computeDiff and internal fragment diffing.
+ */
+export function executeWithFullPipeline(
+  oldHtml: string,
+  newHtml: string,
+  execute: (old: string, newVal: string) => string,
+  allTokens: Record<string, string>,
+  options: { skipRefinement?: boolean; tokenizeCodeBlocks?: boolean } = {},
+): { diff: string; tokens: Record<string, string> } {
+  // 1. Identify complex blocks FIRST to protect them from fragmentation
+  const tokenizeCodeBlocks = options.tokenizeCodeBlocks !== false;
+  const { html: oldT, tokens: t1 } = replaceComplexBlocksWithTokens(oldHtml, { tokenizeCodeBlocks });
+  const { html: newT, tokens: t2 } = replaceComplexBlocksWithTokens(newHtml, { tokenizeCodeBlocks });
 
-  let diffHtml = execute(oldHtmlChecked, newHtmlChecked);
-  diffHtml = fixInvalidNesting(diffHtml);
-  diffHtml = normalizeListContainerChanges(diffHtml);
-  diffHtml = restoreComplexTokens(diffHtml, allTokens);
-  diffHtml = cleanupCheckboxArtifacts(diffHtml);
-  return diffHtml;
+  // 2. Mask block attributes to prevent noise from IDs, classes, and line numbers
+  const { masked: oldMasked, attributes: oldAttrs } = maskBlockAttributes(oldT);
+  const { masked: newMasked, attributes: newAttrs } = maskBlockAttributes(newT);
+
+  const localTokens = { ...allTokens, ...t1, ...t2 };
+
+  let diff = execute(oldMasked, newMasked);
+
+  // Apply pre-restoration fixes (like nesting and checkboxes)
+  diff = applyPreRestorePipeline(diff);
+
+  // 4. Token restoration
+  let restored = restoreComplexTokens(diff, localTokens);
+
+  // Apply post-restoration refinements (like list Ghost items)
+  if (!options.skipRefinement) {
+    restored = applyStructuralDiffPipeline(restored, execute, localTokens);
+  }
+
+  // Restore the original attributes into the diff
+  restored = restoreBlockAttributes(restored, oldAttrs, newAttrs);
+
+  return { diff: restored, tokens: localTokens };
+}
+
+export function replaceLineAttributesWithTokens(html: string): {
+  html: string;
+  tokens: Record<string, string>;
+} {
+  const tokens: Record<string, string> = {};
+  // Regex to find data-line or data-line-end attributes
+  const regex = /(\s?data-line(?:-end)?="[^"]*")/g;
+  const result = html.replace(regex, (match) => {
+    return createToken(match, "ATTR", tokens);
+  });
+  return { html: result, tokens };
 }
 
 /**
@@ -56,17 +97,179 @@ export function applyPreRestorePipeline(html: string): string {
 /**
  * Orchestrates the full structural diffing pipeline on specialized or restored HTML.
  */
-export function applyStructuralDiffPipeline(html: string): string {
+export function applyStructuralDiffPipeline(
+  html: string,
+  execute: (old: string, newVal: string) => string,
+  allTokens: Record<string, string> = {},
+): string {
   let result = html;
-  result = refineBlockDiffs(result);
-  result = consolidateBlockDiffs(result);
   result = splitMixedBlockInsertions(result);
+  result = splitConsolidatedDiffs(result);
+
+  const skipRefinementExecute = (old: string, newVal: string) =>
+    diffHtmlFragments(old, newVal, execute, {
+      allTokens,
+      skipRefinement: true,
+    });
+
+  result = refineBlockDiffs(result, skipRefinementExecute, allTokens);
+  result = consolidateBlockDiffs(result);
   result = wrapHeadingPrefixes(result);
   result = extractSharedReparentedLists(result);
   result = markGhostListItems(result);
+  result = consolidateWrappedItems(result);
   result = fixInvalidNesting(result);
   result = normalizeListContainerChanges(result);
   return result;
+}
+
+/**
+ * Splits diff wrappers (ins/del) that contain multiple top-level blocks.
+ * This ensures that refineBlockDiffs can match individual blocks correctly.
+ */
+export function splitConsolidatedDiffs(html: string): string {
+  const blockTags = "h[1-6]|p|blockquote|pre|div|table|ul|ol|dl|section";
+  const blocksRegex = new RegExp(
+    `<(${blockTags})[^>]*>[\\s\\S]*?<\\/\\1>`,
+    "gi",
+  );
+
+  // First, look for pairs of <del> and <ins> that both contain multiple blocks
+  // This is where interleaving is most effective.
+  let result = html.replace(
+    /(<del([^>]*)>([\s\S]*?)<\/del>)\s*(<ins([^>]*)>([\s\S]*?)<\/ins>)/gi,
+    (match, fullDel, delAttrs, delContent, fullIns, insAttrs, insContent) => {
+      const delParts: string[] = [];
+      const insParts: string[] = [];
+      let m: RegExpExecArray | null;
+
+      while ((m = blocksRegex.exec(delContent)) !== null) {
+        delParts.push(m[0]);
+      }
+      blocksRegex.lastIndex = 0;
+      while ((m = blocksRegex.exec(insContent)) !== null) {
+        insParts.push(m[0]);
+      }
+      blocksRegex.lastIndex = 0;
+
+      const delRemaining = delContent.replace(blocksRegex, "").trim();
+      const insRemaining = insContent.replace(blocksRegex, "").trim();
+
+      if (
+        delParts.length > 1 &&
+        insParts.length > 1 &&
+        delParts.length === insParts.length &&
+        delRemaining.length === 0 &&
+        insRemaining.length === 0
+      ) {
+        return delParts
+          .map((p, i) => {
+            return `<del${delAttrs}>${p}</del><ins${insAttrs}>${insParts[i]}</ins>`;
+          })
+          .join("\n");
+      }
+      return match;
+    },
+  );
+
+  // Fallback for single tags or unbalanced tags: split them normally
+  const diffTags = ["ins", "del"];
+  diffTags.forEach((tagName) => {
+    const regex = new RegExp(
+      `<${tagName}([^>]*)>([\\s\\S]*?)<\\/${tagName}>`,
+      "gi",
+    );
+
+    result = result.replace(regex, (match, attrs, content) => {
+      const parts: string[] = [];
+      let m: RegExpExecArray | null;
+      blocksRegex.lastIndex = 0;
+      while ((m = blocksRegex.exec(content)) !== null) {
+        parts.push(m[0]);
+      }
+
+      const remainingText = content.replace(blocksRegex, "").trim();
+
+      if (parts.length > 1 && remainingText.length === 0) {
+        return parts
+          .map((p) => `<${tagName}${attrs}>${p}</${tagName}>`)
+          .join("\n");
+      }
+
+      return match;
+    });
+  });
+
+  return result;
+}
+
+export function consolidateWrappedItems(html: string): string {
+  // Fix <li><ins>...</ins></li> -> <ins><li>...</li></ins>
+  // Robust against whitespace and attributes
+  return html.replace(
+    /<(li|h[1-6]|p|blockquote)([^>]*)>\s*<(ins|del)[^>]*>\s*([\s\S]*?)\s*<\/\3>\s*<\/\1>/gi,
+    (match, tag, attrs, type, content) => {
+      const diffClass = type === "ins" ? "diffins" : "diffdel";
+      // Ensure we don't wrap twice
+      if (match.includes("diff-block")) {
+        return match;
+      }
+      return `<${type} class="${diffClass}"><${tag}${attrs}>${content}</${tag}></${type}>`;
+    },
+  );
+}
+
+/**
+ * Masks attributes on block tags with a data-attr="MASKED" placeholder.
+ */
+export function maskBlockAttributes(html: string): {
+  masked: string;
+  attributes: string[];
+} {
+  const attributes: string[] = [];
+  const blockTags =
+    "h[1-6]|p|blockquote|pre|div|table|ul|ol|dl|section|li|tr|th|td";
+  const regex = new RegExp(`(<(?:${blockTags}))(\\s+[^>]*?)(>)`, "gi");
+
+  const masked = html.replace(regex, (match, tag, attrs, close) => {
+    attributes.push(attrs);
+    return `${tag} data-attr="MASKED"${close}`;
+  });
+  return { masked, attributes };
+}
+
+/**
+ * Restores the original attributes into the diff HTML.
+ */
+export function restoreBlockAttributes(
+  diffHtml: string,
+  attrsOld: string[],
+  attrsNew: string[],
+): string {
+  let oldIdx = 0;
+  let newIdx = 0;
+
+  return diffHtml.replace(/data-attr="MASKED"/g, (match, offset) => {
+    const prefix = diffHtml.substring(0, offset);
+    const lastInsOpen = prefix.lastIndexOf("<ins");
+    const lastInsClose = prefix.lastIndexOf("</ins>");
+    const lastDelOpen = prefix.lastIndexOf("<del");
+    const lastDelClose = prefix.lastIndexOf("</del>");
+
+    const isInsideIns = lastInsOpen > lastInsClose;
+    const isInsideDel = lastDelOpen > lastDelClose;
+
+    if (isInsideDel) {
+      return attrsOld[oldIdx++] || "";
+    } else if (isInsideIns) {
+      return attrsNew[newIdx++] || "";
+    } else {
+      // Shared: consume from both to keep pointers aligned
+      const val = attrsNew[newIdx++] || "";
+      oldIdx++;
+      return val;
+    }
+  });
 }
 
 /**
@@ -163,26 +366,7 @@ export function replaceBalancedTags(
       }
     }
 
-    if (html.startsWith("<li", i)) {
-      const potentialStart = i;
-      const tagEnd = html.indexOf(">", i);
-      if (tagEnd > -1) {
-        const tag = html.substring(potentialStart, tagEnd + 1);
-        if (
-          tag.includes('class="footnote-item"') ||
-          tag.includes("class='footnote-item'")
-        ) {
-          const end = findClosing(html, i, "li");
-          if (end > -1) {
-            const content = html.substring(potentialStart, end);
-            const token = createToken(content, "FOOTNOTE", tokens);
-            result += token;
-            i = end;
-            continue;
-          }
-        }
-      }
-    }
+    // Math (KaTeX)
     if (
       html.startsWith('<p class="katex-block">', i) ||
       html.startsWith("<p class='katex-block'>", i)
@@ -197,6 +381,7 @@ export function replaceBalancedTags(
         continue;
       }
     }
+
     if (
       html.startsWith('<span class="katex">', i) ||
       html.startsWith("<span class='katex'>", i)
@@ -212,20 +397,20 @@ export function replaceBalancedTags(
       }
     }
 
+    // List and Table containers
     if (options.tokenizeListContainers !== false && html[i] === "<") {
-      const listMatch = html.substring(i).match(/^<(ol|ul|dl|table)(\s[^>]*)?>/i);
+      const listMatch = html
+        .substring(i)
+        .match(/^<(ol|ul|dl|table)(\s[^>]*)?>/i);
       if (listMatch) {
         const tagName = listMatch[1].toLowerCase();
         const start = i;
         const end = findClosing(html, i, tagName);
         if (end > -1) {
           const content = html.substring(start, end);
-          const prefix = tagName === "table" ? "TABLE" : `LIST_${tagName.toUpperCase()}`;
-          const token = createToken(
-            content,
-            prefix,
-            tokens,
-          );
+          const prefix =
+            tagName === "table" ? "TABLE" : `LIST_${tagName.toUpperCase()}`;
+          const token = createToken(content, prefix, tokens);
           result += token;
           i = end;
           continue;
@@ -233,40 +418,49 @@ export function replaceBalancedTags(
       }
     }
 
-    if (html[i] === "<") {
-      const headingMatch = html.substring(i).match(/^<(h[1-6])(\s[^>]*)?>/);
-      if (headingMatch) {
-        const tagName = headingMatch[1];
-        const start = i;
-        const end = findClosing(html, i, tagName);
-        if (end > -1) {
-          const content = html.substring(start, end);
-          const token = createToken(content, "HEADING", tokens);
-          result += token;
-          i = end;
-          continue;
-        }
+    // Tables
+    if (html.startsWith("<table", i)) {
+      const start = i;
+      const end = findClosing(html, i, "table");
+      if (end > -1) {
+        const content = html.substring(start, end);
+        const token = createToken(content, "TABLE", tokens);
+        result += token;
+        i = end;
+        continue;
       }
     }
 
     result += html[i];
     i++;
   }
+
   return { html: result, tokens };
 }
 
-export function findClosing(html: string, start: number, tagName: string): number {
+export function findClosing(
+  html: string,
+  start: number,
+  tagName: string,
+): number {
   let depth = 0;
-  const openTag = `<${tagName}`;
-  const closeTag = `</${tagName}>`;
+  const tagNameLower = tagName.toLowerCase();
+  const openTagBase = `<${tagNameLower}`;
+  const closeTag = `</${tagNameLower}>`;
 
   for (let i = start; i < html.length; i++) {
-    if (html.startsWith(openTag, i)) {
-      depth++;
-    } else if (html.startsWith(closeTag, i)) {
-      depth--;
-      if (depth === 0) {
-        return i + closeTag.length;
+    if (html[i] === "<") {
+      // Check for opening tag with word boundary
+      if (html.toLowerCase().startsWith(openTagBase, i)) {
+        const charAfter = html[i + openTagBase.length];
+        if (!charAfter || /[\s/>]/.test(charAfter)) {
+          depth++;
+        }
+      } else if (html.toLowerCase().startsWith(closeTag, i)) {
+        depth--;
+        if (depth === 0) {
+          return i + closeTag.length;
+        }
       }
     }
   }
@@ -278,13 +472,26 @@ export function createToken(
   prefix: string,
   tokens: Record<string, string>,
 ): string {
-  const hashContent = content.replace(/\s?data-line="[^"]*"/g, "");
+  // For LINEBLOCK tokens, we want to include the data-line attribute in the hash
+  // so that content on different lines is treated as distinct by htmldiff.
+  // For other blocks (MATH, etc.), we strip them to allow granular diffing.
+  const hashContent =
+    prefix === "LINEBLOCK"
+      ? content
+      : content.replace(/\s?data-line(?:-end)?="[^"]*"/g, "");
+
   const hash = crypto
     .createHash("sha256")
     .update(hashContent)
     .digest("hex")
     .substring(0, 12);
   const token = `TOKEN_${prefix}_${hash}`;
+
+  // Guard against re-tokenizing a token
+  if (content === token) {
+    return token;
+  }
+
   tokens[token] = content;
   return token;
 }
@@ -294,22 +501,40 @@ export function restoreComplexTokens(
   tokens: Record<string, string>,
 ): string {
   let restored = html;
-  Object.keys(tokens).forEach((token) => {
-    restored = restored.replace(new RegExp(token, "g"), tokens[token]);
-  });
+  let hasMoreTokens = true;
+  let iterations = 0;
+  const MAX_ITERATIONS = 5;
+
+  while (hasMoreTokens && iterations < MAX_ITERATIONS) {
+    hasMoreTokens = false;
+    const prev = restored;
+
+    // Sort keys by length descending to replace longest/most-specific tokens first
+    const keys = Object.keys(tokens).sort((a, b) => b.length - a.length);
+
+    for (const token of keys) {
+      if (restored.includes(token)) {
+        restored = restored.replace(new RegExp(token, "g"), tokens[token]);
+        hasMoreTokens = true;
+      }
+    }
+
+    if (restored === prev) {
+      hasMoreTokens = false;
+    }
+    iterations++;
+  }
   return restored;
 }
 
 /**
  * Refinement and Optimization logic.
  */
-export function refineBlockDiffs(html: string): string {
-  const execute =
-    (htmldiff as any).execute || (htmldiff as any).default?.execute || htmldiff;
-  if (typeof execute !== "function") {
-    return html;
-  }
-
+export function refineBlockDiffs(
+  html: string,
+  execute: (old: string, newVal: string) => string,
+  _allTokens: Record<string, string> = {},
+): string {
   const replacer = (
     match: string,
     delBlock: string,
@@ -407,18 +632,16 @@ export function refineBlockDiffs(html: string): string {
         );
       }
 
-      return diffHtmlFragments(
+      return execute(
         `<${oldTag}${oldAttrs}>${oldContent}</${oldTag}>`,
         `<${newTag}${newAttrs}>${newContent}</${newTag}>`,
-        execute,
       );
     },
   );
 
   const footnoteBundleRegex =
-    /<del[^>]*>\s*((?:<li[^>]*class=["']footnote-item["'][^>]*>[\s\S]*?<\/li>\s*)+)<\/del>\s*<ins[^>]*>\s*((?:<li[^>]*class=["']footnote-item["'][^>]*>[\s\S]*?<\/li>\s*)+)<\/ins>/gi;
-  const footnoteItemRegex =
-    /<li[^>]*class=["']footnote-item["'][^>]*>[\s\S]*?<\/li>/gi;
+    /<del[^>]*>\s*((?:<li[^>]*>[\s\S]*?<\/li>\s*)+)<\/del>\s*<ins[^>]*>\s*((?:<li[^>]*>[\s\S]*?<\/li>\s*)+)<\/ins>/gi;
+  const footnoteItemRegex = /<li[^>]*>[\s\S]*?<\/li>/gi;
   const getFootnoteId = (itemHtml: string) =>
     itemHtml.match(/\bid=["']([^"']+)["']/i)?.[1] ?? null;
 
@@ -476,31 +699,83 @@ export function refineBlockDiffs(html: string): string {
   );
 
   const headingRegex =
-    /<del[^>]*>\s*<(h[1-6])([^>]*)>([\s\S]*?)<\/\1>\s*<\/del>\s*<ins[^>]*>\s*<(h[1-6])([^>]*)>([\s\S]*?)<\/\4>\s*<\/ins>/gi;
+    /<(del|ins)[^>]*>\s*<(h[1-6])([^>]*)>([\s\S]*?)<\/\2>\s*<\/\1>\s*<(ins|del)[^>]*>\s*<(h[1-6])([^>]*)>([\s\S]*?)<\/\6>\s*<\/\5>/gi;
 
   resultHtml = resultHtml.replace(
     headingRegex,
-    (match, oldTag, oldAttrs, oldContent, newTag, newAttrs, newContent) => {
-      if (oldTag.toLowerCase() !== newTag.toLowerCase()) {
+    (match, outer1, tag1, attrs1, content1, outer2, tag2, attrs2, content2) => {
+      if (tag1.toLowerCase() !== tag2.toLowerCase()) {
         return match;
       }
-      if (/<\/?h[1-6][\s>]/i.test(newContent)) {
+      if (outer1.toLowerCase() === outer2.toLowerCase()) {
         return match;
       }
-      const innerDiff = execute(oldContent, newContent);
+      // Re-run the diff on the inner content to restore granularity
+      const oldInner = outer1.toLowerCase() === "del" ? content1 : content2;
+      const newInner = outer1.toLowerCase() === "ins" ? content1 : content2;
+      const newTag = outer1.toLowerCase() === "ins" ? tag1 : tag2;
+      const newAttrs = outer1.toLowerCase() === "ins" ? attrs1 : attrs2;
+
+      const innerDiff = execute(oldInner, newInner);
       return `<${newTag}${newAttrs}>${innerDiff}</${newTag}>`;
     },
   );
 
-  const preRegex =
-    /(<del[^>]*>\s*(<pre[^>]*>[\s\S]*?<\/pre>)\s*<\/del>)\s*(<ins[^>]*>\s*(<pre[^>]*>[\s\S]*?<\/pre>)\s*<\/ins>)/gi;
+  // NOTE: We must pass tokenizeCodeBlocks: false here.
+  // The execute function (skipRefinementExecute) calls diffHtmlFragments → executeWithFullPipeline,
+  // which by default re-tokenizes <pre> blocks as opaque tokens. That would cause htmldiff to see
+  // two different opaque tokens and produce no granular diff inside the code block.
+  // By disabling code block tokenization for this inner call, the <pre> content is diffed directly.
+  const diffCodeBlocks = (oldCode: string, newCode: string) =>
+    diffHtmlFragments(oldCode, newCode, execute, {
+      allTokens: _allTokens,
+      skipRefinement: true,
+      tokenizeCodeBlocks: false,
+    });
 
-  resultHtml = resultHtml.replace(
-    preRegex,
-    (match, delBlock, oldInner, insBlock, newInner) => {
-      return diffHtmlFragments(oldInner, newInner, execute);
-    },
-  );
+  // NOTE: We cannot use a simple adjacency regex (del<pre></pre>del ins<pre></pre>ins) because
+  // other diff elements (e.g. a deleted section) may sit between the del-pre and ins-pre blocks.
+  // Instead, collect all del-wrapped and ins-wrapped <pre> blocks globally, pair them by index,
+  // re-diff each pair, and substitute back via placeholder tokens.
+  {
+    const delPreRegex = /<del([^>]*)>\s*(<pre[^>]*>[\s\S]*?<\/pre>)\s*<\/del>/gi;
+    const insPreRegex = /<ins([^>]*)>\s*(<pre[^>]*>[\s\S]*?<\/pre>)\s*<\/ins>/gi;
+
+    interface PreBlock { full: string; attrs: string; inner: string }
+    const delBlocks: PreBlock[] = [];
+    const insBlocks: PreBlock[] = [];
+
+    let m: RegExpExecArray | null;
+    while ((m = delPreRegex.exec(resultHtml)) !== null) {
+      delBlocks.push({ full: m[0], attrs: m[1], inner: m[2] });
+    }
+    while ((m = insPreRegex.exec(resultHtml)) !== null) {
+      insBlocks.push({ full: m[0], attrs: m[1], inner: m[2] });
+    }
+
+    const pairCount = Math.min(delBlocks.length, insBlocks.length);
+    if (pairCount > 0) {
+      // Compute diffed replacements for each pair
+      const diffedPairs: Array<{ delFull: string; insFull: string; diffed: string }> = [];
+      for (let i = 0; i < pairCount; i++) {
+        diffedPairs.push({
+          delFull: delBlocks[i].full,
+          insFull: insBlocks[i].full,
+          diffed: diffCodeBlocks(delBlocks[i].inner, insBlocks[i].inner),
+        });
+      }
+
+      // Replace del blocks with placeholders, remove ins blocks
+      for (let i = 0; i < diffedPairs.length; i++) {
+        resultHtml = resultHtml.replace(diffedPairs[i].delFull, `PREDIFF_${i}_PLACEHOLDER`);
+        resultHtml = resultHtml.replace(diffedPairs[i].insFull, '');
+      }
+      // Replace placeholders with diffed content
+      for (let i = 0; i < diffedPairs.length; i++) {
+        resultHtml = resultHtml.replace(`PREDIFF_${i}_PLACEHOLDER`, diffedPairs[i].diffed);
+      }
+    }
+  }
 
   const blockquoteRegex =
     /(<del[^>]*>\s*(<blockquote>[\s\S]*?<\/blockquote>)\s*<\/del>)\s*(<ins[^>]*>\s*(<blockquote>[\s\S]*?<\/blockquote>)\s*<\/ins>)/gi;
@@ -508,7 +783,42 @@ export function refineBlockDiffs(html: string): string {
   resultHtml = resultHtml.replace(
     blockquoteRegex,
     (match, delBlock, oldInner, insBlock, newInner) => {
-      return diffHtmlFragments(oldInner, newInner, execute);
+      return execute(oldInner, newInner);
+    },
+  );
+
+  const genericBlockRegex =
+    /(<del[^>]*>\s*<([a-z1-6]+)(?:\s+[^>]*)?>([\s\S]*?)<\/\2>\s*<\/del>)\s*(<ins[^>]*>\s*<([a-z1-6]+)(?:\s+[^>]*)?>([\s\S]*?)<\/\5>\s*<\/ins>)/gi;
+
+  resultHtml = resultHtml.replace(
+    genericBlockRegex,
+    (match, delWrapper, delTag, delInner, insWrapper, insTag, insInner) => {
+      if (delTag.toLowerCase() !== insTag.toLowerCase()) {
+        return match;
+      }
+
+      // Attempt to extract attributes from the new tag to preserve classes/line numbers
+      const attributesMatch = match.match(
+        /<ins[^>]*>\s*<[a-z1-6]+(\s+[^>]*)?>/i,
+      );
+      const attributes =
+        attributesMatch && attributesMatch[1] ? attributesMatch[1] : "";
+
+      // EXCEPTION: Do not re-diff the inside of specialized blocks like Mermaid or GitHub Alerts.
+      // For Mermaid: Re-diffing injects <ins>/<del> tags that break their specific parsers.
+      // For Alerts: It often causes redundant nesting (double vertical bars).
+      if (
+        /class=["'][^"']*(?:mermaid|markdown-alert)[^"']*["']/i.test(
+          attributes,
+        )
+      ) {
+        return match;
+      }
+
+      // Re-run the diff on the inner content to restore granularity
+      const innerDiff = execute(delInner, insInner);
+
+      return `<${insTag}${attributes}>${innerDiff}</${insTag}>`;
     },
   );
 
@@ -574,10 +884,26 @@ export function refineBlockDiffs(html: string): string {
 
 export function consolidateBlockDiffs(html: string): string {
   const blocks = [
-    "table", "ul", "ol", "dl", "blockquote", "div", "h1", "h2", "h3", "h4", "h5", "h6", "section", "svg", "pre", "hr",
+    "table",
+    "ul",
+    "ol",
+    "dl",
+    "blockquote",
+    "div",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "section",
+    "svg",
+    "pre",
+    "hr",
   ];
   let result = html;
-  const blockTags = "table|ul|ol|dl|blockquote|div|h1|h2|h3|h4|h5|h6|section|svg|pre";
+  const blockTags =
+    "table|ul|ol|dl|blockquote|div|h1|h2|h3|h4|h5|h6|section|svg|pre";
   const selfClosingTags = "hr";
   const blockElementPattern = `(?:<(?:${blockTags})[^>]*>[\\s\\S]*?<\\/(?:${blockTags})>|<(?:${selfClosingTags})[^>]*\\/?>)`;
 
@@ -606,6 +932,16 @@ export function consolidateBlockDiffs(html: string): string {
       "gi",
     );
     result = result.replace(regex, (match) => {
+      // EXCEPTION: Don't consolidate math blocks into block-level diffs.
+      // This keeps the diff tags internal and prevents the 'Upstream INS' problem.
+      if (
+        match.includes("katex-block") ||
+        match.includes("katex-display") ||
+        match.includes("TOKEN_MATH")
+      ) {
+        return match;
+      }
+
       const hasIns = /<ins\b[^>]*>([\s\S]*?)<\/ins>/gi.test(match);
       const hasDel = /<del\b[^>]*>([\s\S]*?)<\/del>/gi.test(match);
 
@@ -633,7 +969,7 @@ export function cleanupCheckboxArtifacts(html: string): string {
 }
 
 export function stripDataLineAttributes(html: string): string {
-  return html.replace(/ data-line="\d+"/g, "");
+  return html.replace(/ data-line(?:-end)?="\d+"/g, "");
 }
 
 export function splitMixedBlockInsertions(html: string): string {
@@ -650,9 +986,7 @@ export function splitMixedBlockInsertions(html: string): string {
       if (headingCount === 0) {
         return match;
       }
-      const parts = inner.split(
-        /(?=<(?:h[1-6]|p|ul|ol|dl|blockquote|pre|table|hr)[\s>/])|(?<=<\/h[1-6]>)\s*(?=\S)/i,
-      );
+      const parts = inner.split(/(?=<[a-z1-6]+)/i);
       if (parts.length <= 1) {
         return match;
       }
@@ -662,6 +996,7 @@ export function splitMixedBlockInsertions(html: string): string {
           if (!trimmed) {
             return "";
           }
+          // Wrap if it looks like a tag or content
           return `<${diffTag} class="${diffClass}">${trimmed}</${diffTag}>`;
         })
         .join("\n");
@@ -690,17 +1025,42 @@ export function wrapHeadingPrefixes(html: string): string {
 }
 
 export function markGhostListItems(html: string): string {
-  return html.replace(
+  // 1. First, handle cases where the whole <li> is wrapped in <ins> or <del>
+  let result = html.replace(
+    /(<(ins|del)[^>]*>)\s*(<li[^>]*>[\s\S]*?<\/li>)\s*(<\/\2>)/gi,
+    (match, open, type, li, close) => {
+      if (type === "ins") {
+        return (
+          open + li.replace(/^<li/, '<li data-all-inserted="true"') + close
+        );
+      } else {
+        return open + li.replace(/^<li/, '<li data-all-deleted="true"') + close;
+      }
+    },
+  );
+
+  // 2. Then handle cases where the markers are INSIDE the <li>
+  result = result.replace(
     /<li([^>]*)>([\s\S]*?)<\/li>/gi,
     (match, attrs: string, content: string) => {
+      if (
+        attrs.includes('data-all-inserted="true"') ||
+        attrs.includes('data-all-deleted="true"')
+      ) {
+        return match;
+      }
       if (/<li\b/i.test(content)) {
         return match;
       }
       const stripInline = (s: string) =>
-        s.replace(/<\/?(strong|em|b|i|s|span|a)\b[^>]*>/gi, "").trim();
+        s
+          .replace(/<\/?(strong|em|b|i|concept|code|s|span|a)\b[^>]*>/gi, "")
+          .trim();
+
       const withoutIns = content.replace(/<ins\b[^>]*>[\s\S]*?<\/ins>/gi, "");
       const withoutDel = content.replace(/<del\b[^>]*>[\s\S]*?<\/del>/gi, "");
       let newAttrs = attrs;
+
       if (stripInline(withoutIns) === "") {
         newAttrs += ' data-all-inserted="true"';
       }
@@ -713,6 +1073,7 @@ export function markGhostListItems(html: string): string {
       return `<li${newAttrs}>${content}</li>`;
     },
   );
+  return result;
 }
 
 export function extractSharedReparentedLists(html: string): string {
@@ -729,7 +1090,7 @@ export function extractSharedReparentedLists(html: string): string {
   ): string | null => {
     const prefix = sourceHtml.slice(0, beforeIndex);
     const deletedNestedListRegex =
-      /(?:<del[^>]*>\s*<\/del>\s*)?<del[^>]*class="[^"]*diff-block[^"]*"[^>]*>\s*(<(ul|ol|dl)[^>]*>[\s\S]*?<\/\2>)\s*<\/del>(?:\s*<del[^>]*>\s*<\/del>)?/gi;
+      /(?:<del[^>]*>\s*<\/del>\s*)?<del[^>]*class="[^"]*diff-block[^"]*"[^>]*>\s*(<(ul|ol|dl)[^>]*>[\s\S]*?<\/\2>)\s*<\/del>(?:\s*<del[^>]*>\s*<\/del>\s*)*/gi;
     let deletedMatch: RegExpExecArray | null;
     let matchedDeletedWrapper: string | null = null;
     while ((deletedMatch = deletedNestedListRegex.exec(prefix)) !== null) {
@@ -742,7 +1103,7 @@ export function extractSharedReparentedLists(html: string): string {
   };
 
   const insertedCompositeRegex =
-    /<ins([^>]*)>\s*(<(ol|ul|dl)[^>]*>\s*<li[\s\S]*?<\/li>\s*<\/\3>)\s*(<(ul|ol|dl)[^>]*>[\s\S]*?<\/\5>)\s*<\/ins>/gi;
+    /<ins([^>]*)>\s*(<(ol|ul|dl)[^>]*>\s*<li[\s\S]*?<\/li>\s*<\/\3>)\s*(<(ul|ol|dl)[^>]*>[\s\S]*?<\/\5>)\s*<\/ins>(?:\s*<ins[^>]*>\s*<\/ins>\s*)*/gi;
 
   let result = html;
   let compositeMatch: RegExpExecArray | null;

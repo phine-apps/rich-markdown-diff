@@ -12,6 +12,9 @@ services:
     environment:
       - NODE_ENV=test
     ipc: host
+    ports:
+      - "9323:9323"
+
 
 volumes:
   pnpm-store:

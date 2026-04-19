@@ -132,8 +132,7 @@ export function sanitizeHtml(html: string): string {
         "tabindex",
         // Allow data attributes for line numbers and internal logic
         "data-line",
-        "data-start",
-        "data-end",
+        "data-line-end",
         "data-type",
         "data-original-content",
         // Marp attributes

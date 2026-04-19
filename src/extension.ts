@@ -200,6 +200,7 @@ function getWebviewTranslations() {
     "Markdown Diff": l10n.t("Markdown Diff"),
     Original: l10n.t("Original"),
     Modified: l10n.t("Modified"),
+    "Open in Editor": l10n.t("Open in Editor"),
     "Scanning...": l10n.t("Scanning..."),
     "Found {0} groups": l10n.t("Found {0} groups"),
     "No changes found": l10n.t("No changes found"),
@@ -737,6 +738,57 @@ async function bindDiffPanel(
         currentState,
         message.payload as RuntimeDiagnosticsPayload,
       );
+      return;
+    }
+
+    if (message.command === "requestBlockSource" && currentState) {
+      const uri = currentState.modifiedUri ?? currentState.fallbackSourceUri;
+      if (uri) {
+        try {
+          const document = await vscode.workspace.openTextDocument(uri);
+          const start = message.lineStart;
+          const end = message.lineEnd;
+          let content = "";
+          for (let i = start; i < end && i < document.lineCount; i++) {
+            content += document.lineAt(i).text + (i < end - 1 ? "\n" : "");
+          }
+          panel.webview.postMessage({ command: "receiveBlockSource", content });
+        } catch (e) {
+          console.error("Failed to read block source:", e);
+        }
+      }
+      return;
+    }
+
+    if (message.command === "applyEdit" && currentState) {
+      const uri = currentState.modifiedUri ?? currentState.fallbackSourceUri;
+      if (uri) {
+        try {
+          const document = await vscode.workspace.openTextDocument(uri);
+          const edit = new vscode.WorkspaceEdit();
+          const start = message.lineStart;
+          const end = message.lineEnd;
+          
+          // Construct range. end is exclusive line in markdown-it, 
+          // but in VS Code Range, (start, 0) to (end, 0) means lines [start, end-1].
+          // To replace full lines including trailing newline of the last line:
+          const range = new vscode.Range(
+            new vscode.Position(start, 0),
+            document.validatePosition(new vscode.Position(end, 0))
+          );
+          
+          // Ensure newContent ends with newline if we replaced full lines
+          let text = message.newContent;
+          if (end < document.lineCount && !text.endsWith("\n")) {
+            text += "\n";
+          }
+          
+          edit.replace(uri, range, text);
+          await vscode.workspace.applyEdit(edit);
+        } catch (e) {
+          vscode.window.showErrorMessage(l10n.t("Failed to apply edit: {0}", String(e)));
+        }
+      }
       return;
     }
 

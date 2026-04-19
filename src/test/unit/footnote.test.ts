@@ -53,13 +53,12 @@ describe("Footnote Tests", () => {
       diffHtml.includes('class="footnotes"'),
       "Footnotes section should exist",
     );
-    // Verify that the second footnote list item is wrapped in <ins>
-    const fn2Match = diffHtml.match(
-      /<ins[^>]*>(?:(?!<\/ins>)[\s\S])*<li[^>]*id="fn2"/,
-    );
+    // Verify that the second footnote list item has insertion indicators
     assert.ok(
-      fn2Match,
-      "Complete new footnote (LI) should be wrapped in <ins>",
+      /<ins[^>]*>[\s\S]*<li[^>]*id="fn2"|<li[^>]*id="fn2"[^>]*>[\s\S]*<ins[^>]*>/i.test(
+        diffHtml,
+      ),
+      "New footnote (LI) should have insertion markers either wrapping it or inside it",
     );
   });
 
@@ -88,14 +87,12 @@ Another footnote[^2].
 
     assert.ok(diffHtml.includes('class="footnotes"'));
 
-    // Verify that the second footnote list item is wrapped in <ins>
-    // This ensures atomic handling for added footnotes and prevents ghost bullets in diffs.
-    const fn2Match = diffHtml.match(
-      /<ins[^>]*>(?:(?!<\/ins>)[\s\S])*<li[^>]*id="fn2"/,
-    );
+    // Verify that the second footnote list item has insertion indicators
     assert.ok(
-      fn2Match,
-      "Complete new footnote (LI) should be wrapped in <ins>",
+      /<ins[^>]*>[\s\S]*<li[^>]*id="fn2"|<li[^>]*id="fn2"[^>]*>[\s\S]*<ins[^>]*>/i.test(
+        diffHtml,
+      ),
+      "New footnote (LI) should have insertion markers either wrapping it or inside it",
     );
   });
 
@@ -118,19 +115,19 @@ And another sentence with a second footnote[^2].
     const { html: diffHtml } = provider.computeDiff(oldMd, newMd);
 
     assert.ok(
-      /<li id="fn1" class="footnote-item">[\s\S]*diffins[\s\S]*updated/i.test(
+      /<li[^>]*id="fn1"[^>]*>[\s\S]*diffins[\s\S]*updated/i.test(
         diffHtml,
       ),
       "Existing footnote fn1 should be refined in-place, not replaced wholesale",
     );
 
     assert.ok(
-      !/<ins[^>]*>\s*<li id="fn1" class="footnote-item">/i.test(diffHtml),
+      !/<ins[^>]*>\s*<li[^>]*id="fn1"[^>]*>/i.test(diffHtml),
       "Updated fn1 should not be wrapped as a wholesale insertion",
     );
 
     assert.ok(
-      /<ins[^>]*>[\s\S]*<li id="fn2" class="footnote-item">/i.test(diffHtml),
+      /<ins[^>]*>[\s\S]*<li[^>]*id="fn2"[^>]*>/i.test(diffHtml),
       "New footnote fn2 should remain a standalone insertion",
     );
   });

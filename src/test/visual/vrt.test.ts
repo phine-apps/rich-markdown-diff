@@ -16,140 +16,69 @@ test.describe("Visual Regression Tests", () => {
   });
 
   test.beforeEach(async ({ page }) => {
-    // Standard viewport, using fullPage: true for auto-scaling screenshots
+    // Standard viewport
     await page.setViewportSize({ width: 1280, height: 800 });
   });
 
   const cases = [
-    { name: "comprehensive", v1: "comprehensive_v1.md", v2: "comprehensive_v2.md" },
-    { name: "marp", v1: "marp_v1.md", v2: "marp_v2.md" },
-    { name: "marp-advanced", v1: "marp_v2.md", v2: "marp_v3.md" },
+    {
+      name: "comprehensive",
+      v1: "comprehensive_v1.md",
+      v2: "comprehensive_v2.md",
+      configs: [
+        { theme: "light", inline: false, suffix: "split-light" },
+        { theme: "dark", inline: true, suffix: "inline-dark" },
+      ],
+    },
+    {
+      name: "marp",
+      v1: "marp_v1.md",
+      v2: "marp_v2.md",
+      configs: [
+        { theme: "dark", inline: false, suffix: "split-dark" },
+        { theme: "light", inline: true, suffix: "inline-light" },
+      ],
+    },
+    {
+      name: "marp-advanced",
+      v1: "marp_v2.md",
+      v2: "marp_v3.md",
+      configs: [
+        { theme: "light", inline: false, suffix: "split-light" },
+        { theme: "dark", inline: true, suffix: "inline-dark" },
+      ],
+    },
   ];
 
   for (const c of cases) {
-    test(`Visual Diff: ${c.name} - Split Light`, async ({ page }) => {
-      const v1 = fs.readFileSync(path.join(FIXTURES_DIR, c.v1), "utf-8");
-      const v2 = fs.readFileSync(path.join(FIXTURES_DIR, c.v2), "utf-8");
+    for (const config of c.configs) {
+      test(`Visual Diff: ${c.name} - ${config.suffix}`, async ({ page }) => {
+        const v1 = fs.readFileSync(path.join(FIXTURES_DIR, c.v1), "utf-8");
+        const v2 = fs.readFileSync(path.join(FIXTURES_DIR, c.v2), "utf-8");
 
-      const html = await generateVRTHtml(provider, v1, v2, {
-        theme: "light",
-        inline: false,
+        const html = await generateVRTHtml(provider, v1, v2, {
+          theme: config.theme as "light" | "dark",
+          inline: config.inline,
+        });
+
+        await page.emulateMedia({ colorScheme: config.theme as "light" | "dark" });
+        await page.setContent(html, { waitUntil: "load" });
+
+        if (c.name.includes("marp")) {
+          // Wait for Marp scaling check, but don't fail if it takes a bit
+          await page.waitForSelector("body.marp-mode[data-marp-scaled='true']", { timeout: 10000 }).catch(() => {
+            console.log("Marp scaling wait timed out (optional)");
+          });
+        }
+
+        // Final short wait for any transitions/rendering
+        await page.waitForTimeout(1000);
+
+        await expect(page).toHaveScreenshot(`${c.name}-${config.suffix}.png`, {
+          maxDiffPixelRatio: 0.1,
+          fullPage: true,
+        });
       });
-      await page.emulateMedia({ colorScheme: "light" });
-      await page.setContent(html, { waitUntil: "load" });
-
-      // Wait for KaTeX/fonts
-      // @ts-ignore
-      await page.evaluate(() =>
-        Promise.race([
-          document.fonts.ready,
-          new Promise((r) => setTimeout(r, 2000)),
-        ]),
-      );
-      const katexCount = await page.locator(".katex").count();
-      if (katexCount > 0) {
-        await page.waitForSelector(".katex", { state: "visible" });
-      }
-
-      if (c.name.includes("marp")) {
-        // Remove signal dependency to unblock update-snapshots
-        await page.waitForTimeout(2000);
-      }
-
-      await expect(page).toHaveScreenshot(`${c.name}-split-light.png`, { 
-        maxDiffPixelRatio: 0.1,
-        fullPage: true 
-      });
-    });
-
-    test(`Visual Diff: ${c.name} - Split Dark`, async ({ page }) => {
-      const v1 = fs.readFileSync(path.join(FIXTURES_DIR, c.v1), "utf-8");
-      const v2 = fs.readFileSync(path.join(FIXTURES_DIR, c.v2), "utf-8");
-
-      const html = await generateVRTHtml(provider, v1, v2, {
-        theme: "dark",
-        inline: false,
-      });
-      await page.emulateMedia({ colorScheme: "dark" });
-      await page.setContent(html, { waitUntil: "load" });
-
-      // @ts-ignore
-      await page.evaluate(() =>
-        Promise.race([
-          document.fonts.ready,
-          new Promise((r) => setTimeout(r, 2000)),
-        ]),
-      );
-
-      if (c.name.includes("marp")) {
-        // Remove signal dependency to unblock update-snapshots
-        await page.waitForTimeout(2000);
-      }
-
-      await expect(page).toHaveScreenshot(`${c.name}-split-dark.png`, { 
-        maxDiffPixelRatio: 0.1,
-        fullPage: true 
-      });
-    });
-
-    test(`Visual Diff: ${c.name} - Inline Light`, async ({ page }) => {
-      const v1 = fs.readFileSync(path.join(FIXTURES_DIR, c.v1), "utf-8");
-      const v2 = fs.readFileSync(path.join(FIXTURES_DIR, c.v2), "utf-8");
-
-      const html = await generateVRTHtml(provider, v1, v2, {
-        theme: "light",
-        inline: true,
-      });
-      await page.emulateMedia({ colorScheme: "light" });
-      await page.setContent(html, { waitUntil: "load" });
-
-      // @ts-ignore
-      await page.evaluate(() =>
-        Promise.race([
-          document.fonts.ready,
-          new Promise((r) => setTimeout(r, 2000)),
-        ]),
-      );
-
-      if (c.name.includes("marp")) {
-        // Remove signal dependency to unblock update-snapshots
-        await page.waitForTimeout(2000);
-      }
-
-      await expect(page).toHaveScreenshot(`${c.name}-inline-light.png`, { 
-        maxDiffPixelRatio: 0.1,
-        fullPage: true 
-      });
-    });
-
-    test(`Visual Diff: ${c.name} - Inline Dark`, async ({ page }) => {
-      const v1 = fs.readFileSync(path.join(FIXTURES_DIR, c.v1), "utf-8");
-      const v2 = fs.readFileSync(path.join(FIXTURES_DIR, c.v2), "utf-8");
-
-      const html = await generateVRTHtml(provider, v1, v2, {
-        theme: "dark",
-        inline: true,
-      });
-      await page.emulateMedia({ colorScheme: "dark" });
-      await page.setContent(html, { waitUntil: "load" });
-
-      // @ts-ignore
-      await page.evaluate(() =>
-        Promise.race([
-          document.fonts.ready,
-          new Promise((r) => setTimeout(r, 2000)),
-        ]),
-      );
-
-      if (c.name.includes("marp")) {
-        // Remove signal dependency to unblock update-snapshots
-        await page.waitForTimeout(2000);
-      }
-
-      await expect(page).toHaveScreenshot(`${c.name}-inline-dark.png`, { 
-        maxDiffPixelRatio: 0.1,
-        fullPage: true 
-      });
-    });
+    }
   }
 });

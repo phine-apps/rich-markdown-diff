@@ -270,8 +270,8 @@
     "publish:vsce": "vsce publish",
     "publish:ovsx": "pnpm exec ovsx publish",
     "test:visual": "pnpm exec playwright test",
-    "test:visual:docker": "docker compose run --rm playwright sh -c \"pnpm install --store-dir /pnpm-store && pnpm exec playwright test\"",
-    "test:visual:update": "docker compose run --rm playwright sh -c \"pnpm install --store-dir /pnpm-store && pnpm exec playwright test --update-snapshots\""
+    "test:visual:docker": "docker compose run --rm --service-ports playwright sh -c \"pnpm install --store-dir /pnpm-store && pnpm exec playwright test\"",
+    "test:visual:update": "docker compose run --rm --service-ports playwright sh -c \"pnpm install --store-dir /pnpm-store && pnpm exec playwright test --update-snapshots\""
   },
   "overrides": {
     "serialize-javascript": "^7.0.5"

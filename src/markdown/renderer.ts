@@ -37,7 +37,7 @@ export function createMarkdownRenderer(): MarkdownIt {
   md.use(katex);
 
   // Task Lists: Checkboxes
-  md.use(taskLists, { enabled: true });
+  md.use(taskLists, { enabled: false });
 
   // Custom Rules
   configureRules(md);
@@ -67,7 +67,8 @@ function configureRules(md: MarkdownIt) {
 
     if (info === "mermaid") {
       const escapedContent = escapeHtml(token.content);
-      return `<div class="mermaid" data-original-content="${escapedContent}">\n${escapedContent}\n</div>`;
+      const attrs = self.renderAttrs(token);
+      return `<div class="mermaid"${attrs} data-original-content="${escapedContent}">\n${escapedContent}\n</div>`;
     }
 
     return defaultFence(tokens, idx, options, env, self);
@@ -104,6 +105,7 @@ function injectLineNumbers(md: MarkdownIt) {
     "code_block",
     "fence",
     "table_open",
+    "math_block",
   ];
 
   rules.forEach((rule) => {
@@ -113,8 +115,19 @@ function injectLineNumbers(md: MarkdownIt) {
       const token = tokens[idx];
       if (token.map) {
         token.attrSet("data-line", String(token.map[0]));
+        token.attrSet("data-line-end", String(token.map[1]));
       }
-      return original.call(self, tokens, idx, options, env, self);
+      let html = original.call(self, tokens, idx, options, env, self);
+
+      // If the original renderer didn't include the data attributes (common with plugins),
+      // try to inject them into the first tag of the output.
+      if (token.map && html && !html.includes("data-line=")) {
+        html = html.replace(
+          /^(<[a-z1-6]+)/i,
+          `$1 data-line="${token.map[0]}" data-line-end="${token.map[1]}"`,
+        );
+      }
+      return html;
     };
   });
 }
