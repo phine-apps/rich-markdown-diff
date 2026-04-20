@@ -25,7 +25,7 @@
 import eslint from "@eslint/js";
 import tseslint from "typescript-eslint";
 import globals from "globals";
-import tsdoc from "eslint-plugin-tsdoc";
+import jsdoc from "eslint-plugin-jsdoc";
 
 export default tseslint.config(
   {
@@ -33,10 +33,8 @@ export default tseslint.config(
   },
   eslint.configs.recommended,
   ...tseslint.configs.recommended,
+  jsdoc.configs['flat/recommended-tsdoc'],
   {
-    plugins: {
-      tsdoc,
-    },
     languageOptions: {
       globals: {
         ...globals.node,
@@ -44,7 +42,12 @@ export default tseslint.config(
       },
     },
     rules: {
-      "tsdoc/syntax": "warn",
+      "jsdoc/require-jsdoc": "off",
+      "jsdoc/require-param": "off",
+      "jsdoc/require-returns": "off",
+      "jsdoc/require-yields": "off",
+      "jsdoc/tag-lines": "off",
+      "jsdoc/require-description": "off",
       curly: "warn",
       eqeqeq: "warn",
       semi: ["warn", "always"],

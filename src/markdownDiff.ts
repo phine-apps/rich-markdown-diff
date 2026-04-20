@@ -198,7 +198,7 @@ export class MarkdownDiffProvider {
    * Generates the full HTML content for the webview.
    *
    * @param diffHtml - The computed HTML difference.
-   * @param katexCssUri - The URI for KaTeX CSS.
+   * @param katexCssInline - The URI for KaTeX CSS.
    * @param mermaidJsUri - The URI for Mermaid JS.
    * @param hljsLightCssUri - The URI for Highlight.js light theme CSS.
    * @param hljsDarkCssUri - The URI for Highlight.js dark theme CSS.
