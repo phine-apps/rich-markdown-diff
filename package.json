@@ -303,9 +303,9 @@
     "@types/mocha": "^10.0.10",
     "@types/node": "^25.6.0",
     "@types/sanitize-html": "^2.16.1",
-    "@types/vscode": "1.80.0",
-    "@typescript-eslint/eslint-plugin": "^8.58.2",
-    "@typescript-eslint/parser": "^8.58.2",
+    "@types/vscode": "1.116.0",
+    "@typescript-eslint/eslint-plugin": "^8.59.0",
+    "@typescript-eslint/parser": "^8.59.0",
     "@vscode/l10n-dev": "^0.0.35",
     "@vscode/test-electron": "^2.5.2",
     "@vscode/vsce": "^3.9.1",
@@ -319,7 +319,7 @@
     "playwright": "^1.59.1",
     "ts-node": "^10.9.2",
     "typescript": "^6.0.3",
-    "typescript-eslint": "^8.58.2"
+    "typescript-eslint": "^8.59.0"
   },
   "dependencies": {
     "@iktakahiro/markdown-it-katex": "^4.0.1",
