@@ -352,6 +352,164 @@ describe("MarkdownDiffProvider", () => {
     );
   });
 
+  it("should configure Mermaid with VS Code theme-aware colors", () => {
+    const webviewContent = provider.getWebviewContent(
+      '<div class="mermaid">graph TD; A-->B;</div>',
+      "katex.css",
+      "mermaid.js",
+      "hljs-light.css",
+      "hljs-dark.css",
+    );
+
+    assert.ok(
+      webviewContent.includes("const createMermaidConfig = () =>"),
+      "Webview should build a Mermaid config from VS Code theme values",
+    );
+    assert.ok(
+      webviewContent.includes("const toMermaidHexColor = (value, fallback) =>"),
+      "Mermaid config should normalize runtime CSS colors into Mermaid-compatible hex values",
+    );
+    assert.ok(
+      webviewContent.includes(
+        "const mixMermaidHexColors = (baseColor, overlayColor, ratio) =>",
+      ),
+      "Mermaid config should derive lighter diagram surfaces from the editor palette",
+    );
+    assert.ok(
+      webviewContent.includes("theme: 'base'"),
+      "Mermaid should use the base theme so the template can override palette values",
+    );
+    assert.ok(
+      webviewContent.includes("startOnLoad: false"),
+      "Mermaid auto-start should be disabled so the webview can render diagrams after applying its theme config",
+    );
+    assert.ok(
+      webviewContent.includes("themeVariables:"),
+      "Mermaid config should include explicit theme variables",
+    );
+    assert.ok(
+      webviewContent.includes("nodeTextColor: foreground"),
+      "Mermaid flowchart nodes should explicitly use the themed foreground color",
+    );
+    assert.ok(
+      webviewContent.includes(
+        "const renderMermaidDiagrams = async (container = document) =>",
+      ),
+      "Webview should explicitly render Mermaid diagrams after initializing the theme config",
+    );
+    assert.ok(
+      webviewContent.includes("const mermaidStyleNonce = '"),
+      "Webview should expose the page nonce to the Mermaid renderer so generated SVG styles can satisfy CSP",
+    );
+    assert.ok(
+      webviewContent.includes(
+        "styleEl.setAttribute('nonce', mermaidStyleNonce);",
+      ),
+      "Mermaid SVG style blocks should receive the page nonce before insertion into the DOM",
+    );
+    assert.ok(
+      webviewContent.includes(
+        "mermaid.render('rich-markdown-diff-mermaid-' + Date.now() + '-' + index, original)",
+      ),
+      "Mermaid rendering should use explicit render calls instead of implicit auto-start timing",
+    );
+    assert.ok(
+      webviewContent.includes("mermaid.initialize(createMermaidConfig());"),
+      "Mermaid should be initialized with the computed theme config",
+    );
+    assert.ok(
+      webviewContent.includes(
+        ".labelBkg, .edgeLabel, .node .label, .cluster .label, foreignObject div, .nodeLabel, .nodeLabel p {",
+      ),
+      "Mermaid label containers should be explicitly normalized in the runtime theme CSS",
+    );
+    assert.ok(
+      webviewContent.includes("background-color: transparent !important;"),
+      "Mermaid node label containers should stay transparent so text does not render over dark patches",
+    );
+    assert.ok(
+      webviewContent.includes("foreignObject {") &&
+        webviewContent.includes("overflow: visible !important;"),
+      "Mermaid foreignObject labels should be allowed to overflow so glyph edges are not clipped",
+    );
+    assert.ok(
+      webviewContent.includes("padding-right: 1px;"),
+      "Mermaid label containers should keep a small right-side cushion to avoid clipping the last glyph pixel",
+    );
+    assert.ok(
+      webviewContent.includes(
+        ".edgePath .path, .flowchart-link, .relationshipLine, .messageLine0, .messageLine1 {",
+      ) && webviewContent.includes("fill: none !important;"),
+      "Mermaid edge paths should remain stroke-only so curved links do not render as thick filled ribbons",
+    );
+    assert.ok(
+      webviewContent.includes(".marker path, .arrowheadPath {") &&
+        webviewContent.includes("'  fill: ' + muted + ' !important;',"),
+      "Mermaid arrowheads should keep their solid fill after edge paths are switched back to stroke-only rendering",
+    );
+  });
+
+  it("should emit a syntactically valid inline webview script", () => {
+    const webviewContent = provider.getWebviewContent(
+      '<div class="mermaid">graph TD; A-->B;</div>',
+      "katex.css",
+      "mermaid.js",
+      "hljs-light.css",
+      "hljs-dark.css",
+    );
+
+    const scriptBlocks = Array.from(
+      webviewContent.matchAll(
+        /<script(?: nonce="[^"]*")?>([\s\S]*?)<\/script>/g,
+      ),
+      (match) => match[1],
+    );
+    const runtimeScript = scriptBlocks.find((script) =>
+      script.includes("const vscode = acquireVsCodeApi();"),
+    );
+
+    assert.ok(runtimeScript, "Webview should include the main runtime script");
+    assert.doesNotThrow(
+      () => new Function(runtimeScript!),
+      "Generated runtime script should parse successfully",
+    );
+  });
+
+  it("should disable gutter markers and hover chrome by default", () => {
+    const webviewContent = provider.getWebviewContent(
+      '<p data-line="0">diff</p>',
+      "katex.css",
+      "mermaid.js",
+      "hljs-light.css",
+      "hljs-dark.css",
+    );
+
+    assert.ok(
+      !/<body class="[^"]*show-gutter-markers/.test(webviewContent),
+      "Gutter markers should be opt-in instead of enabled by default",
+    );
+    assert.ok(
+      !webviewContent.includes("#right-pane [data-line]:hover::before"),
+      "Webview should not inject hover-only quick-edit labels",
+    );
+    assert.ok(
+      !webviewContent.includes("outline: 2px dashed rgba(255, 165, 0, 0.4);"),
+      "Webview should not draw hover outlines for editable blocks",
+    );
+    assert.ok(
+      !webviewContent.includes("cursor: help;"),
+      "Webview should not switch the mouse cursor to the help affordance when blame is enabled",
+    );
+    assert.ok(
+      !webviewContent.includes('id="blame-tooltip"'),
+      "Webview should not render a hover blame tooltip container",
+    );
+    assert.ok(
+      !webviewContent.includes("addEventListener('mouseenter', showBlame)"),
+      "Webview should not register hover blame handlers on diff lines",
+    );
+  });
+
   it("should use a grid-based split layout so panes stay evenly sized", () => {
     const webviewContent = provider.getWebviewContent(
       "<p>diff</p>",
@@ -493,7 +651,7 @@ describe("MarkdownDiffProvider", () => {
     );
     assert.ok(
       webviewContent.includes(
-        "Promise.allSettled(renderPasses).finally(() => scheduleAsyncLayoutRefresh());",
+        "renderMermaidDiagrams(container).finally(() => scheduleAsyncLayoutRefresh());",
       ),
       "Mermaid refreshes should batch layout follow-up work on larger documents",
     );
@@ -526,6 +684,10 @@ describe("MarkdownDiffProvider", () => {
       "Rendered panes should use inner content roots for layout observation",
     );
     assert.ok(
+      webviewContent.includes("setMermaidSvgContent(el, result.svg);"),
+      "Mermaid render results should be normalized through the nonce-aware SVG insertion helper",
+    );
+    assert.ok(
       webviewContent.includes("command: 'runtimeDiagnostics'"),
       "Webview should be able to emit runtime diagnostics snapshots to the extension host",
     );
@@ -555,6 +717,318 @@ describe("MarkdownDiffProvider", () => {
       webviewContent.includes("targetPane.scrollLeft = targetScrollLeft;"),
       "Scroll sync should mirror horizontal scrolling between panes",
     );
+    assert.ok(
+      webviewContent.includes("const mirroredScrollState = new WeakMap();") &&
+        webviewContent.includes("const shouldIgnoreMirroredScroll = (pane) =>"),
+      "Scroll sync should track mirrored pane updates explicitly instead of using a global scroll lock",
+    );
+    assert.ok(
+      webviewContent.includes("let activePane = null;") &&
+        webviewContent.includes("const setActive = (pane) => {") &&
+        webviewContent.includes("if (activePane !== sourcePane) {") &&
+        webviewContent.includes(
+          "leftPane.addEventListener('wheel', () => setActive(leftPane), { passive: true });",
+        ) &&
+        webviewContent.includes(
+          "rightPane.addEventListener('wheel', () => setActive(rightPane), { passive: true });",
+        ),
+      "Scroll sync should restore active-pane ownership so only the pane under user interaction can drive mirroring",
+    );
+    assert.ok(
+      webviewContent.includes(
+        "if (shouldIgnoreMirroredScroll(leftPane)) return;",
+      ) &&
+        webviewContent.includes(
+          "if (shouldIgnoreMirroredScroll(rightPane)) return;",
+        ),
+      "Scroll listeners should ignore only the mirrored target-pane events so active scrolling stays smooth",
+    );
+    assert.ok(
+      webviewContent.includes("markMirroredScroll(targetPane);") &&
+        webviewContent.includes("markMirroredScroll(leftPane);") &&
+        webviewContent.includes("markMirroredScroll(rightPane);"),
+      "Programmatic pane syncs should mark the affected panes so their synthetic scroll events do not bounce back",
+    );
+    assert.ok(
+      !webviewContent.includes("if (isScrolling) return;"),
+      "Scroll sync should no longer rely on the coarse global scroll lock that caused mirrored-pane jitter",
+    );
+    assert.ok(
+      webviewContent.includes("if (sourceMax > 0 && targetMax > 0) {") &&
+        webviewContent.includes(
+          "const percentage = sourcePane.scrollTop / sourceMax;",
+        ) &&
+        webviewContent.includes("targetScrollTop = percentage * targetMax;") &&
+        webviewContent.includes("let shouldMarkTargetScroll = false;"),
+      "Scroll sync should use percentage-based vertical mirroring during active scrolling and mark programmatic target updates for mirrored-event suppression",
+    );
+    assert.ok(
+      !webviewContent.includes(
+        "const syncScrollToMatchingLine = (sourcePane, targetPane) =>",
+      ) &&
+        !webviewContent.includes("const getTopVisibleLineAnchor = (pane) =>") &&
+        !webviewContent.includes(
+          "const findClosestLineAnchor = (pane, sourceLine) =>",
+        ),
+      "The jitter-inducing anchor-based vertical sync helpers should be removed once percentage-based mirroring is restored",
+    );
+  });
+
+  it("should keep overview ruler markers granular for table cell diffs", () => {
+    const webviewContent = provider.getWebviewContent(
+      "<table><tbody><tr><td><ins>Improved</ins></td></tr></tbody></table>",
+      "katex.css",
+      "mermaid.js",
+      "hljs-light.css",
+      "hljs-dark.css",
+    );
+
+    assert.ok(
+      webviewContent.includes("const getVisualChangeHeight = (el) =>"),
+      "Overview ruler logic should compute marker spans from the rendered block height",
+    );
+    assert.ok(
+      !webviewContent.includes("el.closest('table')"),
+      "Table cell diffs should stay granular instead of being promoted to the whole table",
+    );
+    assert.ok(
+      !webviewContent.includes("el.querySelector('table') ||"),
+      "Wrapped table changes should not force overview markers to span the entire table when only a small part changed",
+    );
+    assert.ok(
+      webviewContent.includes(
+        "const scrollRange = Math.max(paneHeight - pane.clientHeight, 0);",
+      ),
+      "Overview ruler markers should align to the pane's actual scrollable range instead of the full document height",
+    );
+    assert.ok(
+      webviewContent.includes("const thumbHeightPx = scrollRange > 0") &&
+        webviewContent.includes(
+          "const thumbTravelPx = Math.max(rulerHeight - thumbHeightPx, 0);",
+        ),
+      "Overview ruler markers should account for the native scrollbar thumb height so their positions match the actual scrollbar travel",
+    );
+    assert.ok(
+      webviewContent.includes(
+        "const getGroupIndicatorStartScrollTop = (groupMetrics, pane) => {",
+      ) &&
+        webviewContent.includes(
+          "const rawIndicatorScrollTop = Math.max(groupMetrics.top, 0);",
+        ),
+      "Overview ruler placement should start where a grouped change begins in the pane content",
+    );
+    assert.ok(
+      webviewContent.includes("const getOverviewSpan = (span) => {"),
+      "Overview ruler logic should project actual change spans separately from the scroll-position mapping",
+    );
+    assert.ok(
+      webviewContent.includes(
+        "Math.max(getOverviewOffset(indicatorStartScrollTop), 0)",
+      ) && webviewContent.includes("Math.max(rulerHeight - markerHeightPx, 0)"),
+      "Overview ruler marker placement should align to the thumb top for the grouped diff start position",
+    );
+    assert.ok(
+      webviewContent.includes(
+        "return (clampedOffset / scrollRange) * thumbTravelPx;",
+      ),
+      "Overview ruler marker top positions should be projected over the actual thumb travel instead of the full track height",
+    );
+    assert.ok(
+      webviewContent.includes("Math.max(getOverviewSpan(height), 2)"),
+      "Overview ruler markers should size their blocks from the actual grouped change height instead of inflating to the whole visibility interval",
+    );
+    assert.ok(
+      webviewContent.includes(
+        "drawRuler(rightPane, rightRuler, changeElements);",
+      ),
+      "Overview ruler rendering should reuse the collected change entries instead of re-querying raw ins and del tags",
+    );
+    assert.ok(
+      !webviewContent.includes(
+        "const changes = rightContent.querySelectorAll('ins, del');",
+      ),
+      "Overview ruler rendering should not fall back to raw diff-tag queries that miss full table spans",
+    );
+    assert.ok(
+      webviewContent.includes(
+        "const ancestor = el.closest('.mermaid') || el.closest('.katex-block') || el.closest('svg');",
+      ),
+      "Complex visual blocks like Mermaid and KaTeX should still be promoted to their rendered container while stable code blocks stay granular",
+    );
+    assert.ok(
+      webviewContent.includes("marker.style.top = markerTopPx + 'px';"),
+      "Overview ruler marker placement should use the scroll-range projection so the indicator lines up with the actual scrollbar travel",
+    );
+    assert.ok(
+      webviewContent.includes("updateOverviewRulerVisibility();"),
+      "Overview ruler rendering should resync the ruler geometry before placing markers so header and layout changes do not skew the marker positions",
+    );
+  });
+
+  it("should anchor overview rulers to the live pane rectangles instead of fixed header offsets", () => {
+    const webviewContent = provider.getWebviewContent(
+      "<p><ins>Change</ins></p>",
+      "katex.css",
+      "mermaid.js",
+      "hljs-light.css",
+      "hljs-dark.css",
+    );
+
+    assert.ok(
+      webviewContent.includes("const syncRulerToPane = (ruler, pane) => {"),
+      "Overview rulers should have a dedicated pane-anchoring helper",
+    );
+    assert.ok(
+      webviewContent.includes("const paneRect = pane.getBoundingClientRect();"),
+      "Overview ruler geometry should be measured from the live pane rectangle instead of a guessed header offset",
+    );
+    assert.ok(
+      webviewContent.includes(
+        "const scrollbarTrackInset = scrollbarTrackWidth > 0",
+      ) &&
+        webviewContent.includes("? scrollbarTrackWidth") &&
+        webviewContent.includes(
+          "ruler.style.top = (paneRect.top + scrollbarTrackInset) + 'px';",
+        ) &&
+        webviewContent.includes(
+          "ruler.style.height = Math.max(paneRect.height - (scrollbarTrackInset * 2), 0) + 'px';",
+        ),
+      "Overview rulers should align to the native scrollbar track rather than the full pane box so markers do not start a few pixels above the track",
+    );
+    assert.ok(
+      webviewContent.includes("const totalScrollbarGutter = Math.max(") &&
+        webviewContent.includes(
+          "const gutterSides = paneStyle.scrollbarGutter.includes('both-edges') ? 2 : 1;",
+        ) &&
+        webviewContent.includes(
+          "const scrollbarTrackWidth = totalScrollbarGutter > 0",
+        ) &&
+        webviewContent.includes(
+          "const scrollbarTrackLeft = paneRect.right - scrollbarTrackWidth;",
+        ) &&
+        webviewContent.includes(
+          "const centeredTrackLeft = scrollbarTrackLeft + Math.max((scrollbarTrackWidth - rulerWidth) / 2, 0);",
+        ) &&
+        webviewContent.includes(
+          "ruler.style.left = (scrollbarTrackWidth > 0",
+        ) &&
+        webviewContent.includes("? centeredTrackLeft") &&
+        webviewContent.includes(": paneRect.right - rulerWidth) + 'px';"),
+      "Overview rulers should split the reserved gutter correctly and center the indicator strip inside the actual right-hand scrollbar track",
+    );
+    assert.ok(
+      !webviewContent.includes("leftRuler.style.left = 'calc(50% - 14px)';"),
+      "Overview rulers should no longer depend on a fixed split midpoint that drifts from the actual scrollbar position",
+    );
+    assert.ok(
+      /\.overview-marker \{[\s\S]*width: 4px;[\s\S]*border-radius: 999px;/m.test(
+        webviewContent,
+      ),
+      "Overview markers should stay narrow so the native scrollbar thumb remains visible alongside the indicator strip",
+    );
+  });
+
+  it("should use shared group bounds for ruler placement and grouped-change scrolling", () => {
+    const webviewContent = provider.getWebviewContent(
+      "<h2><ins>Section</ins></h2><p><ins>Changed paragraph</ins></p>",
+      "katex.css",
+      "mermaid.js",
+      "hljs-light.css",
+      "hljs-dark.css",
+    );
+
+    assert.ok(
+      webviewContent.includes("const getGroupPaneMetrics = (group, pane) => {"),
+      "Grouped changes should compute shared pane-local bounds once so marker placement and navigation use the same section geometry",
+    );
+    assert.ok(
+      webviewContent.includes(
+        "const groupMetrics = getGroupPaneMetrics(group, pane);",
+      ) &&
+        webviewContent.includes(
+          "const { paneItems, height } = groupMetrics;",
+        ) &&
+        webviewContent.includes(
+          "const indicatorStartScrollTop = getGroupIndicatorStartScrollTop(groupMetrics, pane);",
+        ),
+      "Overview ruler rendering should derive grouped marker positions from the shared group bounds instead of individual stored item offsets",
+    );
+    assert.ok(
+      webviewContent.includes(
+        "const groupMetrics = getGroupPaneMetrics(group, targetPane);",
+      ) &&
+        webviewContent.includes(
+          "const targetScrollTop = getGroupTargetScrollTop(groupMetrics, targetPane);",
+        ),
+      "Grouped-change scrolling should center the whole grouped section when it fits in view instead of only centering the first child node",
+    );
+    assert.ok(
+      !webviewContent.includes("const elHeight = targetEl.offsetHeight || 20;"),
+      "Grouped-change scrolling should no longer rely on a single child element height for section positioning",
+    );
+    assert.ok(
+      webviewContent.includes(
+        "const thumbTopY = Math.min(Math.max(clickY, 0), thumbTravelPx);",
+      ) && webviewContent.includes("(thumbTopY / thumbTravelPx) * scrollRange"),
+      "Ruler clicks should use the same thumb-top semantics as marker placement so clicking an indicator targets the expected diff position",
+    );
+  });
+
+  it("should promote fully inserted code blocks to the pre container for active highlighting", () => {
+    const webviewContent = provider.getWebviewContent(
+      '<ins class="diffins"><pre><code>changed</code></pre></ins>',
+      "katex.css",
+      "mermaid.js",
+      "hljs-light.css",
+      "hljs-dark.css",
+    );
+
+    assert.ok(
+      webviewContent.includes(
+        "if (el.querySelector && (el.querySelector('pre') || el.querySelector('.mermaid') || el.querySelector('.katex-block'))) return true;",
+      ),
+      "Change collection should treat code blocks as meaningful visual blocks when gathering active changes",
+    );
+    assert.ok(
+      webviewContent.includes(
+        "const ancestor = el.closest('.mermaid') || el.closest('.katex-block') || el.closest('svg');",
+      ),
+      "Stable code blocks with inner line diffs should stay granular instead of being promoted through closest('pre')",
+    );
+    assert.ok(
+      webviewContent.includes(
+        "let child = el.querySelector('pre') || el.querySelector('.mermaid') || el.querySelector('.katex-block');",
+      ),
+      "Wrapped code-block insertions should resolve to the pre container for active highlighting",
+    );
+    assert.ok(
+      webviewContent.includes(".selected-change.selected-ins {") &&
+        webviewContent.includes(
+          "background-color: rgba(34, 197, 94, 0.25) !important;",
+        ),
+      "Inserted active changes should use green selection styling instead of the old yellow overlay",
+    );
+    assert.ok(
+      webviewContent.includes("pre.selected-change.selected-ins,") &&
+        webviewContent.includes("border: 1px solid #22c55e !important;") &&
+        webviewContent.includes(
+          "box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.8) !important;",
+        ),
+      "Inserted complex blocks like code blocks should use the same green diff palette as other added highlights in the diff view",
+    );
+    assert.ok(
+      webviewContent.includes(".selected-change.selected-del {") &&
+        webviewContent.includes(
+          "background-color: rgba(248, 113, 113, 0.2) !important;",
+        ),
+      "Deleted active changes should use the same red diff palette as other removed highlights in the diff view",
+    );
+    assert.ok(
+      !webviewContent.includes(
+        "background-color: rgba(255, 200, 0, 0.3) !important;",
+      ),
+      "Active change styling should no longer use the old yellow generic highlight color",
+    );
   });
 
   it("should keep all headings on one line and expose full width for pane scrolling", () => {
@@ -577,7 +1051,7 @@ describe("MarkdownDiffProvider", () => {
       "heading-prefix class should prevent number prefixes from wrapping",
     );
     assert.ok(
-      /ins:has\(> h1, > h2, > h3, > h4, > h5, > h6, > p, > img, > table, > ul, > ol, > dl, > li, > blockquote, > div, > pre, > hr, > section, > details, > summary, > figure\),[\s\S]*del:has\(> h1, > h2, > h3, > h4, > h5, > h6, > p, > img, > table, > ul, > ol, > dl, > li, > blockquote, > div, > pre, > hr, > section, > details, > summary, > figure\) \{[\s\S]*display: block;[\s\S]*width: fit-content;/m.test(
+      /ins:has\(> h1, > h2, > h3, > h4, > h5, > h6, > p, > img, > table, > \.table-scroll, > ul, > ol, > dl, > li, > blockquote, > div, > pre, > hr, > section, > details, > summary, > figure\),[\s\S]*del:has\(> h1, > h2, > h3, > h4, > h5, > h6, > p, > img, > table, > \.table-scroll, > ul, > ol, > dl, > li, > blockquote, > div, > pre, > hr, > section, > details, > summary, > figure\) \{[\s\S]*display: block;[\s\S]*width: fit-content;/m.test(
         webviewContent,
       ),
       "Modified headings should be set as block elements so the background color spans the full pane width",
@@ -687,6 +1161,33 @@ describe("MarkdownDiffProvider", () => {
     assert.ok(
       /pre \{[\s\S]*overflow-x: auto;/m.test(webviewContent),
       "Code blocks should have overflow-x: auto for horizontal scrolling",
+    );
+  });
+
+  it("should wrap tables in their own horizontal scroll container", () => {
+    const webviewContent = provider.getWebviewContent(
+      "<table><tbody><tr><th>Feature</th><th>Status</th></tr><tr><td>Rich Markdown Diff</td><td>Enabled</td></tr></tbody></table>",
+      "katex.css",
+      "mermaid.js",
+      "hljs-light.css",
+      "hljs-dark.css",
+    );
+
+    assert.ok(
+      /<div class="table-scroll">\s*<table>/m.test(webviewContent),
+      "Tables should be wrapped in a dedicated scroll container so wide tables scroll locally instead of stretching the pane",
+    );
+    assert.ok(
+      /\.table-scroll \{[\s\S]*overflow-x: auto;[\s\S]*overflow-y: hidden;/m.test(
+        webviewContent,
+      ),
+      "Table wrappers should own the horizontal overflow behavior",
+    );
+    assert.ok(
+      /table \{[\s\S]*width: max-content;[\s\S]*max-width: none;/m.test(
+        webviewContent,
+      ),
+      "Tables inside the scroll container should be allowed to grow to their intrinsic width so the wrapper can scroll them",
     );
   });
 
@@ -981,6 +1482,40 @@ describe("MarkdownDiffProvider", () => {
       ),
       "Complex inserted KaTeX blocks should also use a 1px border",
     );
+    assert.ok(
+      webviewContent.includes(
+        "body.inline-mode #right-pane :is(del.diffdel.diff-block, del.diffmod.diff-block, ins.diffins.diff-block, ins.diffmod.diff-block) {",
+      ),
+      "Inline view should explicitly preserve block-level diff wrappers instead of falling back to inline deletion styling",
+    );
+    assert.ok(
+      webviewContent.includes(
+        "body.inline-mode #right-pane del + ins .task-list-item-checkbox {",
+      ),
+      "Inline view should only reset inserted checkbox spacing when it directly follows a deleted checkbox in the same task item",
+    );
+    assert.ok(
+      !webviewContent.includes(
+        "body.inline-mode #right-pane ins .task-list-item-checkbox {",
+      ),
+      "Inline view should not shift every inserted task-list checkbox to the right",
+    );
+    assert.ok(
+      webviewContent.includes(
+        ":is(del.diffdel.diff-block, del.diffmod.diff-block, ins.diffins.diff-block, ins.diffmod.diff-block):has(> pre) {",
+      ) &&
+        webviewContent.includes("padding: 0;") &&
+        webviewContent.includes("overflow: hidden;"),
+      "Block-level code diffs should let the outer diff wrapper own the add/remove highlight instead of keeping extra inner wrapper padding",
+    );
+    assert.ok(
+      webviewContent.includes(
+        ":is(del.diffdel.diff-block, del.diffmod.diff-block, ins.diffins.diff-block, ins.diffmod.diff-block):has(> pre) > pre {",
+      ) &&
+        webviewContent.includes("background-color: transparent;") &&
+        webviewContent.includes("border: none;"),
+      "Wrapped code blocks should drop their opaque pre background so the same green or red diff highlight shows through as other block diffs",
+    );
   });
 
   it("should allow list item text to wrap", () => {
@@ -1153,6 +1688,24 @@ describe("MarkdownDiffProvider", () => {
     );
   });
 
+  it("should mark list items when an entire list is newly inserted", () => {
+    const oldMd = "";
+    const newMd = "- First item\n- Second item\n- Third item";
+    const { html: diff } = provider.computeDiff(oldMd, newMd);
+
+    const insertedItems = diff.match(/data-all-inserted="true"/g) ?? [];
+    assert.strictEqual(
+      insertedItems.length,
+      3,
+      `Expected all inserted list items to be marked. HTML was: ${diff}`,
+    );
+
+    assert.ok(
+      diff.includes("First item"),
+      "Inserted list text should remain visible",
+    );
+  });
+
   it("should keep reparented nested bullets neutral when only the parent item changes", () => {
     const oldMd =
       '1. **Run/Debug:**\n   - Open this project in VS Code.\n   - Press `F5` to launch an "Extension Development Host" instance.';
@@ -1161,7 +1714,10 @@ describe("MarkdownDiffProvider", () => {
     const { html: diff } = provider.computeDiff(oldMd, newMd);
 
     const hasItems = diff.includes("Open this project in VS Code");
-    assert.ok(hasItems, "The shared bullet list text content must remain visible");
+    assert.ok(
+      hasItems,
+      "The shared bullet list text content must remain visible",
+    );
   });
 
   it("should use reduced block spacing", () => {

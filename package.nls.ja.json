@@ -12,5 +12,5 @@
   "rich-markdown-diff.category": "Markdown Diff",
   "rich-markdown-diff.customEditor.displayName": "Markdown Diff プレビュー",
   "rich-markdown-diff.showGutterMarkers.description": "ガター領域に垂直な差分マーカーを表示するかどうか。",
-  "rich-markdown-diff.showGitBlame.description": "ホバー時に Git Blame 情報（作成者、日付、メッセージ）を表示するかどうか。"
+  "rich-markdown-diff.showGitBlame.description": "比較対象ファイルの Git Blame メタデータを読み込むかどうか。"
 }

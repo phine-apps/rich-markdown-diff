@@ -28,11 +28,27 @@ import * as htmldiff from "htmldiff-js";
 import matter from "gray-matter";
 import { sanitizeHtml } from "./markdown/sanitizer";
 import { getWebviewContent } from "./markdown/webviewTemplate";
-import { cleanMarpHtml, resolveCssUrls, scopeMarpCss } from "./markdown/marpRenderer";
-import { createMarkdownRenderer, loadMarkdownPlugins } from "./markdown/renderer";
 import {
-  executeWithFullPipeline,
-} from "./markdown/structuralDiff";
+  cleanMarpHtml,
+  resolveCssUrls,
+  scopeMarpCss,
+} from "./markdown/marpRenderer";
+import {
+  createMarkdownRenderer,
+  loadMarkdownPlugins,
+} from "./markdown/renderer";
+import { executeWithFullPipeline } from "./markdown/structuralDiff";
+
+function wrapTablesForScrolling(html: string): string {
+  if (!html.includes("<table")) {
+    return html;
+  }
+
+  return html.replace(
+    /<table\b[\s\S]*?<\/table>/gi,
+    (tableHtml) => `<div class="table-scroll">${tableHtml}</div>`,
+  );
+}
 
 /**
  * Provides functionality to compute and render differences between Markdown documents.
@@ -67,7 +83,6 @@ export class MarkdownDiffProvider {
     this.marp = await loadMarkdownPlugins(this.md);
   }
 
-
   /**
    * Computes the visual difference between two Markdown strings.
    * @param oldMarkdown - The original Markdown content.
@@ -93,12 +108,18 @@ export class MarkdownDiffProvider {
     let marpJs: string | undefined;
 
     if (isMarp && this.marp) {
-      const { html: oHtml, css: cssOld } = this.marp.render(oldMarkdown, envOld);
+      const { html: oHtml, css: cssOld } = this.marp.render(
+        oldMarkdown,
+        envOld,
+      );
       const { cleaned: cleanedOld, scripts: scriptsOld } = cleanMarpHtml(oHtml);
       oldHtml = cleanedOld;
 
       const envNew = { imageResolver };
-      const { html: nHtml, css: cssNew } = this.marp.render(newMarkdown, envNew);
+      const { html: nHtml, css: cssNew } = this.marp.render(
+        newMarkdown,
+        envNew,
+      );
       const { cleaned: cleanedNew, scripts: scriptsNew } = cleanMarpHtml(nHtml);
       newHtml = cleanedNew;
 
@@ -131,7 +152,7 @@ export class MarkdownDiffProvider {
     // @ts-ignore
     const execute =
       htmldiff.execute || (htmldiff as any).default?.execute || htmldiff;
-    
+
     let bodyDiffHtml = oldHtml;
     if (typeof execute === "function") {
       const { diff } = executeWithFullPipeline(oldHtml, newHtml, execute, {});
@@ -193,7 +214,6 @@ export class MarkdownDiffProvider {
     return { html: fmHtml + bodyDiffHtml, marpCss, marpJs };
   }
 
-
   /**
    * Generates the full HTML content for the webview.
    *
@@ -226,11 +246,11 @@ export class MarkdownDiffProvider {
       original?: any;
       modified?: any;
     },
-    showGutterMarkers: boolean = true,
+    showGutterMarkers: boolean = false,
     showGitBlame: boolean = true,
   ): string {
     return getWebviewContent(
-      diffHtml,
+      wrapTablesForScrolling(diffHtml),
       katexCssInline,
       mermaidJsUri,
       hljsLightCssUri,

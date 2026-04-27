@@ -2,43 +2,48 @@ import * as fs from "fs";
 import * as path from "path";
 import type { MarkdownDiffProvider as ProviderType } from "../../markdownDiff";
 
-
 export async function generateVRTHtml(
   provider: ProviderType,
   oldMarkdown: string,
   newMarkdown: string,
-  options: { 
-    inline?: boolean; 
+  options: {
+    inline?: boolean;
     theme?: "light" | "dark";
     blameInfo?: any;
     showGutterMarkers?: boolean;
     showGitBlame?: boolean;
-  } = {}
+  } = {},
 ): Promise<string> {
-  const { html: diffHtml, marpCss, marpJs } = provider.computeDiff(
-    oldMarkdown,
-    newMarkdown,
-    (src) => {
-      // Resolve any path that doesn't look like a URL
-      if (!src.includes("://") && !src.startsWith("data:")) {
-        return "file://" + path.resolve(path.join(__dirname, "../../../fixtures"), src);
-      }
-      return src;
+  const {
+    html: diffHtml,
+    marpCss,
+    marpJs,
+  } = provider.computeDiff(oldMarkdown, newMarkdown, (src) => {
+    // Resolve any path that doesn't look like a URL
+    if (!src.includes("://") && !src.startsWith("data:")) {
+      return (
+        "file://" + path.resolve(path.join(__dirname, "../../../fixtures"), src)
+      );
     }
-  );
-  
-  const mediaDir = path.join(__dirname, "../../../media");
-  const katexCss = fs.readFileSync(path.join(mediaDir, "katex/katex.min.css"), "utf8");
+    return src;
+  });
 
-  
+  const mediaDir = path.join(__dirname, "../../../media");
+  const katexCss = fs.readFileSync(
+    path.join(mediaDir, "katex/katex.min.css"),
+    "utf8",
+  );
+
   const translations = {
     "Markdown Diff": "Markdown Diff",
-    "Original": "Original",
-    "Modified": "Modified",
+    Original: "Original",
+    Modified: "Modified",
   };
 
   // Standard VS Code Theme Variables (Mocks)
-  const themeVars = options.theme === "dark" ? `
+  const themeVars =
+    options.theme === "dark"
+      ? `
     --vscode-editor-background: #1e1e1e;
     --vscode-editor-foreground: #d4d4d4;
     --vscode-panel-border: #333333;
@@ -51,7 +56,8 @@ export async function generateVRTHtml(
     --vscode-descriptionForeground: #8b949e;
     --vscode-editor-inactiveSelectionBackground: #3a3d41;
     --vscode-font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  ` : `
+  `
+      : `
     --vscode-editor-background: #ffffff;
     --vscode-editor-foreground: #333333;
     --vscode-panel-border: #eeeeee;
@@ -68,8 +74,14 @@ export async function generateVRTHtml(
     --vscode-font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   `;
 
-  const hljsLightCss = fs.readFileSync(path.join(mediaDir, "highlight/github.min.css"), "utf8");
-  const hljsDarkCss = fs.readFileSync(path.join(mediaDir, "highlight/github-dark.min.css"), "utf8");
+  const hljsLightCss = fs.readFileSync(
+    path.join(mediaDir, "highlight/github.min.css"),
+    "utf8",
+  );
+  const hljsDarkCss = fs.readFileSync(
+    path.join(mediaDir, "highlight/github-dark.min.css"),
+    "utf8",
+  );
 
   let html = provider.getWebviewContent(
     diffHtml,
@@ -84,8 +96,8 @@ export async function generateVRTHtml(
     marpCss,
     marpJs,
     options.blameInfo,
-    options.showGutterMarkers ?? true,
-    options.showGitBlame ?? true
+    options.showGutterMarkers ?? false,
+    options.showGitBlame ?? true,
   );
 
   // Inject Theme Variables via placeholder
@@ -128,20 +140,29 @@ export async function generateVRTHtml(
   `;
 
   // Force layout classes if requested via placeholder in body class
-  const layoutClass = (options.inline ? "inline-mode" : "split-mode") + " vrt-layout";
+  const layoutClass =
+    (options.inline ? "inline-mode" : "split-mode") + " vrt-layout";
   const extraClasses = marpCss ? " marp-mode" : "";
   html = html.replace("VRT_LAYOUT_CLASS", layoutClass + extraClasses);
 
   // Remove CSP and nonces for testing environment
-  html = html.replace(/<meta http-equiv=["']Content-Security-Policy["'][^>]*>/gi, "");
+  html = html.replace(
+    /<meta http-equiv=["']Content-Security-Policy["'][^>]*>/gi,
+    "",
+  );
   html = html.replace(/nonce=["'][^"']*["']/g, "");
 
   // We don't inject mermaid.min.js in VRT since it's mocked by CSS and executing it can cause hangs.
-  html = html.replace(/<script[^>]*src="[^"]*mock-mermaid.min.js"[^>]*><\/script>/, "");
+  html = html.replace(
+    /<script[^>]*src="[^"]*mock-mermaid.min.js"[^>]*><\/script>/,
+    "",
+  );
 
   // Mock Mermaid for VRT. Headless browsers often fail to render Mermaid SVGs securely (sandbox errors),
   // which causes flaky text-only snapshots or timeouts. We replace `.mermaid` with a static visual block.
-  html = html.replace("</head>", `
+  html = html.replace(
+    "</head>",
+    `
     <style>
       ${vrtStyle}
       .mermaid {
@@ -182,7 +203,8 @@ export async function generateVRTHtml(
           document.body.setAttribute('data-marp-scaled', 'true');
       }, 5000);
     </script>
-  </head>`);
+  </head>`,
+  );
 
   return html;
 }

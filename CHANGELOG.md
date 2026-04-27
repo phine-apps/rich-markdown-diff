@@ -2,6 +2,21 @@
 
 All notable changes to **Rich Markdown Diff** will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+
+- **Mermaid Theming**: Render Mermaid diagrams with VS Code theme-aware colors and CSP-safe SVG style handling.
+- **Scroll Sync**: Reduced mirrored-pane jitter by restoring active-pane ownership during synchronized scrolling.
+- **Wide Tables**: Wrap tables in a dedicated horizontal scroll container so they do not stretch the diff panes.
+- **Block Diffs**: Keep fully inserted KaTeX and code blocks wrapped as stable block-level diffs.
+
+### Changed
+
+- **Overview Ruler**: Align overview markers to each pane's live scrollbar track and size them from grouped change spans.
+- **Default Chrome**: Disable gutter markers by default and remove the old hover-only blame/quick-edit chrome.
+- **Change Highlighting**: Use insertion/deletion-aware active-change colors for code, Mermaid, and math blocks.
+
 ## [1.2.0] - 2026-04-12
 
 ### Added in 1.2.0

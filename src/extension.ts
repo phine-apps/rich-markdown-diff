@@ -53,7 +53,9 @@ let activeEditorRepositorySubscription: vscode.Disposable | undefined;
 let contextUpdateGeneration = 0;
 let lastCanShowRenderedDiff: boolean | undefined;
 let runtimeDiagnosticsChannel: vscode.OutputChannel | undefined;
-const openPanelUpdateHandlers = new Set<(trigger: DiffPanelUpdateTrigger) => void>();
+const openPanelUpdateHandlers = new Set<
+  (trigger: DiffPanelUpdateTrigger) => void
+>();
 
 const markdownExtensions = [
   ".md",
@@ -568,8 +570,12 @@ async function renderDiffPanel(
   const originalContent = await readDocumentText(state.originalUri);
   const modifiedContent = await readDocumentText(state.modifiedUri);
 
-  const originalBlame = state.originalUri ? await resolveBlameInfo(state.originalUri) : undefined;
-  const modifiedBlame = state.modifiedUri ? await resolveBlameInfo(state.modifiedUri) : undefined;
+  const originalBlame = state.originalUri
+    ? await resolveBlameInfo(state.originalUri)
+    : undefined;
+  const modifiedBlame = state.modifiedUri
+    ? await resolveBlameInfo(state.modifiedUri)
+    : undefined;
 
   const contentKey = `${originalContent}\0${modifiedContent}\0${state.leftLabel}\0${state.rightLabel}`;
   if (lastContentKey !== undefined && contentKey === lastContentKey) {
@@ -580,14 +586,14 @@ async function renderDiffPanel(
 
   const resolver = createImageResolver(state.imageBaseUri, panel.webview);
   const config = vscode.workspace.getConfiguration("rich-markdown-diff");
-  const showGutterMarkers = config.get<boolean>("showGutterMarkers", true);
+  const showGutterMarkers = config.get<boolean>("showGutterMarkers", false);
   const showGitBlame = config.get<boolean>("showGitBlame", true);
 
-  const { html: diffHtml, marpCss, marpJs } = diffProvider.computeDiff(
-    originalContent,
-    modifiedContent,
-    resolver,
-  );
+  const {
+    html: diffHtml,
+    marpCss,
+    marpJs,
+  } = diffProvider.computeDiff(originalContent, modifiedContent, resolver);
   const assets = getWebviewAssetUris(panel, context.extensionUri);
   const katexCssInline = await buildKatexCssInline(
     context.extensionUri,
@@ -797,25 +803,27 @@ async function bindDiffPanel(
           const edit = new vscode.WorkspaceEdit();
           const start = message.lineStart;
           const end = message.lineEnd;
-          
-          // Construct range. end is exclusive line in markdown-it, 
+
+          // Construct range. end is exclusive line in markdown-it,
           // but in VS Code Range, (start, 0) to (end, 0) means lines [start, end-1].
           // To replace full lines including trailing newline of the last line:
           const range = new vscode.Range(
             new vscode.Position(start, 0),
-            document.validatePosition(new vscode.Position(end, 0))
+            document.validatePosition(new vscode.Position(end, 0)),
           );
-          
+
           // Ensure newContent ends with newline if we replaced full lines
           let text = message.newContent;
           if (end < document.lineCount && !text.endsWith("\n")) {
             text += "\n";
           }
-          
+
           edit.replace(uri, range, text);
           await vscode.workspace.applyEdit(edit);
         } catch (e) {
-          vscode.window.showErrorMessage(l10n.t("Failed to apply edit: {0}", String(e)));
+          vscode.window.showErrorMessage(
+            l10n.t("Failed to apply edit: {0}", String(e)),
+          );
         }
       }
       return;

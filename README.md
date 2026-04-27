@@ -10,6 +10,7 @@ A professional VS Code extension for visual Markdown comparison. Compare rendere
 - **Marp Support**: Full visual diffing for Marp slide decks (`marp: true`).
 - **Git Integration**: Diff directly from Source Control view (Workspace, Staged, or HEAD).
 - **Clipboard Compare**: Compare any Markdown file against your clipboard.
+- **Polished Rendering**: Theme-aware Mermaid output, block-aware math/code diffs, and locally scrollable wide tables.
 - **Rich Extensions**: Support for Math (KaTeX), Mermaid diagrams, GitHub Alerts, and more.
 
 ## Supported Extensions
@@ -18,16 +19,16 @@ A professional VS Code extension for visual Markdown comparison. Compare rendere
 | --- | --- |
 | **Marp** | Render and diff slide decks with full theme support. |
 | **Math** | High-quality KaTeX rendering for formulas. |
-| **Mermaid** | Flowcharts, sequence diagrams, and Gantt charts. |
+| **Mermaid** | Flowcharts, sequence diagrams, and Gantt charts with VS Code theme-aware rendering. |
 | **Alerts** | GitHub-style `[!NOTE]`, `[!WARNING]`, etc. |
-| **Structure** | Robust diffing for Tables, Nested Lists, and Footnotes. |
+| **Structure** | Robust diffing for Tables, Nested Lists, Footnotes, and block-level math/code changes. |
 | **Misc** | Wikilinks, Emoji, Sub/Superscript, and Definition Lists. |
 
 ## Use Cases
 
 - 🖼️ **Marp Presentations**: Verify slide layout and theme changes visually.
 - 📚 **Knowledge Bases**: Review changes in foam/wiki notes with wikilinks and footnotes.
-- 📖 **Technical Docs**: Catch rendering issues in Mermaid diagrams and math formulas.
+- 📖 **Technical Docs**: Catch rendering issues in Mermaid diagrams, math formulas, and wide comparison tables.
 - 🔬 **Academic Writing**: Track revisions to LaTeX equations and complex tables.
 - 👥 **Peer Review**: Focus on the final rendered output rather than raw Markdown syntax.
 

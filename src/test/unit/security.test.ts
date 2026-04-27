@@ -35,7 +35,10 @@ describe("Security Tests", () => {
     `;
     const safeMarkdown = "# Hello";
 
-    const { html: diffHtml } = provider.computeDiff(safeMarkdown, maliciousMarkdown);
+    const { html: diffHtml } = provider.computeDiff(
+      safeMarkdown,
+      maliciousMarkdown,
+    );
 
     // Verify sanitization
     assert.strictEqual(
@@ -135,9 +138,35 @@ describe("Security Tests", () => {
       "Mermaid source should not be restored via innerHTML",
     );
     assert.strictEqual(
-      webviewContent.includes("el.textContent = original"),
+      webviewContent.includes(
+        "const renderMermaidDiagrams = async (container = document) =>",
+      ),
       true,
-      "Mermaid source should be restored as text",
+      "Mermaid diagrams should be rendered through the explicit render helper",
+    );
+    assert.strictEqual(
+      webviewContent.includes(
+        "mermaid.render('rich-markdown-diff-mermaid-' + Date.now() + '-' + index, original)",
+      ),
+      true,
+      "Mermaid source should be passed to Mermaid's renderer instead of injected directly into the DOM",
+    );
+    assert.match(
+      webviewContent,
+      /const mermaidStyleNonce = '[0-9a-f]+';/,
+      "The webview should pass its CSP nonce into the Mermaid SVG insertion helper",
+    );
+    assert.strictEqual(
+      webviewContent.includes(
+        "styleEl.setAttribute('nonce', mermaidStyleNonce);",
+      ),
+      true,
+      "Mermaid SVG <style> elements should be nonced before insertion so themed rendering survives CSP",
+    );
+    assert.strictEqual(
+      webviewContent.includes("el.innerHTML = result.svg"),
+      false,
+      "Mermaid SVG markup should not be inserted directly without first applying the CSP nonce to generated styles",
     );
     assert.strictEqual(
       webviewContent.includes("securityLevel: 'strict'"),

@@ -252,7 +252,7 @@
       "properties": {
         "rich-markdown-diff.showGutterMarkers": {
           "type": "boolean",
-          "default": true,
+          "default": false,
           "description": "%rich-markdown-diff.showGutterMarkers.description%"
         },
         "rich-markdown-diff.showGitBlame": {
