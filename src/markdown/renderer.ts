@@ -1,9 +1,34 @@
+/*
+ * MIT License
+ *
+ * Copyright (c) 2026 Rich Markdown Diff Authors
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+
 import MarkdownIt = require("markdown-it");
 import hljs from "highlight.js";
 import { escapeHtml } from "./sanitizer";
 import { loadMarp } from "./marpRenderer";
 
 const wikilinks = require("../wikilinksPlugin");
+const obsidian = require("./obsidianPlugin");
 // @ts-ignore
 const katex = require("@iktakahiro/markdown-it-katex");
 // @ts-ignore
@@ -30,11 +55,12 @@ export function createMarkdownRenderer(): MarkdownIt {
     },
   });
 
-  // Wikilinks: default options
-  md.use(wikilinks, { uriSuffix: "" });
-
   // Math: KaTeX
   md.use(katex);
+
+  // Wikilinks/Obsidian: default options
+  md.use(wikilinks, { uriSuffix: "" });
+  md.use(obsidian);
 
   // Task Lists: Checkboxes
   md.use(taskLists, { enabled: false });
@@ -92,29 +118,50 @@ function configureRules(md: MarkdownIt) {
 
 /**
  * Injects data-line attributes into major block elements for scroll syncing.
+ * Safe to call multiple times; it will not double-wrap existing rules.
  */
-function injectLineNumbers(md: MarkdownIt) {
+export function injectLineNumbers(md: MarkdownIt) {
   const rules = [
     "paragraph_open",
     "heading_open",
     "list_item_open",
     "blockquote_open",
     "tr_open",
+    "td_open",
+    "th_open",
     "code_block",
     "fence",
     "table_open",
     "math_block",
     "dt_open",
     "dd_open",
+    "alert_open",
+    "github_alert_open",
   ];
 
   rules.forEach((rule) => {
     const original =
       md.renderer.rules[rule] || md.renderer.renderToken.bind(md.renderer);
-    md.renderer.rules[rule] = (tokens, idx, options, env, self) => {
+
+    if ((original as any)._isMapped) {
+      return;
+    }
+
+    const wrapped = (tokens: any, idx: any, options: any, env: any, self: any) => {
       const token = tokens[idx];
       let startLine = token.map ? token.map[0] : undefined;
       let endLine = token.map ? token.map[1] : undefined;
+
+      // Propagate line numbers from tr to td/th (markdown-it doesn't map cells)
+      if ((token.type === "td_open" || token.type === "th_open") && startLine === undefined) {
+        for (let i = idx - 1; i >= 0; i--) {
+          if (tokens[i].type === "tr_open" && tokens[i].map) {
+            startLine = tokens[i].map[0];
+            endLine = tokens[i].map[1];
+            break;
+          }
+        }
+      }
 
       // Heuristics for Definition Lists (markdown-it-deflist has inaccurate maps)
       if (
@@ -152,14 +199,17 @@ function injectLineNumbers(md: MarkdownIt) {
 
       // If the original renderer didn't include the data attributes (common with plugins),
       // try to inject them into the first tag of the output.
-      if (hasMap && html && !html.includes("data-line=")) {
+      if (hasMap && html && !/data-line="/i.test(html)) {
         html = html.replace(
-          /^(<[a-z1-6]+)/i,
-          `$1 data-line="${startLine}" data-line-end="${endLine}"`,
+          /(\/?>)/,
+          ` data-line="${startLine}" data-line-end="${endLine}"$1`,
         );
       }
       return html;
     };
+
+    (wrapped as any)._isMapped = true;
+    md.renderer.rules[rule] = wrapped;
   });
 }
 
@@ -228,8 +278,15 @@ export async function loadMarkdownPlugins(md: MarkdownIt): Promise<any> {
       md.use(githubAlerts);
     }
 
+    // Capture line numbers for blocks added by plugins (like Alerts)
+    injectLineNumbers(md);
+
     // Also load Marp
-    return await loadMarp();
+    const marp = await loadMarp();
+    if (marp && marp.markdown) {
+      injectLineNumbers(marp.markdown);
+    }
+    return marp;
   } catch (e) {
     console.error("Failed to load markdown plugins:", e);
     return null;

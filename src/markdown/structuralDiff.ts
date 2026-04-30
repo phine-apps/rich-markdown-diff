@@ -1,3 +1,27 @@
+/*
+ * MIT License
+ *
+ * Copyright (c) 2026 Rich Markdown Diff Authors
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+
 import * as crypto from "crypto";
 import { diffTables } from "./tableDiff";
 
@@ -46,7 +70,7 @@ export function executeWithFullPipeline(
 ): { diff: string; tokens: Record<string, string> } {
   // 1. Identify complex blocks FIRST to protect them from fragmentation
   const tokenizeCodeBlocks = options.tokenizeCodeBlocks !== false;
-  const tokenizeListContainers = options.tokenizeListContainers ?? true;
+  const tokenizeListContainers = options.tokenizeListContainers ?? false;
   const { html: oldT, tokens: t1 } = replaceComplexBlocksWithTokens(oldHtml, { 
     tokenizeCodeBlocks,
     tokenizeListContainers
@@ -57,8 +81,9 @@ export function executeWithFullPipeline(
   });
 
   // 2. Mask block attributes to prevent noise from IDs, classes, and line numbers
-  const { masked: oldMasked, attributes: oldAttrs } = maskBlockAttributes(oldT);
-  const { masked: newMasked, attributes: newAttrs } = maskBlockAttributes(newT);
+  const sharedToken = `data-attr-masked-${Math.random().toString(36).substring(2, 10)}`;
+  const { masked: oldMasked, attributePools: oldPools } = maskBlockAttributes(oldT, sharedToken);
+  const { masked: newMasked, attributePools: newPools } = maskBlockAttributes(newT, sharedToken);
 
   // 3. Materialize checkboxes into text to ensure htmldiff detects state changes
   const { html: oldM, tokens: cbTokensOld } = materializeCheckboxes(oldMasked);
@@ -68,19 +93,34 @@ export function executeWithFullPipeline(
 
   let diff = execute(oldM, newM);
 
+  // Restore the original attributes into the diff IMMEDIATELY after htmldiff
+  // to prevent structural manipulations (like nesting fixes and block consolidation) 
+  // from causing pointer drift.
+  diff = restoreBlockAttributes(diff, oldPools, newPools, sharedToken);
+
   // Apply pre-restoration fixes (like nesting)
   diff = applyPreRestorePipeline(diff);
 
   // 4. Token restoration
+  // We restore all tokens (including SECTION) before the structural pipeline
+  // to allow refineBlockDiffs to granularly diff slide content.
   let restored = restoreComplexTokens(diff, localTokens);
+
+  // --- CONTENT INTEGRITY GUARD ---
+  // If the complex pipeline caused data loss (e.g. htmldiff failed to align correctly),
+  // fallback to a safe raw diff. We check after restoration so we can see the words.
+  if (!verifyDiffIntegrity(newHtml, restored)) {
+    console.warn("Structural diff failed integrity check. Falling back to raw diff.");
+    let fallbackDiff = execute(oldHtml, newHtml);
+    // Even in fallback, we still want to apply basic cleanup to ensure valid HTML
+    fallbackDiff = fixInvalidNesting(fallbackDiff);
+    return { diff: fallbackDiff, tokens: {} };
+  }
 
   // Apply post-restoration refinements (like list Ghost items)
   if (!options.skipRefinement) {
     restored = applyStructuralDiffPipeline(restored, execute, localTokens);
   }
-
-  // Restore the original attributes into the diff
-  restored = restoreBlockAttributes(restored, oldAttrs, newAttrs);
 
   return { diff: restored, tokens: localTokens };
 }
@@ -107,6 +147,7 @@ export function applyPreRestorePipeline(html: string): string {
   result = fixInvalidNesting(result);
   result = normalizeListContainerChanges(result);
   result = consolidateBlockDiffs(result);
+  result = flattenDiffNesting(result);
   result = cleanupCheckboxArtifacts(result);
   return result;
 }
@@ -120,7 +161,6 @@ export function applyStructuralDiffPipeline(
   allTokens: Record<string, string> = {},
 ): string {
   let result = html;
-  result = splitMixedBlockInsertions(result);
   result = splitConsolidatedDiffs(result);
 
   const skipRefinementExecute = (old: string, newVal: string, options: { tokenizeListContainers?: boolean } = {}) =>
@@ -138,6 +178,75 @@ export function applyStructuralDiffPipeline(
   result = consolidateWrappedItems(result);
   result = fixInvalidNesting(result);
   result = normalizeListContainerChanges(result);
+  result = flattenDiffNesting(result);
+  result = cleanupUnbalancedDiffTags(result);
+  result = labelBlockDiffTags(result);
+  return result;
+}
+
+/**
+ * Final cleanup for unbalanced or redundant diff tags that might be 
+ * introduced during structural manipulation.
+ */
+export function cleanupUnbalancedDiffTags(html: string): string {
+  let result = html;
+  // Fix cases like <section></del></ins> which happen if htmldiff gets confused by fragments
+  result = result.replace(/<section>\s*<\/del>\s*<\/ins>/gi, '<section>');
+  result = result.replace(/<section>\s*<\/ins>\s*<\/del>/gi, '<section>');
+
+  // Fix inverted closing tags inside content
+  result = result.replace(/<\/del>\s*<\/ins>/g, '</ins></del>');
+
+  
+  // Remove empty diff tags
+  result = result.replace(/<(ins|del)[^>]*>\s*<\/\1>/gi, '');
+  
+  return result;
+}
+
+/**
+ * Removes logically impossible nested diff tags (e.g., <del><ins>...</ins></del>).
+ * htmldiff sometimes produces these when comparing complex block changes.
+ * In split mode, the outer <del> hides the inner <ins> on the right pane, 
+ * causing content to disappear.
+ */
+export function flattenDiffNesting(html: string): string {
+  let result = html;
+  let changed = true;
+  
+  while (changed) {
+    const prev = result;
+    
+    // Pattern 1: <outer><inner>CONTENT</inner></outer> where outer and inner are different (del/ins)
+    // This is logically impossible and usually caused by htmldiff getting confused by block changes.
+    // We unwrap the outer tag because it's usually the one hiding the inner one in split view.
+    result = result.replace(/<(del|ins)([^>]*)>(\s*)<(ins|del)([^>]*)>([\s\S]*?)<\/\4>(\s*)<\/\1>/gi, 
+      (match, t1, a1, s1, t2, a2, content, s2) => {
+        if (t1.toLowerCase() === t2.toLowerCase()) {
+          // Double wrapping of same type: just consolidate them
+          return `<${t1}${a1}>${content}</${t1}>`;
+        }
+        // Opposite types: unwrap outer to ensure visibility in one of the panes
+        // BUT merge attributes (like diff-block class) to the inner tag
+        let mergedA2 = a2;
+        if (a1.includes("diff-block") && !a2.includes("diff-block")) {
+          if (mergedA2.includes('class="')) {
+            mergedA2 = mergedA2.replace(/class="([^"]*)"/i, 'class="$1 diff-block"');
+          } else {
+            mergedA2 += ' class="diff-block"';
+          }
+        }
+        return s1 + `<${t2}${mergedA2}>${content}</${t2}>` + s2;
+      }
+    );
+
+    // Pattern 2: <outer>...<inner>CONTENT</inner>...</outer> where inner is a different type
+    // and covers most of the content. This is a bit riskier but helps with Slide 1 disappearing.
+    // However, let's stick to Pattern 1 first as it's the most common failure mode.
+
+    changed = result !== prev;
+  }
+
   return result;
 }
 
@@ -152,9 +261,11 @@ export function splitConsolidatedDiffs(html: string): string {
     "gi",
   );
 
+  let result = html;
+
   // First, look for pairs of <del> and <ins> that both contain multiple blocks
   // This is where interleaving is most effective.
-  let result = html.replace(
+  result = result.replace(
     /(<del([^>]*)>([\s\S]*?)<\/del>)\s*(<ins([^>]*)>([\s\S]*?)<\/ins>)/gi,
     (match, fullDel, delAttrs, delContent, fullIns, insAttrs, insContent) => {
       const delParts: string[] = [];
@@ -222,10 +333,13 @@ export function splitConsolidatedDiffs(html: string): string {
 }
 
 export function consolidateWrappedItems(html: string): string {
-  // Fix <li><ins>...</ins></li> -> <ins><li>...</li></ins>
+  // Fix <p><ins>...</ins></p> -> <ins><p>...</p></ins>
   // Robust against whitespace and attributes
+  // Note: We intentionally EXCLUDE <li> here because <ul><ins><li> is invalid HTML
+  // and breaks sibling selectors like li + li. List items are handled via 
+  // markGhostListItems and data-all-inserted attributes instead.
   return html.replace(
-    /<(li|h[1-6]|p|blockquote)([^>]*)>\s*<(ins|del)[^>]*>\s*([\s\S]*?)\s*<\/\3>\s*<\/\1>/gi,
+    /<(h[1-6]|p|blockquote)([^>]*)>\s*<(ins|del)[^>]*>\s*([\s\S]*?)\s*<\/\3>\s*<\/\1>/gi,
     (match, tag, attrs, type, content) => {
       const diffClass = type === "ins" ? "diffins" : "diffdel";
       // Ensure we don't wrap twice
@@ -240,53 +354,114 @@ export function consolidateWrappedItems(html: string): string {
 /**
  * Masks attributes on block tags with a data-attr="MASKED" placeholder.
  */
-export function maskBlockAttributes(html: string): {
+/**
+ * Masks attributes on block tags with a content-based hash placeholder.
+ * This allows htmldiff to match blocks even if line numbers change, 
+ * while preserving the original attributes in a pool.
+ */
+export function maskBlockAttributes(
+  html: string,
+  providedToken?: string,
+): {
   masked: string;
   attributes: string[];
+  token: string;
+  attributePools: Record<string, string[]>;
 } {
-  const attributes: string[] = [];
+  const attributePools: Record<string, string[]> = {};
   const blockTags =
     "h[1-6]|p|blockquote|pre|div|table|ul|ol|dl|section|li|tr|th|td";
-  const regex = new RegExp(`(<(?:${blockTags}))(\\s+[^>]*?)(>)`, "gi");
+  
+  // Exclude already masked tags
+  const regex = new RegExp(`(<(?:${blockTags}))(\\s+(?!data-attr-masked-)[^>]*?)(>)`, "gi");
 
-  const masked = html.replace(regex, (match, tag, attrs, close) => {
-    attributes.push(attrs);
-    return `${tag} data-attr="MASKED"${close}`;
+  const token = providedToken || `data-attr-masked-${Math.random().toString(36).substring(2, 10)}`;
+
+  const masked = html.replace(regex, (match, tag, attrs, close, offset) => {
+    // Normalize attributes for hashing by stripping volatile parts (data-line)
+    const normalized = attrs.replace(/\s*data-line(-end)?="[^"]*"/g, "").trim();
+    
+    // Include tag name and a snippet of the inner content to make the hash more unique
+    // while still being stable enough for htmldiff to match identical/similar blocks.
+    const tagName = tag.substring(1).toLowerCase();
+    
+    // Peek at the content immediately following the tag (up to 20 chars, stripping tags)
+    const contentSnippet = html.substring(offset + match.length, offset + match.length + 50)
+      .replace(/<[^>]+>/g, "")
+      .substring(0, 20)
+      .trim();
+      
+    const hash = crypto.createHash("md5")
+      .update(`${tagName}|${normalized}|${contentSnippet}`)
+      .digest("hex")
+      .substring(0, 8);
+    
+    const key = `${token}-${hash}`;
+    if (!attributePools[key]) {
+      attributePools[key] = [];
+    }
+    attributePools[key].push(attrs);
+    
+    return `${tag} ${key}="true"${close}`;
   });
-  return { masked, attributes };
+
+  return { masked, attributes: [], token, attributePools };
 }
 
 /**
- * Restores the original attributes into the diff HTML.
+ * Restores the original attributes into the diff HTML using the attribute pools.
  */
 export function restoreBlockAttributes(
   diffHtml: string,
-  attrsOld: string[],
-  attrsNew: string[],
+  oldPools: Record<string, string[]>,
+  newPools: Record<string, string[]>,
+  token: string,
 ): string {
-  let oldIdx = 0;
-  let newIdx = 0;
+  // We need to keep track of how many times each hash has been used on each side
+  const oldCounters: Record<string, number> = {};
+  const newCounters: Record<string, number> = {};
 
-  return diffHtml.replace(/data-attr="MASKED"/g, (match, offset) => {
+  const tokenRegex = new RegExp(`${token}-([a-f0-9]{8})="true"`, "g");
+  
+  return diffHtml.replace(tokenRegex, (match, hash, offset) => {
+    const key = `${token}-${hash}`;
     const prefix = diffHtml.substring(0, offset);
-    const lastInsOpen = prefix.lastIndexOf("<ins");
-    const lastInsClose = prefix.lastIndexOf("</ins>");
-    const lastDelOpen = prefix.lastIndexOf("<del");
-    const lastDelClose = prefix.lastIndexOf("</del>");
-
-    const isInsideIns = lastInsOpen > lastInsClose;
-    const isInsideDel = lastDelOpen > lastDelClose;
-
-    if (isInsideDel) {
-      return attrsOld[oldIdx++] || "";
-    } else if (isInsideIns) {
-      return attrsNew[newIdx++] || "";
-    } else {
-      // Shared: consume from both to keep pointers aligned
-      const val = attrsNew[newIdx++] || "";
-      oldIdx++;
-      return val;
+    
+    const tags = prefix.match(/<\/?(ins|del)[^>]*>/gi) || [];
+    let inIns = false;
+    let inDel = false;
+    for (const tag of tags) {
+      if (tag.toLowerCase().startsWith("<ins")) {
+        inIns = true;
+      } else if (tag.toLowerCase().startsWith("</ins")) {
+        inIns = false;
+      } else if (tag.toLowerCase().startsWith("<del")) {
+        inDel = true;
+      } else if (tag.toLowerCase().startsWith("</del")) {
+        inDel = false;
+      }
     }
+
+    let res;
+    if (inDel) {
+      const idx = oldCounters[key] || 0;
+      const pool = oldPools[key] || [];
+      res = pool[idx] || pool[pool.length - 1] || "";
+      oldCounters[key] = idx + 1;
+    } else {
+      // For shared or inserted, we prefer New attributes
+      const idx = newCounters[key] || 0;
+      const pool = newPools[key] || [];
+      res = pool[idx] || pool[pool.length - 1] || "";
+      newCounters[key] = idx + 1;
+      
+      // Also increment old counter if shared to keep them "aligned" where possible
+      if (!inIns) {
+          oldCounters[key] = (oldCounters[key] || 0) + 1;
+      }
+    }
+    
+    return res;
   });
 }
 
@@ -298,6 +473,7 @@ export function replaceComplexBlocksWithTokens(
   options: {
     tokenizeListContainers?: boolean;
     tokenizeCodeBlocks?: boolean;
+    tokenizeMarpSections?: boolean;
   } = {},
 ): {
   html: string;
@@ -307,6 +483,7 @@ export function replaceComplexBlocksWithTokens(
   return replaceBalancedTags(html, tokens, {
     tokenizeListContainers: options.tokenizeListContainers,
     tokenizeCodeBlocks: options.tokenizeCodeBlocks ?? true,
+    tokenizeMarpSections: options.tokenizeMarpSections ?? true,
   });
 }
 
@@ -341,10 +518,14 @@ export function replaceBalancedTags(
   options: {
     tokenizeListContainers?: boolean;
     tokenizeCodeBlocks?: boolean;
+    tokenizeMarpSections?: boolean;
   } = {},
 ): { html: string; tokens: Record<string, string> } {
   let result = "";
   let i = 0;
+
+  // Use sticky regex for list containers to avoid substring calls
+  const listRegex = /^<(ol|ul|dl|table)(\s[^>]*)?>/iy;
 
   while (i < html.length) {
     if (html.startsWith('<div class="mermaid"', i)) {
@@ -425,11 +606,27 @@ export function replaceBalancedTags(
       }
     }
 
+    // Marp Sections (but not Footnotes section)
+    if (
+      options.tokenizeMarpSections !== false &&
+      html.startsWith("<section", i) &&
+      !html.startsWith('<section class="footnotes"', i)
+    ) {
+      const start = i;
+      const end = findClosing(html, i, "section");
+      if (end > -1) {
+        const content = html.substring(start, end);
+        const token = createToken(content, "SECTION", tokens);
+        result += token;
+        i = end;
+        continue;
+      }
+    }
+
     // List and Table containers
     if (options.tokenizeListContainers !== false && html[i] === "<") {
-      const listMatch = html
-        .substring(i)
-        .match(/^<(ol|ul|dl|table)(\s[^>]*)?>/i);
+      listRegex.lastIndex = i;
+      const listMatch = listRegex.exec(html);
       if (listMatch) {
         const tagName = listMatch[1].toLowerCase();
         const start = i;
@@ -446,7 +643,7 @@ export function replaceBalancedTags(
       }
     }
 
-    // Tables
+    // Tables (already covered by listRegex, but keeping for compatibility if listRegex doesn't match for some reason)
     if (html.startsWith("<table", i)) {
       const start = i;
       const end = findClosing(html, i, "table");
@@ -479,12 +676,13 @@ export function findClosing(
   for (let i = start; i < html.length; i++) {
     if (html[i] === "<") {
       // Check for opening tag with word boundary
-      if (html.toLowerCase().startsWith(openTagBase, i)) {
+      // Optimized: slice and toLowerCase only the necessary part
+      if (html.slice(i, i + openTagBase.length).toLowerCase() === openTagBase) {
         const charAfter = html[i + openTagBase.length];
         if (!charAfter || /[\s/>]/.test(charAfter)) {
           depth++;
         }
-      } else if (html.toLowerCase().startsWith(closeTag, i)) {
+      } else if (html.slice(i, i + closeTag.length).toLowerCase() === closeTag) {
         depth--;
         if (depth === 0) {
           return i + closeTag.length;
@@ -533,20 +731,39 @@ export function restoreComplexTokens(
   let iterations = 0;
   const MAX_ITERATIONS = 5;
 
+  // Sort keys by length descending to replace longest/most-specific tokens first
+  const keys = Object.keys(tokens).sort((a, b) => b.length - a.length);
+  if (keys.length === 0) {
+    return html;
+  }
+
+  // Create a mapping from uppercase key to original key for case-insensitive lookup
+  const upperToOriginal = new Map<string, string>();
+  for (const k of keys) {
+    upperToOriginal.set(k.toUpperCase(), k);
+  }
+
+  // Create a single combined regex for all tokens
+  const escapedKeys = keys.map((k) => k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  const combinedRegex = new RegExp(escapedKeys.join("|"), "gi");
+
   while (hasMoreTokens && iterations < MAX_ITERATIONS) {
     hasMoreTokens = false;
     const prev = restored;
 
-    // Sort keys by length descending to replace longest/most-specific tokens first
-    const keys = Object.keys(tokens).sort((a, b) => b.length - a.length);
-
-    for (const token of keys) {
-      if (restored.includes(token)) {
-        const escapedToken = token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-        restored = restored.replace(new RegExp(escapedToken, "g"), tokens[token]);
-        hasMoreTokens = true;
+    // Use a single-pass replacement for all tokens
+    restored = restored.replace(combinedRegex, (match) => {
+      // Find the original token key (case-insensitive)
+      const originalKey = upperToOriginal.get(match.toUpperCase());
+      if (originalKey !== undefined) {
+        const tokenValue = tokens[originalKey];
+        if (tokenValue !== undefined) {
+          hasMoreTokens = true;
+          return tokenValue;
+        }
       }
-    }
+      return match;
+    });
 
     if (restored === prev) {
       hasMoreTokens = false;
@@ -672,8 +889,10 @@ export function refineBlockDiffs(
   const footnoteBundleRegex =
     /<del[^>]*>\s*((?:<li[^>]*>[\s\S]*?<\/li>\s*)+)<\/del>\s*<ins[^>]*>\s*((?:<li[^>]*>[\s\S]*?<\/li>\s*)+)<\/ins>/gi;
   const footnoteItemRegex = /<li[^>]*>[\s\S]*?<\/li>/gi;
-  const getFootnoteId = (itemHtml: string) =>
-    itemHtml.match(/\bid=["']([^"']+)["']/i)?.[1] ?? null;
+  const getFootnoteId = (itemHtml: string) => {
+    const id = itemHtml.match(/\bid=["']([^"']+)["']/i)?.[1] ?? null;
+    return id ? id.replace(/-(old|new)-/, "-") : id;
+  };
 
   resultHtml = resultHtml.replace(
     footnoteBundleRegex,
@@ -768,41 +987,42 @@ export function refineBlockDiffs(
   // Instead, collect all del-wrapped and ins-wrapped <pre> blocks globally, pair them by index,
   // re-diff each pair, and substitute back via placeholder tokens.
   {
-    const delPreRegex = /<del([^>]*)>\s*(<pre[^>]*>[\s\S]*?<\/pre>)\s*<\/del>/gi;
-    const insPreRegex = /<ins([^>]*)>\s*(<pre[^>]*>[\s\S]*?<\/pre>)\s*<\/ins>/gi;
+    const delPreRegex = /<del([^>]*)>\s*<pre([^>]*)>([\s\S]*?)<\/pre>\s*<\/del>/gi;
+    const insPreRegex = /<ins([^>]*)>\s*<pre([^>]*)>([\s\S]*?)<\/pre>\s*<\/ins>/gi;
 
-    interface PreBlock { full: string; attrs: string; inner: string }
+    interface PreBlock { full: string; delAttrs: string; preAttrs: string; inner: string }
     const delBlocks: PreBlock[] = [];
     const insBlocks: PreBlock[] = [];
 
     let m: RegExpExecArray | null;
     while ((m = delPreRegex.exec(resultHtml)) !== null) {
-      delBlocks.push({ full: m[0], attrs: m[1], inner: m[2] });
+      delBlocks.push({ full: m[0], delAttrs: m[1], preAttrs: m[2], inner: m[3] });
     }
     while ((m = insPreRegex.exec(resultHtml)) !== null) {
-      insBlocks.push({ full: m[0], attrs: m[1], inner: m[2] });
+      insBlocks.push({ full: m[0], delAttrs: m[1], preAttrs: m[2], inner: m[3] });
     }
 
     const pairCount = Math.min(delBlocks.length, insBlocks.length);
     if (pairCount > 0) {
-      // Compute diffed replacements for each pair
       const diffedPairs: Array<{ delFull: string; insFull: string; diffed: string }> = [];
       for (let i = 0; i < pairCount; i++) {
+        // Diff ONLY the inner content of the pre block
+        const innerDiff = diffCodeBlocks(delBlocks[i].inner, insBlocks[i].inner);
         diffedPairs.push({
           delFull: delBlocks[i].full,
           insFull: insBlocks[i].full,
-          diffed: diffCodeBlocks(delBlocks[i].inner, insBlocks[i].inner),
+          diffed: `<pre${insBlocks[i].preAttrs}>${innerDiff}</pre>`,
         });
       }
 
-      // Replace del blocks with placeholders, remove ins blocks
       for (let i = 0; i < diffedPairs.length; i++) {
-        resultHtml = resultHtml.replace(diffedPairs[i].delFull, `PREDIFF_${i}_PLACEHOLDER`);
-        resultHtml = resultHtml.replace(diffedPairs[i].insFull, '');
+        const placeholder = `PREDIFF_${i}_${Date.now()}_PLACEHOLDER`;
+        resultHtml = resultHtml.replace(diffedPairs[i].delFull, () => placeholder);
+        resultHtml = resultHtml.replace(diffedPairs[i].insFull, () => "");
+        diffedPairs[i].delFull = placeholder;
       }
-      // Replace placeholders with diffed content
       for (let i = 0; i < diffedPairs.length; i++) {
-        resultHtml = resultHtml.replace(`PREDIFF_${i}_PLACEHOLDER`, diffedPairs[i].diffed);
+        resultHtml = resultHtml.replace(diffedPairs[i].delFull, () => diffedPairs[i].diffed);
       }
     }
   }
@@ -812,8 +1032,9 @@ export function refineBlockDiffs(
 
   resultHtml = resultHtml.replace(
     blockquoteRegex,
-    (match, delBlock, oldInner, insBlock, newInner) => {
-      return execute(oldInner, newInner);
+    (match, delWrapper, delInner, insWrapper, insInner) => {
+      const cleanedInnerDiff = execute(delInner, insInner);
+      return cleanedInnerDiff;
     },
   );
 
@@ -824,6 +1045,12 @@ export function refineBlockDiffs(
     genericBlockRegex,
     (match, delWrapper, delTag, delInner, insWrapper, insTag, insInner) => {
       if (delTag.toLowerCase() !== insTag.toLowerCase()) {
+        return match;
+      }
+
+      // Special handling for pre blocks to ensure we don't break syntax highlighting
+      // if it's already highlighted.
+      if (delTag.toLowerCase() === "pre") {
         return match;
       }
 
@@ -838,7 +1065,7 @@ export function refineBlockDiffs(
       // For Mermaid: Re-diffing injects <ins>/<del> tags that break their specific parsers.
       // For Alerts: It often causes redundant nesting (double vertical bars).
       if (
-        /class=["'][^"']*(?:mermaid|markdown-alert)[^"']*["']/i.test(
+        /class=["'][^"']*(?:mermaid|markdown-alert|katex)[^"']*["']/i.test(
           attributes,
         )
       ) {
@@ -848,9 +1075,13 @@ export function refineBlockDiffs(
       // Re-run the diff on the inner content to restore granularity
       const innerDiff = execute(delInner, insInner);
 
-      return `<${insTag}${attributes}>${innerDiff}</${insTag}>`;
+      // Clean up potential invalid nesting introduced by htmldiff in fragments
+      const cleanedInnerDiff = fixInvalidNesting(innerDiff);
+
+      return `<${insTag}${attributes}>${cleanedInnerDiff}</${insTag}>`;
     },
   );
+
 
   const boldToHeadingRe =
     /<p[^>]*>\s*<strong[^>]*>\s*<del[^>]*>([\s\S]*?)<\/del>\s*(?:<\/strong>)?\s*<\/p>\s*<ins[^>]*>\s*<(h[1-6])([^>]*)>([\s\S]*?)<\/\2>\s*<\/ins>/gi;
@@ -893,14 +1124,16 @@ export function refineBlockDiffs(
   );
 
   const imageRegex =
-    /(?:<p[^>]*>\s*)?(<del[^>]*>\s*(<img[^>]*>)\s*<\/del>)\s*(<ins[^>]*>\s*(<img[^>]*>)\s*<\/ins>)(?:\s*<\/p>)?/gi;
+    /(?:<p([^>]*)>\s*)?(<del[^>]*>\s*(<img[^>]*>)\s*<\/del>)\s*(<ins[^>]*>\s*(<img[^>]*>)\s*<\/ins>)(?:\s*<\/p>)?/gi;
 
   resultHtml = resultHtml.replace(
     imageRegex,
-    (match, delBlock, oldImg, insBlock, newImg) => {
+    (match, pAttrs, delBlock, oldImg, insBlock, newImg) => {
       // Wrap the changed image pair in a consolidated container
       // Note: We intentionally discard the wrapping <p> if it was matched to prevent <div> inside <p>
-      return `<div class="image-diff-block" data-image-diff="true">
+      // BUT we preserve its attributes (like data-line) for mapping.
+      const attrs = pAttrs ? pAttrs : "";
+      return `<div class="image-diff-block" data-image-diff="true" ${attrs}>
         <div class="image-diff-wrapper">
           <div class="diff-image-old">${oldImg}</div>
           <div class="diff-image-new">${newImg}</div>
@@ -961,13 +1194,15 @@ export function consolidateBlockDiffs(html: string): string {
       `<(?:${tag})[^>]*>[\\s\\S]*?<\\/(?:${tag})>|<(?:${tag})[^>]*\\/?>`,
       "gi",
     );
-    result = result.replace(regex, (match) => {
-      // EXCEPTION: Don't consolidate math blocks into block-level diffs.
-      // This keeps the diff tags internal and prevents the 'Upstream INS' problem.
+    result = result.replace(regex, (match, offset) => {
+      // EXCEPTION: Don't consolidate math blocks or Marp sections into block-level diffs.
+      // This keeps the diff tags internal and prevents layout breakage.
       if (
         match.includes("katex-block") ||
         match.includes("katex-display") ||
-        match.includes("TOKEN_MATH")
+        match.includes("TOKEN_MATH") ||
+        match.startsWith("<section") ||
+        match.startsWith("<pre")
       ) {
         return match;
       }
@@ -977,15 +1212,32 @@ export function consolidateBlockDiffs(html: string): string {
 
       if (hasIns && !hasDel) {
         if (checkIfAllContentIsWrapped(match, "ins")) {
+          // If the block is ALREADY wrapped in an outer diff tag, don't wrap it again.
+          const before = result.substring(0, offset);
+          if (/<(ins|del)\b[^>]*class="[^"]*diff-block[^"]*"[^>]*>[\s\n]*$/i.test(before)) {
+            return match;
+          }
           return `<ins class="diffins diff-block">${cleanInnerDiffTags(match, "ins")}</ins>`;
         }
       } else if (hasDel && !hasIns) {
         if (checkIfAllContentIsWrapped(match, "del")) {
+          const before = result.substring(0, offset);
+          if (/<(ins|del)\b[^>]*class="[^"]*diff-block[^"]*"[^>]*>[\s\n]*$/i.test(before)) {
+            return match;
+          }
           return `<del class="diffdel diff-block">${cleanInnerDiffTags(match, "del")}</del>`;
         }
       }
       return match;
     });
+  });
+
+  // Final cleanup: Deduplicate diff-block class if any doubling occurred
+  result = result.replace(/class="([^"]*)"/g, (m, c) => {
+    if (c.includes("diff-block diff-block")) {
+      return `class="${c.replace(/\bdiff-block\s+diff-block\b/g, "diff-block")}"`;
+    }
+    return m;
   });
 
   return result;
@@ -1002,38 +1254,6 @@ export function stripDataLineAttributes(html: string): string {
   return html.replace(/ data-line(?:-end)?="\d+"/g, "");
 }
 
-export function splitMixedBlockInsertions(html: string): string {
-  const tagTypes: Array<"ins" | "del"> = ["ins", "del"];
-  let result = html;
-  for (const diffTag of tagTypes) {
-    const diffClass = diffTag === "ins" ? "diffins" : "diffdel";
-    const regex = new RegExp(
-      `<${diffTag}\\b[^>]*>([\\s\\S]*?)<\\/${diffTag}>`,
-      "gi",
-    );
-    result = result.replace(regex, (match, inner: string) => {
-      const headingCount = (inner.match(/<h[1-6][\s>]/gi) || []).length;
-      if (headingCount === 0) {
-        return match;
-      }
-      const parts = inner.split(/(?=<[a-z1-6]+)/i);
-      if (parts.length <= 1) {
-        return match;
-      }
-      return parts
-        .map((part) => {
-          const trimmed = part.trim();
-          if (!trimmed) {
-            return "";
-          }
-          // Wrap if it looks like a tag or content
-          return `<${diffTag} class="${diffClass}">${trimmed}</${diffTag}>`;
-        })
-        .join("\n");
-    });
-  }
-  return result;
-}
 
 export function wrapHeadingPrefixes(html: string): string {
   return html.replace(
@@ -1082,19 +1302,21 @@ export function markGhostListItems(html: string): string {
       if (/<li\b/i.test(content)) {
         return match;
       }
-      const stripInline = (s: string) =>
+      const stripInsignificant = (s: string) =>
         s
-          .replace(/<\/?(strong|em|b|i|concept|code|s|span|a)\b[^>]*>/gi, "")
+          .replace(/<\/?(strong|em|b|i|concept|code|s|span|a|p|div|br|section)\b[^>]*>/gi, "")
+          .replace(/[.\s]+/g, "")
+          .replace(/\u21a9[\ufe0e\ufe0f]?/g, "") // Strip backref emoji variants (↩︎)
           .trim();
 
       const withoutIns = content.replace(/<ins\b[^>]*>[\s\S]*?<\/ins>/gi, "");
       const withoutDel = content.replace(/<del\b[^>]*>[\s\S]*?<\/del>/gi, "");
       let newAttrs = attrs;
 
-      if (stripInline(withoutIns) === "") {
+      if (stripInsignificant(withoutIns) === "") {
         newAttrs += ' data-all-inserted="true"';
       }
-      if (stripInline(withoutDel) === "") {
+      if (stripInsignificant(withoutDel) === "") {
         newAttrs += ' data-all-deleted="true"';
       }
       if (newAttrs === attrs) {
@@ -1191,14 +1413,71 @@ export function extractSharedReparentedLists(html: string): string {
 }
 
 export function fixInvalidNesting(html: string): string {
-  const tags = ["em", "strong", "b", "i", "code", "span", "a"];
   let fixed = html;
-  tags.forEach((tag) => {
-    const reIns = new RegExp(`<\/ins><\/${tag}>`, "g");
-    const reDel = new RegExp(`<\/del><\/${tag}>`, "g");
-    fixed = fixed.replace(reIns, `</${tag}></ins>`);
-    fixed = fixed.replace(reDel, `</${tag}></del>`);
+  // 1. Fix order of closing tags for common inline elements
+  const inlineTags = "strong|em|b|i|u|s|code|span|a|mark|sub|sup";
+  const blockTags = "p|div|section|blockquote|pre|h[1-6]|li|ul|ol|table|tr|td|th";
+  const noBlockOrDiff = `((?:(?!<\\/?(?:${blockTags}|ins|del)).)*?)`;
+  
+  const pattern = new RegExp(
+    `<(ins|del)\\b([^>]*?)>${noBlockOrDiff}<\\/(${inlineTags})>${noBlockOrDiff}<\\/\\1>`,
+    "gi",
+  );
+  fixed = fixed.replace(pattern, "<$1$2>$3$5</$4></$1>");
+
+  // 2. Remove redundant nested diff tags (e.g., <ins><ins>...</ins></ins>)
+  fixed = fixed.replace(
+    /<(ins|del)\b[^>]*>(\s*)<\1\b[^>]*>([\s\S]*?)<\/\1>(\s*)<\/\1>/gi,
+    (m, tag, s1, content, s2) => {
+      const cls = tag === "ins" ? "diffins" : "diffdel";
+      return `<${tag} class="${cls}">${s1}${content}${s2}</${tag}>`;
+    },
+  );
+
+  // 3. Fix cases where an inline tag is opened inside and closed outside (reversed)
+  const reversePattern = new RegExp(
+    `<(${inlineTags})\\b([^>]*?)>${noBlockOrDiff}<(ins|del)\\b([^>]*?)>${noBlockOrDiff}<\\/\\1>${noBlockOrDiff}<\\/\\4>`,
+    "gi",
+  );
+  fixed = fixed.replace(reversePattern, (match, itag, iattrs, c1, dtag, dattrs, c2, c3) => {
+    const dclass = dtag === "ins" ? "diffins" : "diffdel";
+    return `<${dtag} class="${dclass}">${c1}<${itag}${iattrs}>${c2}</${itag}>${c3}</${dtag}>`;
   });
+
+  // 4. Promote internal diffs to block level if they effectively cover the entire content of a block-like element.
+  // This handles the "bad pairing" issue where htmldiff incorrectly shares block tags for unrelated content.
+  const blockLikeTags = "p|li|div|h[1-6]|section";
+  const blockRegex = new RegExp(`(<(${blockLikeTags})\\b[^>]*>)([\\s\\S]*?)(<\\/\\2>)`, "gi");
+
+  fixed = fixed.replace(blockRegex, (match, open, tag, content, close) => {
+    // If there is more than one top-level diff tag, don't promote (it's a partial change)
+    const diffTags = content.match(/<(ins|del)\b[^>]*>/gi);
+    if (!diffTags || diffTags.length !== 1) {
+      return match;
+    }
+
+    const singleDiffRegex = /<(ins|del)\b[^>]*>([\s\S]*?)<\/\1>/gi;
+    const stripped = content.replace(singleDiffRegex, "").trim();
+
+    // If the stripped content has any actual content (text or tags), don't promote
+    if (stripped.trim() !== "") {
+      return match;
+    }
+
+    // It's a candidate! Extract the diff type and promoted inner content
+    const m = singleDiffRegex.exec(content);
+    if (m) {
+      const type = m[1];
+      const diffClass = type === "ins" ? "diffins" : "diffdel";
+      // Construct inner content by replacing the <ins>...</ins> with its own content
+      // but keeping the surrounding "boilerplate" tags (like KaTeX spans)
+      const inner = content.replace(m[0], m[2]);
+      return `<${type} class="${diffClass} diff-block">${open}${inner}${close}</${type}>`;
+    }
+
+    return match;
+  });
+
   return fixed;
 }
 
@@ -1243,12 +1522,99 @@ export function checkIfAllContentIsWrapped(
     new RegExp(`<${type}[^>]*?>[\\s\\S]*?<\\/${type}>`, "gi"),
     "",
   );
-  const remainingText = stripped.replace(/<[^>]+>/g, "").replace(/\s/g, "");
-  return remainingText.length === 0 && totalText.length > 0;
+  const remaining = stripped.trim();
+  return remaining.length === 0 && totalText.length > 0;
 }
 
 export function cleanInnerDiffTags(html: string, type: "ins" | "del"): string {
   const reOpen = new RegExp(`<${type}[^>]*?>`, "gi");
   const reClose = new RegExp(`<\\/${type}>`, "gi");
   return html.replace(reOpen, "").replace(reClose, "");
+}
+
+/**
+ * Labels block-level diff tags with human-readable descriptions based on their content.
+ */
+export function labelBlockDiffTags(html: string): string {
+  return html.replace(
+    /<(ins|del)\b[^>]*class="[^"]*diff-block[^"]*"[^>]*>/gi,
+    (match) => {
+      if (match.includes("data-diff-label")) {
+        return match;
+      }
+      let label = "";
+      if (match.includes('class="mermaid"')) {
+        label = "Mermaid Diagram";
+      } else if (
+        match.includes('class="katex-block"') ||
+        match.includes('class="katex-display"')
+      ) {
+        label = "Block math";
+      } else if (match.includes('class="markdown-alert"')) {
+        label = "Alert";
+      }
+
+      if (label) {
+        return match.replace(/>$/, ` data-diff-label="${label}">`);
+      }
+      return match;
+    },
+  );
+}
+
+/**
+ * Verifies that the diff HTML contains all the significant content from the modified version.
+ * If significant content is missing, it indicates a catastrophic failure in htmldiff alignment.
+ */
+export function verifyDiffIntegrity(newHtml: string, diffHtml: string): boolean {
+  const strip = (html: string) => {
+    return html
+      .replace(/<[^>]+>/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  };
+
+  const newText = strip(newHtml);
+  
+  // We want to ensure that all words from the modified version are present 
+  // in the "new" side of the diff (Shared + Inserted).
+  // Therefore, we must EXCLUDE <del> blocks from the integrity check.
+  const diffNewSideHtml = diffHtml.replace(/<del\b[^>]*>[\s\S]*?<\/del>/gi, " ");
+  const diffText = strip(diffNewSideHtml);
+
+  // We check for all alphanumeric words to ensure total integrity.
+  const getWords = (text: string) => {
+    return text.toLowerCase().match(/[a-z0-9]+/g) || [];
+  };
+
+  const newWords = getWords(newText);
+  if (newWords.length === 0) {
+    return true; // Nothing to check
+  }
+
+  const diffWordsSet = new Set(getWords(diffText));
+  
+  // Sample a subset of words to check to avoid performance issues on huge documents
+  // but ensure we check enough to detect truncation.
+  const sampleSize = Math.min(newWords.length, 200);
+  const step = Math.max(1, Math.floor(newWords.length / sampleSize));
+  
+  let missingCount = 0;
+  for (let i = 0; i < newWords.length; i += step) {
+    const word = newWords[i];
+    if (!diffWordsSet.has(word)) {
+      missingCount++;
+    }
+  }
+
+  // Allow a very small margin of error (e.g. 2%) for edge cases where htmldiff 
+  // might legitimately combine or slightly transform words (e.g. case changes, punctuation).
+  const failureThreshold = 0.02;
+  const isBroken = (missingCount / sampleSize) > failureThreshold;
+
+  if (isBroken) {
+    return false;
+  }
+
+  return true;
 }

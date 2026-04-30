@@ -143,7 +143,7 @@ describe("MarkdownDiffProvider", () => {
   it("should detect ordered to unordered list container changes", () => {
     const oldMd = "1. One\n2. Two";
     const newMd = "- One\n- Two";
-    const { html: diff } = provider.computeDiff(oldMd, newMd);
+    const { html: diff } = (provider as any).computeDiff(oldMd, newMd, undefined, undefined, { tokenizeListContainers: true });
 
     assert.ok(diff.includes("<del"), "Should mark the ordered list as removed");
     assert.ok(diff.includes("<ins"), "Should mark the unordered list as added");
@@ -168,7 +168,7 @@ describe("MarkdownDiffProvider", () => {
   it("should detect definition list to unordered list container changes", () => {
     const oldMd = "Term 1\n: One";
     const newMd = "- Term 1";
-    const { html: diff } = provider.computeDiff(oldMd, newMd);
+    const { html: diff } = (provider as any).computeDiff(oldMd, newMd, undefined, undefined, { tokenizeListContainers: true });
 
     assert.ok(
       diff.includes("diff-list-container-change"),
@@ -185,7 +185,7 @@ describe("MarkdownDiffProvider", () => {
   it("should detect ordered list to definition list container changes", () => {
     const oldMd = "1. Term 1";
     const newMd = "Term 1\n: One";
-    const { html: diff } = provider.computeDiff(oldMd, newMd);
+    const { html: diff } = (provider as any).computeDiff(oldMd, newMd, undefined, undefined, { tokenizeListContainers: true });
 
     assert.ok(
       diff.includes("diff-list-container-change"),
@@ -220,7 +220,7 @@ describe("MarkdownDiffProvider", () => {
   it("should keep surrounding headings outside structural list-container change wrappers", () => {
     const oldMd = "## Header\n\n1. One\n2. Two\n\n## Next";
     const newMd = "## Header\n\n- One\n- Two\n\n## Next";
-    const { html: diff } = provider.computeDiff(oldMd, newMd);
+    const { html: diff } = (provider as any).computeDiff(oldMd, newMd, undefined, undefined, { tokenizeListContainers: true });
 
     assert.ok(
       diff.includes("<h2"),
@@ -1124,11 +1124,10 @@ describe("MarkdownDiffProvider", () => {
       "- **GitHub Alerts**: Display styled admonitions like etc.\n- **Tables and Lists**: Preserve rendered tables.\n- **Footnotes**: Full support.";
     const { html: diff } = provider.computeDiff(oldMd, newMd);
 
-    // The Tables and Lists li should be marked as data-all-inserted
-    assert.ok(
-      diff.includes('data-all-inserted="true"'),
-      "A purely-inserted list item should be marked with data-all-inserted",
-    );
+    // We expect "Tables and Lists" to be purely inserted and marked.
+    const liMatch = diff.match(/<li[^>]*>[\s\S]*?Tables and Lists[\s\S]*?<\/li>/);
+    assert.ok(liMatch, "Item Tables and Lists should be in diff");
+    assert.ok(liMatch[0].includes('data-all-inserted="true"'), "A purely-inserted list item should be marked with data-all-inserted");
     // The unchanged Footnotes li must NOT be marked
     assert.ok(
       !diff.includes(
@@ -1177,5 +1176,22 @@ describe("MarkdownDiffProvider", () => {
       webviewContent.includes("--markdown-block-spacing: 0.6em"),
       "Block spacing should be 0.6em for compact layout",
     );
+  });
+
+  it("should respect showGitBlame setting in webview content", () => {
+    const webviewWithBlame = provider.getWebviewContent(
+      "<p>text</p>", "k.css", "m.js", "hl.css", "hd.css",
+      "Orig", "Mod", "", {}, undefined, undefined, {},
+      true, true // showGutterMarkers=true, showGitBlame=true
+    );
+    assert.ok(webviewWithBlame.includes('show-git-blame'), "Body should have show-git-blame class when enabled");
+    assert.ok(webviewWithBlame.includes("if (!document.body.classList.contains('show-git-blame'))"), "JS should contain the guard check");
+
+    const webviewWithoutBlame = provider.getWebviewContent(
+      "<p>text</p>", "k.css", "m.js", "hl.css", "hd.css",
+      "Orig", "Mod", "", {}, undefined, undefined, {},
+      true, false // showGutterMarkers=true, showGitBlame=false
+    );
+    assert.ok(!webviewWithoutBlame.includes('show-git-blame"'), "Body should NOT have show-git-blame class when disabled");
   });
 });

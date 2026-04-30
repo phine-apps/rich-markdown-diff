@@ -1,3 +1,27 @@
+/*
+ * MIT License
+ *
+ * Copyright (c) 2026 Rich Markdown Diff Authors
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+
 /**
  * Handles Marp-specific rendering, HTML cleaning, and CSS scoping.
  */
@@ -12,6 +36,7 @@ export async function loadMarp() {
     container: false,
     html: true,
     inlineSVG: false,
+    math: "katex",
   });
 }
 
@@ -36,13 +61,34 @@ export function cleanMarpHtml(html: string): { cleaned: string; scripts: string[
     "",
   );
 
-  // Strip data-line from SVGs to fix Marp slide offsets
-  fullyCleaned = fullyCleaned.replace(/<svg\b[^>]*\sdata-line="[^"]*"[^>]*>/gi, (match) => {
+  // Strip data-line from SVGs and Sections to fix Marp slide offsets and Quick Edit targeting
+  fullyCleaned = fullyCleaned.replace(/<(svg|section)\b[^>]*\sdata-line="[^"]*"[^>]*>/gi, (match) => {
     return match.replace(/\sdata-line="[^"]*"/gi, "");
   });
 
   return { cleaned: fullyCleaned, scripts };
 }
+
+/**
+ * Splits a Marp HTML string into individual slide strings (each containing the <section> tag).
+ */
+export function splitMarpSlides(html: string): string[] {
+  const slides: string[] = [];
+  const regex = /<section\b[^>]*>([\s\S]*?)<\/section>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = regex.exec(html)) !== null) {
+    slides.push(m[0]);
+  }
+  return slides;
+}
+
+/**
+ * Wraps slide contents in the required Marp container structure.
+ */
+export function wrapMarpContainer(content: string): string {
+  return `<div class="marp"><div class="marpit">${content}</div></div>`;
+}
+
 
 /**
  * Resolves relative URLs in CSS using the provided imageResolver.
@@ -84,9 +130,23 @@ export function scopeMarpCss(
     return "";
   });
 
+  // Basic CSS scoping: prefix every selector with the scopeSelector.
+  // This is more robust than nesting, especially for older browsers.
+  const scoped = cleanedCss.replace(/([^\s{},][^{]*)\{/g, (match, selector) => {
+    // Avoid prefixing @media, @keyframes, etc.
+    if (selector.trim().startsWith("@")) {
+      return match;
+    }
+    const scopedSelector = selector
+      .split(",")
+      .map((s: string) => `${scopeSelector} ${s.trim()}`)
+      .join(", ");
+    return `${scopedSelector} {`;
+  });
+
   return {
     charsets,
     imports,
-    scoped: `${scopeSelector} { ${cleanedCss} }`,
+    scoped,
   };
 }

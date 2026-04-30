@@ -1,6 +1,6 @@
 {
   "rich-markdown-diff.displayName": "Rich Markdown Diff",
-  "rich-markdown-diff.description": "显示两个 Markdown 文件的富文本可视化差异。",
+  "rich-markdown-diff.description": "专业的 Markdown 可视化差异对比工具，支持数学公式、Mermaid 及 Git 集成，助力高效文档审核。",
   "rich-markdown-diff.selectForCompare.title": "选择以进行 Markdown 差异对比",
   "rich-markdown-diff.compareWithSelected.title": "与已选项目进行比较 (Markdown Diff)",
   "rich-markdown-diff.showRenderedDiff.title": "显示 Markdown 差异",

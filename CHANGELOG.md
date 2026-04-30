@@ -2,6 +2,19 @@
 
 All notable changes to **Rich Markdown Diff** will be documented in this file.
 
+## [1.3.0] - 2026-04-30
+
+### Added in 1.3.0
+
+- **Git Blame Integration**: View author and commit information by hovering over any line in the diff view.
+- **Obsidian Support**: Native rendering for Obsidian-style tags (`#tag`) and internal transclusions (`![[link]]`).
+- **Interactive Image Comparison**: New "Swipe" and "Onion Skin" modes for visual image diffing.
+- **Quick Edit Interface**: Direct editing of image paths and block content directly from the webview.
+
+### Improved in 1.3.0
+
+- **UX Refinement**: Optimized diff coloring and gutter markers for better readability in split-view.
+
 ## [1.2.0] - 2026-04-12
 
 ### Added in 1.2.0

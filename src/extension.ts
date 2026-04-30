@@ -30,7 +30,7 @@ import {
   tryGetGitApi,
 } from "./gitDiffResolver";
 import { resolveBlameInfo } from "./gitBlameResolver";
-import { getCommandTarget, getFileUriFromCommandArg } from "./commandTarget";
+import { getCommandTarget, getFileUriFromCommandArg, toFileBackedUri } from "./commandTarget";
 import * as path from "path";
 import * as l10n from "@vscode/l10n";
 
@@ -53,6 +53,7 @@ let activeEditorRepositorySubscription: vscode.Disposable | undefined;
 let contextUpdateGeneration = 0;
 let lastCanShowRenderedDiff: boolean | undefined;
 let runtimeDiagnosticsChannel: vscode.OutputChannel | undefined;
+let isWebviewReadyForTesting = false; // Flag for health tests
 const openPanelUpdateHandlers = new Set<(trigger: DiffPanelUpdateTrigger) => void>();
 
 const markdownExtensions = [
@@ -72,7 +73,8 @@ interface DiffPanelState {
   rightLabel?: string;
   watchUris: readonly vscode.Uri[];
   repository?: GitRepository;
-  imageBaseUri: vscode.Uri;
+  originalImageBaseUri?: vscode.Uri;
+  modifiedImageBaseUri?: vscode.Uri;
   fallbackSourceUri: vscode.Uri;
 }
 
@@ -174,6 +176,9 @@ function getMinimalPathForDisplay(
  * @returns A function that takes an image source and returns a resolved URI string.
  */
 function createImageResolver(fileUri: vscode.Uri, webview: vscode.Webview) {
+  // Normalize to file-backed URI for resolution
+  const baseUri = toFileBackedUri(fileUri);
+
   return (src: string) => {
     // Check if absolute URL (http, https, data, etc.)
     if (/^[a-z]+:/i.test(src)) {
@@ -182,12 +187,12 @@ function createImageResolver(fileUri: vscode.Uri, webview: vscode.Webview) {
 
     try {
       // Resolve path relative to the document
-      // We use joinPath with '..' to start from the directory of the fileUri
+      // We use joinPath with '..' to start from the directory of the baseUri
       let resolvedUri: vscode.Uri;
       if (src.startsWith("/")) {
         resolvedUri = vscode.Uri.file(src);
       } else {
-        resolvedUri = vscode.Uri.joinPath(fileUri, "..", src);
+        resolvedUri = vscode.Uri.joinPath(baseUri, "..", src);
       }
       return webview.asWebviewUri(resolvedUri).toString();
     } catch (e) {
@@ -434,7 +439,8 @@ function toDiffPanelState(
     rightLabel: comparison.modifiedLabel,
     watchUris: comparison.watchUris,
     repository: comparison.repository,
-    imageBaseUri: comparison.targetUri,
+    originalImageBaseUri: comparison.originalUri ?? comparison.targetUri,
+    modifiedImageBaseUri: comparison.modifiedUri ?? comparison.targetUri,
     fallbackSourceUri: comparison.targetUri,
   };
 }
@@ -451,7 +457,7 @@ function isActionableSingleFileComparison(
   isDirty = false,
 ): boolean {
   if (comparison.kind === "fileOnly") {
-    return false;
+    return isDirty;
   }
 
   return comparison.kind !== "cleanHeadToWorkingTree" || isDirty;
@@ -578,15 +584,23 @@ async function renderDiffPanel(
 
   await diffProvider.waitForReady();
 
-  const resolver = createImageResolver(state.imageBaseUri, panel.webview);
+  const originalResolver = state.originalImageBaseUri
+    ? createImageResolver(state.originalImageBaseUri, panel.webview)
+    : undefined;
+  const modifiedResolver = state.modifiedImageBaseUri
+    ? createImageResolver(state.modifiedImageBaseUri, panel.webview)
+    : undefined;
+
   const config = vscode.workspace.getConfiguration("rich-markdown-diff");
   const showGutterMarkers = config.get<boolean>("showGutterMarkers", true);
   const showGitBlame = config.get<boolean>("showGitBlame", true);
+  const lineHoverDelay = config.get<number>("lineHoverDelay", 500);
 
   const { html: diffHtml, marpCss, marpJs } = diffProvider.computeDiff(
     originalContent,
     modifiedContent,
-    resolver,
+    modifiedResolver,
+    originalResolver,
   );
   const assets = getWebviewAssetUris(panel, context.extensionUri);
   const katexCssInline = await buildKatexCssInline(
@@ -594,7 +608,7 @@ async function renderDiffPanel(
     assets.katexFontBaseUri,
   );
 
-  panel.webview.html = diffProvider.getWebviewContent(
+  const html = diffProvider.getWebviewContent(
     diffHtml,
     katexCssInline,
     assets.mermaidJsUri.toString(),
@@ -612,7 +626,9 @@ async function renderDiffPanel(
     },
     showGutterMarkers,
     showGitBlame,
+    lineHoverDelay,
   );
+  panel.webview.html = html;
 
   return contentKey;
 }
@@ -727,7 +743,8 @@ async function bindDiffPanel(
   const configSubscription = vscode.workspace.onDidChangeConfiguration((e) => {
     if (
       e.affectsConfiguration("rich-markdown-diff.showGutterMarkers") ||
-      e.affectsConfiguration("rich-markdown-diff.showGitBlame")
+      e.affectsConfiguration("rich-markdown-diff.showGitBlame") ||
+      e.affectsConfiguration("rich-markdown-diff.lineHoverDelay")
     ) {
       lastContentKey = undefined; // Force re-render
       scheduleUpdate("document");
@@ -761,12 +778,27 @@ async function bindDiffPanel(
   });
 
   panel.webview.onDidReceiveMessage(async (message) => {
+    if (message.command === "ready") {
+      isWebviewReadyForTesting = true;
+      return;
+    }
+
     if (message.command === "runtimeDiagnostics") {
       appendRuntimeDiagnostics(
         panel,
         currentState,
         message.payload as RuntimeDiagnosticsPayload,
       );
+      return;
+    }
+
+    if (message.command === "searchTag") {
+      vscode.commands.executeCommand("workbench.action.findInFiles", {
+        query: message.tag,
+        triggerSearch: true,
+        isCaseSensitive: false,
+        isRegex: false,
+      });
       return;
     }
 
@@ -959,6 +991,12 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand("rich-markdown-diff.prevChange", () => {
       activePanel?.webview.postMessage({ command: "prevChange" });
     }),
+    vscode.commands.registerCommand("rich-markdown-diff.getTestStatus", (key: string) => {
+      if (key === "webviewReady") {
+        return isWebviewReadyForTesting;
+      }
+      return false;
+    }),
   );
 
   context.subscriptions.push(
@@ -1030,6 +1068,7 @@ export function activate(context: vscode.ExtensionContext) {
         clipboardText,
         docText,
         resolver,
+        undefined,
       );
       const katexFontBaseUri = panel.webview.asWebviewUri(
         vscode.Uri.joinPath(context.extensionUri, "media", "katex", "fonts"),
@@ -1383,8 +1422,9 @@ async function showTwoFilesDiff(
       watchUris: [originalUri, modifiedUri].filter(
         (uri): uri is vscode.Uri => !!uri && uri.scheme === "file",
       ),
-      imageBaseUri,
-      fallbackSourceUri: modifiedUri ?? originalUri ?? imageBaseUri,
+      originalImageBaseUri: originalUri,
+      modifiedImageBaseUri: modifiedUri,
+      fallbackSourceUri: imageBaseUri,
     }),
   );
 }

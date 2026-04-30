@@ -1,6 +1,6 @@
 {
   "rich-markdown-diff.displayName": "Rich Markdown Diff",
-  "rich-markdown-diff.description": "2つのMarkdownファイルの視覚的な差分（Rich Diff）を表示します。",
+  "rich-markdown-diff.description": "数式、Mermaid、Git連携を備えた、プロフェッショナルなMarkdown視覚差分ツールです。",
   "rich-markdown-diff.selectForCompare.title": "Markdown Diff のために選択",
   "rich-markdown-diff.compareWithSelected.title": "選択した項目と比較 (Markdown Diff)",
   "rich-markdown-diff.showRenderedDiff.title": "Markdown Diff を表示",
@@ -12,5 +12,6 @@
   "rich-markdown-diff.category": "Markdown Diff",
   "rich-markdown-diff.customEditor.displayName": "Markdown Diff プレビュー",
   "rich-markdown-diff.showGutterMarkers.description": "ガター領域に垂直な差分マーカーを表示するかどうか。",
-  "rich-markdown-diff.showGitBlame.description": "ホバー時に Git Blame 情報（作成者、日付、メッセージ）を表示するかどうか。"
+  "rich-markdown-diff.showGitBlame.description": "ホバー時に Git Blame 情報（作成者、日付、メッセージ）を表示するかどうか。",
+  "rich-markdown-diff.lineHoverDelay.description": "ホバー時に Git Blame や Quick Edit のインジケーターを表示するまでの遅延時間（ミリ秒）。"
 }

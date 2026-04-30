@@ -1,6 +1,6 @@
 {
   "rich-markdown-diff.displayName": "Rich Markdown Diff",
-  "rich-markdown-diff.description": "Displays a rich, visual diff of two markdown files.",
+  "rich-markdown-diff.description": "Professional visual Markdown diff with Math, Mermaid, and Git integration for better document reviews.",
   "rich-markdown-diff.selectForCompare.title": "Select for Markdown Diff",
   "rich-markdown-diff.compareWithSelected.title": "Compare with Selected (Markdown Diff)",
   "rich-markdown-diff.showRenderedDiff.title": "Show Markdown Diff",
@@ -12,5 +12,6 @@
   "rich-markdown-diff.category": "Markdown Diff",
   "rich-markdown-diff.customEditor.displayName": "Markdown Diff Preview",
   "rich-markdown-diff.showGutterMarkers.description": "Whether to show vertical diff markers in the gutter area.",
-  "rich-markdown-diff.showGitBlame.description": "Whether to show Git Blame information (author, date, message) on hover."
+  "rich-markdown-diff.showGitBlame.description": "Whether to show Git Blame information (author, date, message) on hover.",
+  "rich-markdown-diff.lineHoverDelay.description": "The delay in milliseconds before showing Git Blame and Quick Edit indicators on hover."
 }

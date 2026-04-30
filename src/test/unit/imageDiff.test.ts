@@ -100,4 +100,27 @@ describe("MarkdownDiffProvider - Image Diff", () => {
       "Images should use object-fit: contain to maintain alignment",
     );
   });
+
+  it("should use separate resolvers for old and new content", () => {
+    const oldMd = "![Old](old.png)";
+    const newMd = "![New](new.png)";
+    const oldResolver = (src: string) => `https://old/${src}`;
+    const newResolver = (src: string) => `https://new/${src}`;
+
+    const { html: diff } = provider.computeDiff(
+      oldMd,
+      newMd,
+      newResolver,
+      oldResolver,
+    );
+
+    assert.ok(
+      diff.includes('src="https://old/old.png"'),
+      "Old image should use old resolver",
+    );
+    assert.ok(
+      diff.includes('src="https://new/new.png"'),
+      "New image should use new resolver",
+    );
+  });
 });

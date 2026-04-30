@@ -38,19 +38,18 @@ describe("GitHub Alert Tests", () => {
     const newMd = `> [!NOTE]\n> New content`;
 
     const { html: diffHtml } = provider.computeDiff(oldMd, newMd);
+    if (process.env.DEBUG_TEST) { console.log("DEBUG DIFF HTML:", diffHtml); }
 
-    // Extract the alert div
-    const alertMatch = diffHtml.match(
-      /<div class="markdown-alert[^>]*>([\s\S]*?)<\/div>/,
-    );
+    // Extract the alert div - simplified regex to be attribute-order independent
+    const alertMatch = diffHtml.match(/<div[^>]*markdown-alert[^>]*>([\s\S]*?)<\/div>/) || 
+                       diffHtml.match(/<div[^>]*data-mask="[^"]*"[^>]*>([\s\S]*?)<\/div>/);
     assert.ok(alertMatch, "Alert div found");
 
     const alertContent = alertMatch[1];
 
     // Extract the title
-    const titleMatch = alertContent.match(
-      /<p class="markdown-alert-title">([\s\S]*?)<\/p>/,
-    );
+    const titleMatch = alertContent.match(/<p[^>]*markdown-alert-title[^>]*>([\s\S]*?)<\/p>/) ||
+                       alertContent.match(/<p[^>]*data-mask="[^"]*"[^>]*>([\s\S]*?)<\/p>/);
     assert.ok(titleMatch, "Alert title found");
 
     const titleInner = titleMatch[1];
@@ -84,18 +83,16 @@ describe("GitHub Alert Tests", () => {
 
     const { html: diffHtml } = provider.computeDiff(oldMd, newMd);
 
-    // Extract the alert div
-    const alertMatch = diffHtml.match(
-      /<div class="markdown-alert[^>]*>([\s\S]*?)<\/div>/,
-    );
+    // Extract the alert div - can be masked or unmasked
+    const alertMatch = diffHtml.match(/<div[^>]*markdown-alert[^>]*>([\s\S]*?)<\/div>/) || 
+                       diffHtml.match(/<div[^>]*data-mask="[^"]*"[^>]*>([\s\S]*?)<\/div>/);
     assert.ok(alertMatch, "Alert div found");
 
     const alertContent = alertMatch[1];
 
     // Check if the title has any <ins> or <del>
-    const titleMatch = alertContent.match(
-      /<p class="markdown-alert-title">([\s\S]*?)<\/p>/,
-    );
+    const titleMatch = alertContent.match(/<p[^>]*markdown-alert-title[^>]*>([\s\S]*?)<\/p>/) ||
+                       alertContent.match(/<p[^>]*data-mask="[^"]*"[^>]*>([\s\S]*?)<\/p>/);
     assert.ok(titleMatch, "Alert title should exist");
 
     const titleContent = titleMatch[1];
@@ -108,5 +105,36 @@ describe("GitHub Alert Tests", () => {
       !titleContent.includes("<del"),
       "Alert Title should not contain <del>",
     );
+  });
+
+  it("should not split trailing dot into a new line in alerts (User Reported Regression)", () => {
+    // V1: "This is warning alert" (then dot on next line)
+    // V2: "This is a warning alert."
+    const oldMd = `> [!WARNING]\n> This is warning alert\n> .`;
+    const newMd = `> [!WARNING]\n> This is a warning alert.`;
+
+    const { html: diffHtml } = provider.computeDiff(oldMd, newMd);
+
+    // Extract the alert div - simplified regex to be attribute-order independent
+    const alertMatch = diffHtml.match(/<div[^>]*markdown-alert[^>]*>([\s\S]*?)<\/div>/) || 
+                       diffHtml.match(/<div[^>]*data-mask="[^"]*"[^>]*>([\s\S]*?)<\/div>/);
+    assert.ok(alertMatch, "Alert div found");
+
+    const alertContent = alertMatch[1];
+
+    // Extract the title
+    const titleMatch = alertContent.match(/<p[^>]*markdown-alert-title[^>]*>([\s\S]*?)<\/p>/) ||
+                       alertContent.match(/<p[^>]*data-mask="[^"]*"[^>]*>([\s\S]*?)<\/p>/);
+    assert.ok(titleMatch, "Alert title found");
+
+    // Check for a paragraph that contains ONLY a dot or starts with a dot after a break
+    // This would indicate the "detached dot" bug.
+    const hasDetachedDot = /<(p|ins|del)\b[^>]*>\s*\.\s*<\/\1>/.test(alertContent) || 
+                           /alert\s*<\/(p|ins|del)>\s*<(p|ins|del)\b[^>]*>\s*\./.test(alertContent);
+    
+    assert.strictEqual(hasDetachedDot, false, "Dot should not be detached into a new paragraph");
+    
+    // ALSO check if the dot actually EXISTS in the final output for V1 and V2
+    assert.ok(alertContent.includes("."), "The dot must be preserved");
   });
 });

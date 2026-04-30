@@ -28,7 +28,13 @@ import * as htmldiff from "htmldiff-js";
 import matter from "gray-matter";
 import { sanitizeHtml } from "./markdown/sanitizer";
 import { getWebviewContent } from "./markdown/webviewTemplate";
-import { cleanMarpHtml, resolveCssUrls, scopeMarpCss } from "./markdown/marpRenderer";
+import {
+  cleanMarpHtml,
+  resolveCssUrls,
+  scopeMarpCss,
+  splitMarpSlides,
+  wrapMarpContainer,
+} from "./markdown/marpRenderer";
 import { createMarkdownRenderer, loadMarkdownPlugins } from "./markdown/renderer";
 import {
   executeWithFullPipeline,
@@ -79,36 +85,36 @@ export class MarkdownDiffProvider {
     oldMarkdown: string,
     newMarkdown: string,
     imageResolver?: (src: string) => string,
-  ): { html: string; marpCss?: string; marpJs?: string } {
+    oldImageResolver?: (src: string) => string,
+    options: { tokenizeListContainers?: boolean } = {}
+  ): { html: string; marpCss?: string; marpJs?: string; rawDiff?: string } {
     const oldMatter = matter(oldMarkdown);
     const newMatter = matter(newMarkdown);
 
     const isMarp = !!(oldMatter.data.marp || newMatter.data.marp);
 
     // 1. Render Body Diff
-    const envOld = { imageResolver };
-    let oldHtml: string;
-    let newHtml: string;
+    const envOld = { imageResolver: oldImageResolver ?? imageResolver, docId: "old" };
     let marpCss: string | undefined;
     let marpJs: string | undefined;
+
+    let bodyDiffHtml: string;
+    const envNew = { imageResolver, docId: "new" };
 
     if (isMarp && this.marp) {
       const { html: oHtml, css: cssOld } = this.marp.render(oldMarkdown, envOld);
       const { cleaned: cleanedOld, scripts: scriptsOld } = cleanMarpHtml(oHtml);
-      oldHtml = cleanedOld;
-
-      const envNew = { imageResolver };
+      
       const { html: nHtml, css: cssNew } = this.marp.render(newMarkdown, envNew);
       const { cleaned: cleanedNew, scripts: scriptsNew } = cleanMarpHtml(nHtml);
-      newHtml = cleanedNew;
 
       // Resolve URLs in CSS
-      const resolvedCssOld = resolveCssUrls(cssOld, imageResolver);
+      const resolvedCssOld = resolveCssUrls(cssOld, oldImageResolver ?? imageResolver);
       const resolvedCssNew = resolveCssUrls(cssNew, imageResolver);
 
       // Scope CSS to respective panes to allow different themes without conflict
-      const resOld = scopeMarpCss(resolvedCssOld, "#left-pane.marpit");
-      const resNew = scopeMarpCss(resolvedCssNew, "#right-pane.marpit");
+      const resOld = scopeMarpCss(resolvedCssOld, "#left-pane .marpit");
+      const resNew = scopeMarpCss(resolvedCssNew, "#right-pane .marpit");
 
       marpCss = [
         ...new Set([...resOld.charsets, ...resNew.charsets]),
@@ -118,24 +124,64 @@ export class MarkdownDiffProvider {
       ].join("\n");
 
       marpJs = [...new Set([...scriptsOld, ...scriptsNew])].join("\n");
+
+      // 1b. Granular Slide Diffing
+      // Instead of diffing the whole thing as a string, diff slide-by-slide
+      // to prevent htmldiff from grouping multiple slides into a single block.
+      const oldSlides = splitMarpSlides(cleanedOld).map(s => sanitizeHtml(s));
+      const newSlides = splitMarpSlides(cleanedNew).map(s => sanitizeHtml(s));
+      
+      // @ts-ignore
+      const execute = htmldiff.execute || (htmldiff as any).default?.execute || htmldiff;
+      
+      let diffSlides = "";
+      const maxSlides = Math.max(oldSlides.length, newSlides.length);
+      for (let i = 0; i < maxSlides; i++) {
+        const oSlide = oldSlides[i];
+        const nSlide = newSlides[i];
+        
+        if (oSlide && nSlide) {
+          // Extract content and attributes
+          const oMatch = oSlide.match(/<section([^>]*)>([\s\S]*?)<\/section>/i);
+          const nMatch = nSlide.match(/<section([^>]*)>([\s\S]*?)<\/section>/i);
+          
+          if (oMatch && nMatch) {
+            const oInner = oMatch[2];
+            const nAttrs = nMatch[1];
+            const nInner = nMatch[2];
+            
+            // Diff the inner content
+            const { diff: diffInner } = executeWithFullPipeline(oInner, nInner, execute, {});
+            
+            // Re-wrap in section using NEW attributes, and add a wrapper for diff markers
+            diffSlides += `<div class="marp-slide-wrapper"><section${nAttrs}>${diffInner}</section></div>`;
+          } else {
+            // Fallback if regex fails
+            const { diff } = executeWithFullPipeline(oSlide, nSlide, execute, {});
+            diffSlides += `<div class="marp-slide-wrapper">${diff}</div>`;
+          }
+        } else if (oSlide) {
+          diffSlides += `<del class="diffdel diff-block marp-slide-wrapper">${oSlide}</del>`;
+        } else if (nSlide) {
+          diffSlides += `<ins class="diffins diff-block marp-slide-wrapper">${nSlide}</ins>`;
+        }
+      }
+      
+      bodyDiffHtml = wrapMarpContainer(diffSlides);
     } else {
-      oldHtml = this.md.render(oldMatter.content, envOld);
-      const envNew = { imageResolver };
-      newHtml = this.md.render(newMatter.content, envNew);
-    }
+      const oldHtml = sanitizeHtml(this.md.render(oldMatter.content, envOld));
+      const newHtml = sanitizeHtml(this.md.render(newMatter.content, envNew));
 
-    // Sanitize Rendered Markdown
-    oldHtml = sanitizeHtml(oldHtml);
-    newHtml = sanitizeHtml(newHtml);
-
-    // @ts-ignore
-    const execute =
-      htmldiff.execute || (htmldiff as any).default?.execute || htmldiff;
-    
-    let bodyDiffHtml = oldHtml;
-    if (typeof execute === "function") {
-      const { diff } = executeWithFullPipeline(oldHtml, newHtml, execute, {});
-      bodyDiffHtml = diff;
+      // @ts-ignore
+      const execute = htmldiff.execute || (htmldiff as any).default?.execute || htmldiff;
+      if (typeof execute === "function") {
+        const { diff } = executeWithFullPipeline(oldHtml, newHtml, execute, {}, {
+          tokenizeListContainers: options.tokenizeListContainers
+        });
+        bodyDiffHtml = diff;
+      } else {
+        bodyDiffHtml = newHtml;
+      }
     }
 
     // 2. Render Frontmatter Diff
@@ -228,6 +274,7 @@ export class MarkdownDiffProvider {
     },
     showGutterMarkers: boolean = true,
     showGitBlame: boolean = true,
+    lineHoverDelay: number = 500,
   ): string {
     return getWebviewContent(
       diffHtml,
@@ -244,6 +291,7 @@ export class MarkdownDiffProvider {
       blameInfo,
       showGutterMarkers,
       showGitBlame,
+      lineHoverDelay,
     );
   }
 }

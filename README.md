@@ -7,10 +7,13 @@ A professional VS Code extension for visual Markdown comparison. Compare rendere
 ## Key Features
 
 - **Visual Diff**: Compare rendered output instead of raw source code.
+- **Git Blame**: Hover to see commit history for any line in the diff view.
+- **Interactive Image Diff**: New "Swipe" and "Onion Skin" modes for visual image comparison.
 - **Marp Support**: Full visual diffing for Marp slide decks (`marp: true`).
 - **Git Integration**: Diff directly from Source Control view (Workspace, Staged, or HEAD).
+- **Obsidian Support**: Support for `#tag` and `![[link]]` transclusions.
+- **Quick Edit**: Modify image paths or block metadata directly within the diff view.
 - **Clipboard Compare**: Compare any Markdown file against your clipboard.
-- **Rich Extensions**: Support for Math (KaTeX), Mermaid diagrams, GitHub Alerts, and more.
 
 ## Supported Extensions
 
@@ -19,6 +22,7 @@ A professional VS Code extension for visual Markdown comparison. Compare rendere
 | **Marp** | Render and diff slide decks with full theme support. |
 | **Math** | High-quality KaTeX rendering for formulas. |
 | **Mermaid** | Flowcharts, sequence diagrams, and Gantt charts. |
+| **Obsidian** | Native support for Tags (`#tag`) and Transclusions (`![[link]]`). |
 | **Alerts** | GitHub-style `[!NOTE]`, `[!WARNING]`, etc. |
 | **Structure** | Robust diffing for Tables, Nested Lists, and Footnotes. |
 | **Misc** | Wikilinks, Emoji, Sub/Superscript, and Definition Lists. |

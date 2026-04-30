@@ -121,8 +121,8 @@ describe("Security Tests", () => {
     // style-src-attr uses 'unsafe-inline' for KaTeX inline style attributes
     assert.match(
       webviewContent,
-      /style-src-elem[^;]*'nonce-[^']+'/,
-      "CSP style-src-elem should include a nonce for <style> blocks",
+      /style-src-elem[^;]*'unsafe-inline'/,
+      "CSP style-src-elem should allow 'unsafe-inline' for Mermaid's dynamic styles",
     );
     assert.match(
       webviewContent,

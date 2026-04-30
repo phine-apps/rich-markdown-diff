@@ -1,3 +1,27 @@
+/*
+ * MIT License
+ *
+ * Copyright (c) 2026 Rich Markdown Diff Authors
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+
 import * as crypto from "crypto";
 import { escapeHtml } from "./sanitizer";
 
@@ -35,6 +59,7 @@ export function getWebviewContent(
   },
   showGutterMarkers: boolean = true,
   showGitBlame: boolean = true,
+  lineHoverDelay: number = 500,
 ): string {
   const nonce = crypto.randomBytes(16).toString("hex");
 
@@ -54,7 +79,7 @@ export function getWebviewContent(
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; base-uri 'none'; connect-src 'none'; form-action 'none'; style-src-elem ${cspSource} 'nonce-${nonce}'; style-src-attr 'unsafe-inline'; script-src 'nonce-${nonce}'; img-src ${cspSource} https: data:; font-src ${cspSource};">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; base-uri 'none'; connect-src 'none'; form-action 'none'; style-src-elem ${cspSource} 'unsafe-inline'; style-src-attr 'unsafe-inline'; script-src 'nonce-${nonce}'; img-src ${cspSource} https: data:; font-src ${cspSource};">
     <title>${escapeHtml(t("Markdown Diff"))}</title>
     <!-- KaTeX CSS (inlined with absolute font URIs for webview compatibility) -->
     <style nonce="${nonce}">${katexCssInline}</style>
@@ -106,6 +131,8 @@ export function getWebviewContent(
             border-bottom: 1px solid var(--vscode-panel-border);
             flex-shrink: 0;
             gap: 10px;
+            position: relative;
+            z-index: 3000;
         }
         .btn {
             background: none;
@@ -159,21 +186,27 @@ export function getWebviewContent(
         }
         .pane {
             min-width: 0;
-          min-height: 0;
-          height: 100%;
-          max-height: 100%;
-          align-self: stretch;
+            min-height: 0;
+            height: 100%;
+            max-height: 100%;
+            align-self: stretch;
             overflow-y: scroll;
             overflow-x: auto;
             scrollbar-gutter: stable both-edges;
-            padding: 20px;
+            padding: 0; /* Removed padding to fix sticky breadcrumbs */
             box-sizing: border-box;
             position: relative; /* Ensure offsetTop is relative to pane */
-          background-color: var(--markdown-surface-background);
-          color: var(--markdown-foreground);
-          font-weight: normal;
-          font-size: var(--markdown-base-font-size);
-          line-height: var(--markdown-base-line-height);
+            background-color: var(--markdown-surface-background);
+            color: var(--markdown-foreground);
+            font-weight: normal;
+            font-size: var(--markdown-base-font-size);
+            line-height: var(--markdown-base-line-height);
+        }
+
+        .pane-content {
+            padding: 20px 30px 20px 20px; /* Moved padding here */
+            box-sizing: border-box;
+            min-height: 100%;
         }
         .pane + .pane {
           border-left: 1px solid var(--vscode-panel-border);
@@ -231,56 +264,72 @@ export function getWebviewContent(
             color: inherit;
         }
 
-        /* Diff Gutter Markers */
-        body.show-gutter-markers .pane-content > *:has(ins),
-        body.show-gutter-markers .pane-content > *:has(del),
-        body.show-gutter-markers .pane-content > ins,
-        body.show-gutter-markers .pane-content > del {
+        /* Ensure block elements inside diff tags don't hide the diff background */
+        body.inline-mode #right-pane :is(ins, del) :is(table, tr, th, td, h1, h2, h3, h4, h5, h6, section) {
+            background-color: transparent !important;
+        }
+
+        body.show-gutter-markers .pane-content > :is(ins, del, *:has(ins), *:has(del)):not(.marp),
+        /* Support Marp slides even when only inner content changed */
+        body.show-gutter-markers.marp-mode .marp-slide-wrapper:has(ins, del, .fm-changed),
+        /* Marp-mode gutter markers: Attached to wrappers */
+        body.show-gutter-markers.marp-mode :is(ins:has(> .marp-slide-wrapper), del:has(> .marp-slide-wrapper)) {
             position: relative;
         }
-
-        body.show-gutter-markers .pane-content > *:has(ins)::after,
-        body.show-gutter-markers .pane-content > *:has(del)::after,
-        body.show-gutter-markers .pane-content > ins::after,
-        body.show-gutter-markers .pane-content > del::after {
+        body.show-gutter-markers .pane-content > :is(ins, del, *:has(ins), *:has(del)):not(.marp)::after,
+        /* Support Marp slides */
+        body.show-gutter-markers.marp-mode .marp-slide-wrapper:has(ins, del, .fm-changed)::after,
+        body.show-gutter-markers.marp-mode :is(ins:has(> .marp-slide-wrapper), del:has(> .marp-slide-wrapper))::after {
             content: "";
             position: absolute;
-            left: -16px; /* Position in the gutter padding */
+            left: -16px !important; /* Position in the gutter padding */
             top: 0;
             bottom: 0;
-            width: 3px;
+            width: 3px !important;
             border-radius: 0 2px 2px 0;
-            z-index: 5;
-            display: none;
+            z-index: 1000 !important;
+            display: none; /* Hidden by default, enabled per-pane */
         }
 
-        /* Pane Isolation for Side-by-Side Mode */
-        body.show-gutter-markers:not(.inline-mode) #left-pane .pane-content > *:has(del)::after,
-        body.show-gutter-markers:not(.inline-mode) #left-pane .pane-content > del::after {
-            display: block;
-            background-color: #ef4444; /* Red for deletions */
+        /* Pane Isolation: Strictly enforce one color per pane */
+        
+        /* 1. Left Pane: RED ONLY. Hide anything that doesn't have a deletion. */
+        body.show-gutter-markers:not(.inline-mode) #left-pane .pane-content > ::after {
+            display: none !important; /* Hide all markers in left pane by default */
+        }
+        body.show-gutter-markers:not(.inline-mode) #left-pane .pane-content > :is(del, *:has(del)):not(.marp)::after,
+        body.show-gutter-markers:not(.inline-mode).marp-mode #left-pane .marp-slide-wrapper:has(del)::after,
+        body.show-gutter-markers:not(.inline-mode).marp-mode #left-pane del:has(> .marp-slide-wrapper)::after {
+            display: block !important;
+            background-color: #ef4444 !important; /* Strictly Red */
         }
 
-        body.show-gutter-markers:not(.inline-mode) #right-pane .pane-content > *:has(ins)::after,
-        body.show-gutter-markers:not(.inline-mode) #right-pane .pane-content > ins::after {
-            display: block;
-            background-color: #22c55e; /* Green for insertions */
+        /* 2. Right Pane: GREEN ONLY. Hide anything that doesn't have an insertion. */
+        body.show-gutter-markers:not(.inline-mode) #right-pane .pane-content > ::after {
+            display: none !important; /* Hide all markers in right pane by default */
+        }
+        body.show-gutter-markers:not(.inline-mode) #right-pane .pane-content > :is(ins, *:has(ins)):not(.marp)::after,
+        body.show-gutter-markers:not(.inline-mode).marp-mode #right-pane .marp-slide-wrapper:has(ins, .fm-changed)::after,
+        body.show-gutter-markers:not(.inline-mode).marp-mode #right-pane ins:has(> .marp-slide-wrapper)::after {
+            display: block !important;
+            background-color: #22c55e !important; /* Strictly Green */
         }
 
-        /* Inline Mode Logic */
-        body.show-gutter-markers.inline-mode .pane-content > *:has(ins):not(:has(del))::after,
-        body.show-gutter-markers.inline-mode .pane-content > ins::after {
-            display: block;
-            background-color: #22c55e;
+        /* 3. Inline Mode: Standard logic */
+        body.show-gutter-markers.inline-mode .pane-content > :is(ins, *:has(ins):not(:has(del))):not(.marp)::after,
+        body.show-gutter-markers.inline-mode.marp-mode :is(ins, .marp-slide-wrapper):has(ins):not(:has(del))::after {
+            display: block !important;
+            background-color: #22c55e !important;
         }
-        body.show-gutter-markers.inline-mode .pane-content > *:has(del):not(:has(ins))::after,
-        body.show-gutter-markers.inline-mode .pane-content > del::after {
-            display: block;
-            background-color: #ef4444;
+        body.show-gutter-markers.inline-mode .pane-content > :is(del, *:has(del):not(:has(ins))):not(.marp)::after,
+        body.show-gutter-markers.inline-mode.marp-mode :is(del, .marp-slide-wrapper):has(del):not(:has(ins))::after {
+            display: block !important;
+            background-color: #ef4444 !important;
         }
-        body.show-gutter-markers.inline-mode .pane-content > *:has(ins):has(del)::after {
-            display: block;
-            background-color: #3794ff; /* Blue for modified blocks */
+        body.show-gutter-markers.inline-mode .pane-content > *:not(.marp):has(ins):has(del)::after,
+        body.show-gutter-markers.inline-mode.marp-mode :is(ins, .marp-slide-wrapper):has(ins):has(del)::after {
+            display: block !important;
+            background-color: #3794ff !important;
         }
         
         /* Overview Ruler */
@@ -300,13 +349,14 @@ export function getWebviewContent(
             position: absolute;
             left: 2px;
             right: 2px;
-            height: 3px;
-            min-height: 2px;
+            /* height will be set via JS based on change area */
+            min-height: 3px;
             z-index: 101;
             pointer-events: none;
         }
         .overview-marker.ins { background-color: rgba(34, 197, 94, 0.8); }
         .overview-marker.del { background-color: rgba(239, 68, 68, 0.8); }
+        .overview-marker.ins.del { background-color: rgba(55, 148, 255, 0.8); }
         
         body.inline-mode .overview-ruler {
             top: 30px; /* Toolbar is 40px but header is hidden? Header is 30px. */
@@ -433,11 +483,11 @@ export function getWebviewContent(
 
         /* Hover feedback for Blame info */
         body.show-git-blame [data-line] {
-            cursor: help;
             transition: background-color 0.1s ease;
         }
-        body.show-git-blame [data-line]:hover {
-            background-color: var(--vscode-editor-wordHighlightBackground, rgba(127, 127, 127, 0.1));
+        body.show-git-blame [data-line].hover-focused {
+            cursor: help;
+            background-color: var(--vscode-editor-hoverHighlightBackground, rgba(127, 127, 127, 0.1));
         }
 
         /* Ensure alerts don't inherit or double-up on blockquote borders */
@@ -505,6 +555,84 @@ export function getWebviewContent(
           font-size: var(--markdown-h6-size);
           color: var(--vscode-descriptionForeground);
         }
+        /* Breadcrumbs */
+        .breadcrumbs-bar {
+            position: sticky;
+            top: 0;
+            z-index: 3000;
+            background-color: var(--markdown-surface-background);
+            /* Slightly more opaque for readability when sticky */
+            border-bottom: 1px solid var(--vscode-panel-border);
+            padding: 4px 12px;
+            font-size: 11px;
+            display: none !important;
+            align-items: center;
+            gap: 4px;
+            color: var(--vscode-breadcrumb-foreground);
+            min-height: 22px;
+            overflow: hidden;
+            white-space: nowrap;
+            user-select: none;
+        }
+        .breadcrumb-item {
+            cursor: pointer;
+            padding: 2px 4px;
+            border-radius: 3px;
+            transition: background-color 0.1s;
+        }
+        .breadcrumb-item:hover {
+            background-color: var(--vscode-toolbar-hoverBackground);
+            color: var(--vscode-breadcrumb-focusForeground);
+        }
+        .breadcrumb-separator {
+            opacity: 0.5;
+            font-weight: normal;
+        }
+
+        /* Obsidian Styles */
+        .obsidian-tag {
+            background-color: var(--vscode-badge-background);
+            color: var(--vscode-badge-foreground);
+            padding: 1px 6px;
+            border-radius: 10px;
+            font-size: 0.85em;
+            cursor: pointer;
+            display: inline-block;
+            margin: 0 2px;
+            transition: filter 0.1s;
+        }
+        .obsidian-tag:hover {
+            filter: brightness(1.2);
+        }
+        
+        .obsidian-embed {
+            border: 1px solid var(--vscode-panel-border);
+            border-radius: 4px;
+            padding: 8px 12px;
+            margin: 0.5em 0;
+            background-color: var(--vscode-textCodeBlock-background);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: border-color 0.1s;
+        }
+        .obsidian-embed:hover {
+            border-color: var(--vscode-focusBorder);
+        }
+        .obsidian-embed-icon {
+            font-size: 1.2em;
+        }
+        .obsidian-embed-link {
+            font-weight: 500;
+            color: var(--vscode-textLink-foreground);
+        }
+        
+        mark {
+            background-color: rgba(255, 235, 59, 0.4);
+            color: inherit;
+        }
+
         /* Remove noisy bottom borders for inline diff markers inside code blocks */
         pre ins,
         pre del {
@@ -514,6 +642,8 @@ export function getWebviewContent(
           max-width: 100%;
           height: auto;
         }
+
+
         p > img:only-child {
           display: block;
         }
@@ -559,7 +689,7 @@ export function getWebviewContent(
 
         /* Split View Coloring Strategy (Default) */
         /* Left Pane (Original): Hide insertions, show deletions in Red */
-        body:not(.inline-mode) #left-pane ins { display: none; }
+        body:not(.inline-mode) #left-pane ins { display: none !important; }
         body:not(.inline-mode) #left-pane del { 
             background-color: rgba(248, 113, 113, 0.2); 
             text-decoration: none; 
@@ -577,7 +707,7 @@ export function getWebviewContent(
         }
 
         /* Right Pane (Modified): Hide deletions, show insertions in Green */
-        body:not(.inline-mode) #right-pane del { display: none; }
+        body:not(.inline-mode) #right-pane del { display: none !important; }
         body:not(.inline-mode) #right-pane ins {
             background-color: rgba(34, 197, 94, 0.25); 
             text-decoration: none; 
@@ -607,9 +737,30 @@ export function getWebviewContent(
         ins.diffins a, 
         ins.diffins p, 
         ins.diffins li, 
-        ins.diffins td {
+        ins.diffins td,
+        ins.diffins th,
+        ins.diffins table,
+        ins.diffins h1,
+        ins.diffins h2,
+        ins.diffins h3,
+        ins.diffins h4,
+        ins.diffins h5,
+        ins.diffins h6,
+        del.diffdel a,
+        del.diffdel p,
+        del.diffdel li,
+        del.diffdel td,
+        del.diffdel th,
+        del.diffdel table,
+        del.diffdel h1,
+        del.diffdel h2,
+        del.diffdel h3,
+        del.diffdel h4,
+        del.diffdel h5,
+        del.diffdel h6 {
             background-color: transparent !important;
         }
+
 
 
         del.diffdel {
@@ -630,13 +781,31 @@ export function getWebviewContent(
         ins:has(.mermaid), del:has(.mermaid),
         ins:has(.footnote-item), del:has(.footnote-item),
         ins:has(li), del:has(li),
-        ins:has(pre), del:has(pre) {
+        ins:has(pre), del:has(pre),
+        ins:has(table), del:has(table),
+        ins:has(h1), del:has(h1),
+        ins:has(h2), del:has(h2),
+        ins:has(h3), del:has(h3),
+        ins:has(h4), del:has(h4),
+        ins:has(h5), del:has(h5),
+        ins:has(h6), del:has(h6) {
             display: block;
             text-decoration: none;
             border: none !important;
             padding: 0 !important;
             margin: 0 !important;
             margin-bottom: var(--markdown-block-spacing);
+        }
+
+        /* Optimization for Marp slides: Do not force display: block or add margins, 
+           as it breaks the precise SVG/Flexbox positioning of slide content. */
+        .marp-mode :is(ins, del) :is(li, p, h1, h2, h3, h4, h5, h6) {
+            margin-bottom: 0 !important;
+        }
+        .marp-mode :is(ins, del) {
+            margin: 0 !important;
+            padding: 0 !important;
+            border-bottom: none !important; /* Marp layout handles highlights better without borders */
         }
 
 
@@ -659,10 +828,10 @@ export function getWebviewContent(
 
         /* Alerts get their characteristic left bar colored, but NO full border to avoid double lines */
         :is(.markdown-alert):is(:has(ins), :has(.diffins), :parent(:is(ins, .diffins))) {
-            border-left-color: rgba(34, 197, 94, 0.8) !important;
+            /* Keep original semantic colors (Note:Blue, Warning:Yellow, etc.) */
         }
         :is(.markdown-alert):is(:has(del), :has(.diffdel), :parent(:is(del, .diffdel))) {
-            border-left-color: rgba(239, 68, 68, 0.8) !important;
+            /* Keep original semantic colors */
         }
 
 
@@ -980,7 +1149,8 @@ export function getWebviewContent(
             border: 1px solid var(--vscode-panel-border);
             box-sizing: border-box;
             position: relative;
-            overflow: hidden !important;
+            /* Removed overflow: hidden to allow diff markers to be visible in the gutter */
+            overflow: visible !important;
             display: flex;
             flex-direction: column;
             justify-content: center;
@@ -1009,6 +1179,10 @@ export function getWebviewContent(
             border: none !important;
             background-color: transparent !important;
         }
+        
+        .marp-mode :is(ins, del).diff-block {
+            background-color: transparent !important;
+        }
 
         /* If the whole slide is new/deleted, show the tint on the slide itself */
         ins.diffins:has(> svg) svg,
@@ -1033,6 +1207,18 @@ export function getWebviewContent(
             z-index: 10;
         }
 
+        /* Ensure list items and other blocks show full-width highlight when they contain a selected change */
+        :is(li, dt, dd, tr):has(.selected-change) {
+            background-color: rgba(255, 200, 0, 0.3) !important;
+            box-shadow: 0 0 0 3px rgba(255, 200, 0, 0.8);
+            border-radius: 2px;
+        }
+        /* Suppress the inner highlight if the container is already highlighted */
+        :is(li, dt, dd, tr):has(.selected-change) .selected-change {
+            background-color: transparent !important;
+            box-shadow: none !important;
+        }
+
         /* Specific High Visibility for Complex Blocks (Mermaid/Math) */
         .mermaid.selected-change, 
         .katex-block.selected-change {
@@ -1049,15 +1235,36 @@ export function getWebviewContent(
           box-shadow: 0 0 0 2px rgba(255, 165, 0, 0.45) !important;
         }
 
-        /* Quick Edit Styles */
-        body:not(.marp-mode) #right-pane [data-line]:hover {
+        /* Simplified Quick Edit Styles: 
+           Exclude content within <del> tags (v1-only) as it's not editable. 
+           In Split mode, #right-pane only has v2 anyway, but in Inline mode it has both. */
+        #right-pane [data-line]:not(del [data-line]):not(del).hover-focused {
             outline: 2px dashed rgba(255, 165, 0, 0.4);
             outline-offset: 2px;
             cursor: pointer;
             position: relative;
         }
-        body:not(.marp-mode) #right-pane [data-line]:hover::before {
-            content: "✎ " attr(data-line);
+
+        /* Table-specific Fix: structural tags should not be position:relative 
+           as it disrupts table layout in some browsers. Also avoid pseudo-elements 
+           on tr/table as they are treated as children and break column alignment. */
+        #right-pane :is(table, thead, tbody, tr)[data-line].hover-focused {
+            position: static !important;
+        }
+        #right-pane :is(table, thead, tbody, tr)[data-line].hover-focused::before {
+            display: none !important;
+        }
+
+        /* Group GitHub Alerts as a single unit for Quick Edit */
+        .markdown-alert.hover-focused [data-line] {
+            outline: none !important;
+        }
+        .markdown-alert.hover-focused [data-line]::before {
+            display: none !important;
+        }
+
+        #right-pane [data-line]:not(del [data-line]):not(del).hover-focused::before {
+            content: "✎ Line " attr(data-line);
             position: absolute;
             top: -18px;
             right: 0;
@@ -1131,14 +1338,16 @@ export function getWebviewContent(
 
         /* Image Comparison Enhancements */
         .image-diff-block {
-            margin-top: 0;
+            margin: 1em 0;
             margin-bottom: var(--markdown-block-spacing);
             border: 1px solid var(--vscode-panel-border);
             border-radius: 4px;
             overflow: hidden;
             background-color: var(--vscode-textCodeBlock-background, var(--markdown-raised-background));
             position: relative;
-            display: block;
+            z-index: 1500;
+            display: flex;
+            flex-direction: column;
             width: 100%;
         }
         .image-diff-wrapper {
@@ -1165,6 +1374,14 @@ export function getWebviewContent(
             box-sizing: border-box;
         }
         
+        /* Ensure the diff block itself is centered even if wrapped in ins/del */
+        ins:has(.image-diff-block), del:has(.image-diff-block) {
+            margin-left: auto !important;
+            margin-right: auto !important;
+            display: block !important;
+            width: 100% !important;
+        }
+        
         /* Diff Coloring for Interactive Blocks - Applied only in Side-by-Side mode */
         .image-diff-block[data-mode="side-by-side"] .diff-image-old img,
         body:not(.inline-mode) #left-pane .image-diff-block .diff-image-old img {
@@ -1179,8 +1396,13 @@ export function getWebviewContent(
         }
         
         /* Pane-specific hiding for Side-by-Side Mode in Split View */
-        body:not(.inline-mode) #left-pane .image-diff-block[data-mode="side-by-side"] .diff-image-new { display: none !important; }
-        body:not(.inline-mode) #right-pane .image-diff-block[data-mode="side-by-side"] .diff-image-old { display: none !important; }
+        /* Only hide the 'other' image if we are in side-by-side mode (or mode not yet set) */
+        body:not(.inline-mode) #left-pane .image-diff-block:not([data-mode="swipe"]):not([data-mode="onion-skin"]) .diff-image-new { display: none !important; }
+        body:not(.inline-mode) #right-pane .image-diff-block:not([data-mode="swipe"]):not([data-mode="onion-skin"]) .diff-image-old { display: none !important; }
+        
+        /* Ensure the current side's image is always visible in its pane */
+        body:not(.inline-mode) #right-pane .image-diff-block .diff-image-new { display: flex !important; align-items: center; justify-content: center; }
+        body:not(.inline-mode) #left-pane .image-diff-block .diff-image-old { display: flex !important; align-items: center; justify-content: center; }
         
         /* UX Refinement: In Split View, Left Pane always shows v1 and hides controls */
         /* Image controls are hidden by default in left pane (always), 
@@ -1188,21 +1410,19 @@ export function getWebviewContent(
         body:not(.inline-mode) #left-pane .image-diff-controls { display: none !important; }
         #right-pane .image-diff-controls,
         body.inline-mode #right-pane .image-diff-controls {
-            opacity: 0;
-            visibility: hidden;
-            transform: translateY(100%);
-            transition: transform 0.2s ease, opacity 0.2s ease, visibility 0.2s;
+            opacity: 0.6;
+            transition: opacity 0.2s ease;
         }
         #right-pane .image-diff-block:hover .image-diff-controls,
         body.inline-mode #right-pane .image-diff-block:hover .image-diff-controls {
             opacity: 1;
-            visibility: visible;
-            transform: translateY(0);
         }
 
-        body:not(.inline-mode) #left-pane .image-diff-block .diff-image-new { display: none !important; }
+
         body:not(.inline-mode) #left-pane .image-diff-block .diff-image-old { 
-            display: block !important; 
+            display: flex !important; 
+            align-items: center !important;
+            justify-content: center !important;
             opacity: 1 !important; 
             clip-path: none !important; 
             position: static !important; 
@@ -1214,15 +1434,25 @@ export function getWebviewContent(
             min-height: 100px !important;
         }
         
-        /* Reset and display for image comparison containers (now using div instead of ins/del) */
+        /* Reset and display for image comparison containers */
         .image-diff-block .diff-image-old, 
         .image-diff-block .diff-image-new {
-            display: block;
+            display: flex !important;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            flex: 1;
+            min-width: 200px;
             background-color: transparent !important;
             border: none !important;
             padding: 0 !important;
             margin: 0 !important;
             text-decoration: none !important;
+        }
+        
+        .diff-image-old::before, .diff-image-new::before {
+            display: none !important;
         }
 
         /* Mode: Onion Skin / Swipe */
@@ -1263,22 +1493,18 @@ export function getWebviewContent(
             display: flex;
             align-items: center;
             gap: 15px;
-            padding: 10px 16px;
-            background-color: rgba(30, 30, 30, 0.85);
-            backdrop-filter: blur(8px);
-            border-top: 1px solid rgba(255, 255, 255, 0.1);
+            padding: 8px 12px;
+            background-color: var(--vscode-editorWidget-background);
+            border-bottom: 1px solid var(--vscode-panel-border);
             font-size: 11px;
             user-select: none;
-            position: absolute;
-            bottom: 0;
-            left: 0;
-            right: 0;
             z-index: 100;
+            order: -1; /* Appear at the top */
         }
         /* Light mode adjustment for backdrop */
         body.vscode-light .image-diff-controls {
-            background-color: rgba(240, 240, 240, 0.85);
-            border-top: 1px solid rgba(0, 0, 0, 0.1);
+            background-color: var(--vscode-editorWidget-background);
+            border-bottom: 1px solid var(--vscode-panel-border);
         }
 
         .image-diff-tabs {
@@ -1319,6 +1545,17 @@ export function getWebviewContent(
             text-align: right;
             opacity: 0.8;
             font-variant-numeric: tabular-nums;
+        }
+
+        .image-diff-divider {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            width: 2px;
+            background-color: var(--vscode-button-background);
+            z-index: 100;
+            pointer-events: none;
+            box-shadow: 0 0 8px rgba(0,0,0,0.5);
         }
 
          /* Complex block styling consolidated above */
@@ -1414,6 +1651,14 @@ export function getWebviewContent(
             .markdown-alert-caution { border-color: #f85149; }
             .markdown-alert-caution .markdown-alert-title { color: #f85149; }
         }
+
+        .jump-highlight {
+            animation: jump-highlight-fade 1.5s ease-out;
+        }
+        @keyframes jump-highlight-fade {
+            0% { background-color: var(--vscode-editor-hoverHighlightBackground, rgba(127, 127, 127, 0.3)); }
+            100% { background-color: transparent; }
+        }
     </style>
 </head>
 <body class="VRT_LAYOUT_CLASS ${marpCss ? "marp-mode" : ""} ${showGutterMarkers ? "show-gutter-markers" : ""} ${showGitBlame ? "show-git-blame" : ""}">
@@ -1427,11 +1672,13 @@ export function getWebviewContent(
     </div>
     <div class="container">
         <div class="pane ${marpCss ? "marp marpit" : ""}" id="left-pane">
+            <div id="left-breadcrumbs" class="breadcrumbs-bar"></div>
             <div class="pane-content" id="left-content">
                 ${diffHtml}
             </div>
         </div>
         <div class="pane ${marpCss ? "marp marpit" : ""}" id="right-pane">
+            <div id="right-breadcrumbs" class="breadcrumbs-bar"></div>
             <div class="pane-content" id="right-content">
                 ${diffHtml}
             </div>
@@ -1441,24 +1688,56 @@ export function getWebviewContent(
     <div class="overview-ruler" id="right-overview-ruler"></div>
     <div id="blame-tooltip" class="blame-tooltip"></div>
     <script nonce="${nonce}">
+        window.vscode = acquireVsCodeApi();
+    </script>
+    <script nonce="${nonce}">
+        const vscode = window.vscode;
         const blameInfo = ${JSON.stringify(blameInfo || {})};
+        const lineHoverDelay = ${lineHoverDelay};
         const translations = ${JSON.stringify(translations)};
         const t = (key, ...args) => {
             let text = translations[key] || key;
             args.forEach((arg, i) => {
-                text = text.replace(\`{\${i}}\`, String(arg));
+                text = text.replace('{' + i + '}', String(arg));
             });
             return text;
         };
 
-        const vscode = acquireVsCodeApi();
         const leftPane = document.getElementById('left-pane');
         const rightPane = document.getElementById('right-pane');
         const leftContent = document.getElementById('left-content');
         const rightContent = document.getElementById('right-content');
         const leftRuler = document.getElementById('left-overview-ruler');
         const rightRuler = document.getElementById('right-overview-ruler');
+        const leftBreadcrumbs = document.getElementById('left-breadcrumbs');
+        const rightBreadcrumbs = document.getElementById('right-breadcrumbs');
         const statusMsg = document.getElementById('status-msg');
+
+        // --- Obsidian Handlers ---
+        window.handleTagClick = (e, tag) => {
+            e.stopPropagation();
+            vscode.postMessage({ command: 'searchTag', tag: '#' + tag });
+        };
+        
+        window.handleEmbedClick = (e, page) => {
+            e.stopPropagation();
+            vscode.postMessage({ 
+                command: 'openSource', 
+                side: 'modified', // Default to modified side for embeds
+                page: page 
+            });
+        };
+
+        // --- Jump to Element Support ---
+        const jumpToElement = (pane, selector, text) => {
+             const els = pane.querySelectorAll(selector);
+             for (const el of els) {
+                 if (el.textContent.trim() === text) {
+                     pane.scrollTop = getRelativeTop(el, pane) - 40; // Subtract some buffer for header
+                     return;
+                 }
+             }
+        };
 
         const runtimeDiagnostics = {
           events: [],
@@ -1655,6 +1934,8 @@ export function getWebviewContent(
             // Recalculate changes because visibility changed
             scheduleLayoutRefresh();
             updateOverviewRulerVisibility();
+            updateBreadcrumbs(leftPane, leftBreadcrumbs);
+            updateBreadcrumbs(rightPane, rightBreadcrumbs);
         };
 
         const updateOverviewRulerVisibility = () => {
@@ -1792,7 +2073,7 @@ export function getWebviewContent(
                     const els = child.querySelectorAll(tag);
                     for (let el of els) {
                         // Aggressive trim: remove all whitespace including NBSP
-                        const text = el.textContent.replace(/[\s\u00A0]+/g, '');
+                        const text = el.textContent.replace(/[\\s\\u00A0]+/g, '');
                         if (text.length > 0) return true;
                          // Check for images inside change
                         if (el.querySelector('img')) return true;
@@ -1800,7 +2081,7 @@ export function getWebviewContent(
                         if (el.querySelector('input[type="checkbox"]')) return true;
                     }
                     if (child.tagName === tagName) {
-                        const text = child.textContent.replace(/[\s\u00A0]+/g, '');
+                        const text = child.textContent.replace(/[\\s\\u00A0]+/g, '');
                         if (text.length > 0) return true;
                         if (child.querySelector('img')) return true;
                         if (child.querySelector('input[type="checkbox"]')) return true;
@@ -1893,8 +2174,13 @@ export function getWebviewContent(
 
                 const processNodeList = (nodes, pane) => {
                     const results = [];
+                    const isMarpMode = document.body.classList.contains('marp-mode');
                     nodes.forEach(el => {
-                        if (el.offsetParent === null) return; // Invisible
+                        // In Marp mode, elements inside sections might have null offsetParent due to 
+                        // scaling or transformations. Check visibility more leniently.
+                        if (el.offsetParent === null) {
+                            if (!isMarpMode || !el.closest('.marp-slide-wrapper')) return;
+                        }
                         
                         // Check for Complex Container (Mermaid/Math)
                         const container = getComplexContainer(el);
@@ -1990,7 +2276,8 @@ export function getWebviewContent(
 
                     // 1. Strict Pane Check
                     if (item.pane === prev.pane) {
-                        const prevBottom = prev.top + prev.el.offsetHeight;
+                        const prevRect = prev.el.getBoundingClientRect();
+                        const prevBottom = prev.top + prevRect.height;
                         const gap = item.top - prevBottom;
                         
                         // Strict check < 8px
@@ -2024,37 +2311,62 @@ export function getWebviewContent(
         }
 
         function updateOverviewRuler() {
-            const drawRuler = (pane, ruler, els) => {
+            const drawRuler = (pane, ruler, groups) => {
                 ruler.innerHTML = '';
                 const paneHeight = pane.scrollHeight;
-                if (paneHeight === 0) return;
+                if (paneHeight <= 0) return;
 
-                const rulerHeight = ruler.clientHeight;
-                
-                els.forEach(item => {
-                    const el = item.el || item;
-                    const isIns = el.tagName === 'INS' || el.classList.contains('ins') || el.classList.contains('diffins');
-                    const isDel = el.tagName === 'DEL' || el.classList.contains('del') || el.classList.contains('diffdel');
-                    
-                    if (isIns || isDel) {
-                        const marker = document.createElement('div');
-                        marker.className = 'overview-marker ' + (isIns ? 'ins' : 'del');
-                        const topPct = (getRelativeTop(el, pane) / paneHeight) * 100;
-                        marker.style.top = topPct + '%';
-                        ruler.appendChild(marker);
+                groups.forEach(group => {
+                    let minTop = Infinity;
+                    let maxBottom = -Infinity;
+                    let hasIns = false;
+                    let hasDel = false;
+
+                    group.forEach(item => {
+                        const t = item.top;
+                        const elRect = item.el.getBoundingClientRect();
+                        const b = t + elRect.height;
+                        if (t < minTop) minTop = t;
+                        if (b > maxBottom) maxBottom = b;
+                        
+                        const el = item.el;
+                        if (el.tagName === 'INS' || el.classList.contains('ins') || el.classList.contains('diffins') || el.classList.contains('fm-new')) {
+                            hasIns = true;
+                        }
+                        if (el.tagName === 'DEL' || el.classList.contains('del') || el.classList.contains('diffdel') || el.classList.contains('fm-old')) {
+                            hasDel = true;
+                        }
+                    });
+
+                    if (minTop === Infinity) return;
+
+                    const height = maxBottom - minTop;
+                    const marker = document.createElement('div');
+                    marker.className = 'overview-marker';
+                    if (hasIns && hasDel) {
+                        marker.classList.add('ins', 'del');
+                    } else if (hasIns) {
+                        marker.classList.add('ins');
+                    } else if (hasDel) {
+                        marker.classList.add('del');
                     }
+
+                    const topPct = (minTop / paneHeight) * 100;
+                    const heightPct = (height / paneHeight) * 100;
+
+                    marker.style.top = topPct + '%';
+                    marker.style.height = heightPct + '%';
+                    ruler.appendChild(marker);
                 });
             };
 
             if (isInline) {
-                const changes = rightContent.querySelectorAll('ins, del');
-                const items = Array.from(changes).map(el => ({ el, pane: rightPane }));
-                drawRuler(rightPane, rightRuler, items);
+                drawRuler(rightPane, rightRuler, changeElements);
             } else {
-                const leftDels = leftContent.querySelectorAll('del');
-                const rightIns = rightContent.querySelectorAll('ins');
-                drawRuler(leftPane, leftRuler, Array.from(leftDels).map(el => ({ el, pane: leftPane })));
-                drawRuler(rightPane, rightRuler, Array.from(rightIns).map(el => ({ el, pane: rightPane })));
+                const leftGroups = changeElements.filter(g => g.length > 0 && g[0].pane === leftPane);
+                const rightGroups = changeElements.filter(g => g.length > 0 && g[0].pane === rightPane);
+                drawRuler(leftPane, leftRuler, leftGroups);
+                drawRuler(rightPane, rightRuler, rightGroups);
             }
         }
 
@@ -2072,32 +2384,57 @@ export function getWebviewContent(
         // --- Blame Tooltip Logic ---
         const tooltip = document.getElementById('blame-tooltip');
         let tooltipTimeout;
+        let hoverTimeout;
 
         const showBlame = (e) => {
+            // Ignore interactive areas
+            if (e.target.closest('.image-diff-controls') || e.target.closest('.toolbar') || e.target.closest('.breadcrumbs-bar')) {
+                return;
+            }
+
             const el = e.currentTarget;
             const line = el.getAttribute('data-line');
             if (line === null) return;
 
-            const pane = el.closest('#left-pane') ? 'original' : 'modified';
-            const info = blameInfo[pane]?.lines?.[parseInt(line, 10) + 1]; // porcelain is 1-indexed
+            clearTimeout(hoverTimeout);
+            hoverTimeout = setTimeout(() => {
+                // Apply focus class to trigger CSS effects (highlight, edit indicator)
+                el.classList.add('hover-focused');
+                const alert = el.closest('.markdown-alert');
+                if (alert) alert.classList.add('hover-focused');
 
-            if (info) {
-                clearTimeout(tooltipTimeout);
-                const date = new Date(info.authorTime * 1000).toLocaleDateString();
-                tooltip.innerHTML = \`<span class="blame-author">\${info.author}</span><span class="blame-date">\${date}</span><span class="blame-msg">\${info.summary}</span>\`;
-                tooltip.style.display = 'block';
-                
-                // Position relative to mouse
-                const x = Math.min(window.innerWidth - 300, e.clientX + 15);
-                const y = e.clientY + 15;
-                tooltip.style.left = x + 'px';
-                tooltip.style.top = y + 'px';
-                
-                requestAnimationFrame(() => tooltip.style.opacity = '1');
-            }
+                // Check if Git Blame is enabled via setting class on body
+                if (!document.body.classList.contains('show-git-blame')) {
+                    return;
+                }
+
+                const pane = el.closest('#left-pane') ? 'original' : 'modified';
+                const info = blameInfo[pane]?.lines?.[parseInt(line, 10) + 1]; // porcelain is 1-indexed
+
+                if (info) {
+                    clearTimeout(tooltipTimeout);
+                    const date = new Date(info.authorTime * 1000).toLocaleDateString();
+                    tooltip.innerHTML = \`<span class="blame-author">\${info.author}</span><span class="blame-date">\${date}</span><span class="blame-msg">\${info.summary}</span>\`;
+                    tooltip.style.display = 'block';
+                    
+                    // Position relative to mouse
+                    const x = Math.min(window.innerWidth - 300, e.clientX + 15);
+                    const y = e.clientY + 15;
+                    tooltip.style.left = x + 'px';
+                    tooltip.style.top = y + 'px';
+                    
+                    requestAnimationFrame(() => tooltip.style.opacity = '1');
+                }
+            }, lineHoverDelay);
         };
 
-        const hideBlame = () => {
+        const hideBlame = (e) => {
+            clearTimeout(hoverTimeout);
+            const el = e.currentTarget;
+            el.classList.remove('hover-focused');
+            const alert = el.closest('.markdown-alert');
+            if (alert) alert.classList.remove('hover-focused');
+
             tooltip.style.opacity = '0';
             tooltipTimeout = setTimeout(() => {
                 tooltip.style.display = 'none';
@@ -2339,7 +2676,10 @@ export function getWebviewContent(
                  elTop = firstItem.top;
             }
 
-            const elHeight = targetEl.offsetHeight || 20; 
+            const elHeight = targetEl.getBoundingClientRect().height || 20; 
+            if (targetEl.tagName === 'SECTION') {
+                // For Marp sections, ensure we use the visual height
+            }
             
             // Calculate target scroll position (centering the element)
             const targetScrollTop = elTop - (paneHeight / 2) + (elHeight / 2);
@@ -2355,6 +2695,13 @@ export function getWebviewContent(
                     const pct = targetPane.scrollTop / sourceMax;
                     otherPane.scrollTop = pct * otherMax;
                 }
+            }
+
+            // Force immediate breadcrumb update after jump
+            updateBreadcrumbs(targetPane, targetPane === leftPane ? leftBreadcrumbs : rightBreadcrumbs);
+            if (!isInline) {
+                const otherPane = targetPane === leftPane ? rightPane : leftPane;
+                updateBreadcrumbs(otherPane, otherPane === leftPane ? leftBreadcrumbs : rightBreadcrumbs);
             }
         }
 
@@ -2395,6 +2742,7 @@ export function getWebviewContent(
 
         const syncScroll = (sourcePane, targetPane) => {
             // Only sync if the source is the one being actively scrolled by user
+            if (!activePane) activePane = sourcePane; 
             if (activePane !== sourcePane) return;
 
             // Specialized sync for Marp slides
@@ -2451,36 +2799,33 @@ export function getWebviewContent(
             // Find the slide that is most visible at the top
             const sourceScrollTop = sourcePane.scrollTop;
             let currentSlideIndex = 0;
+            const paneRect = sourcePane.getBoundingClientRect();
             
             for (let i = 0; i < sourceSections.length; i++) {
                 const rect = sourceSections[i].getBoundingClientRect();
-                const paneRect = sourcePane.getBoundingClientRect();
                 const relativeTop = rect.top - paneRect.top;
                 
-                if (relativeTop + rect.height / 2 > 0) {
+                // If the slide center is below the top of the viewport, it's our current slide
+                // Or if it's the last slide, we must pick it.
+                if (relativeTop + rect.height / 2 > 0 || i === sourceSections.length - 1) {
                     currentSlideIndex = i;
                     break;
                 }
             }
 
             // Sync to the same slide index in target
-            const targetSlide = targetSections[currentSlideIndex];
-            if (targetSlide) {
-                const targetRect = targetSlide.getBoundingClientRect();
-                const targetPaneRect = targetPane.getBoundingClientRect();
-                const targetRelativeTop = targetRect.top - targetPaneRect.top;
+            if (currentSlideIndex >= 0 && currentSlideIndex < targetSections.length) {
+                const sourceSlide = sourceSections[currentSlideIndex];
+                const targetSlide = targetSections[currentSlideIndex];
                 
-                // Keep the relative position of the slide top within the viewport
-                const sourceSlideRect = sourceSections[currentSlideIndex].getBoundingClientRect();
-                const sourcePaneRect = sourcePane.getBoundingClientRect();
-                const offsetInSlide = sourceScrollTop - (sourceSlideRect.top - sourcePaneRect.top + sourceScrollTop);
+                const sourceSlideTop = getRelativeTop(sourceSlide, sourcePane);
+                const sourceRelativePosInSlide = sourceScrollTop - sourceSlideTop;
                 
-                const slideTopPos = targetSlide.offsetTop;
-                const sourceRelativePos = (sourceScrollTop - sourceSections[currentSlideIndex].offsetTop);
+                const targetSlideTop = getRelativeTop(targetSlide, targetPane);
+                const desiredScrollTop = targetSlideTop + sourceRelativePosInSlide;
 
-                // Simple slide alignment (aligned with the top of the slide)
-                if (Math.abs(targetPane.scrollTop - targetSlide.offsetTop) > 5) {
-                    targetPane.scrollTop = targetSlide.offsetTop + sourceRelativePos;
+                if (Math.abs(targetPane.scrollTop - desiredScrollTop) > 0.5) {
+                    targetPane.scrollTop = desiredScrollTop;
                 }
             }
         };
@@ -2519,6 +2864,78 @@ export function getWebviewContent(
              document.body.setAttribute('data-marp-scaled', 'true');
         };
 
+        const updateBreadcrumbs = (pane, container) => {
+            if (document.body.classList.contains('marp-mode')) {
+                container.style.display = 'none';
+                return;
+            }
+            container.style.display = 'flex';
+            
+            const headings = Array.from(pane.querySelectorAll('h1, h2, h3, h4, h5, h6'))
+                .filter(el => el.offsetParent !== null);
+            
+            if (headings.length === 0) {
+                container.innerHTML = '<span class="breadcrumb-item">' + t("No headings") + '</span>';
+                return;
+            }
+
+            let activeHeading = null;
+            // Use a larger threshold (1/4 of viewport) so that if we jump to a diff
+            // near a heading, it still picks up that heading context.
+            const threshold = pane.clientHeight / 4; 
+            
+            for (let i = headings.length - 1; i >= 0; i--) {
+                const el = headings[i];
+                const top = getRelativeTop(el, pane);
+                if (top - pane.scrollTop <= threshold) {
+                    activeHeading = el;
+                    break;
+                }
+            }
+
+            if (!activeHeading) {
+                // Before first heading
+                container.innerHTML = '<span class="breadcrumb-item" onclick="' + pane.id + '.scrollTop = 0">' + t("Top") + '</span>';
+                return;
+            }
+
+            // Build path
+            const path = [activeHeading];
+            const activeLevel = parseInt(activeHeading.tagName[1], 10);
+            let currentLevel = activeLevel;
+
+            // Search backwards for parents
+            const headIdx = headings.indexOf(activeHeading);
+            for (let i = headIdx - 1; i >= 0; i--) {
+                const h = headings[i];
+                const level = parseInt(h.tagName[1], 10);
+                if (level < currentLevel) {
+                    path.unshift(h);
+                    currentLevel = level;
+                }
+                if (currentLevel === 1) break;
+            }
+
+            container.innerHTML = '';
+            path.forEach((h, i) => {
+                if (i > 0) {
+                    const sep = document.createElement('span');
+                    sep.className = 'breadcrumb-separator';
+                    sep.textContent = '›';
+                    container.appendChild(sep);
+                }
+                const item = document.createElement('span');
+                item.className = 'breadcrumb-item';
+                item.textContent = h.innerText.replace(/[\\n\\t]/g, ' ').trim();
+                item.onclick = (e) => {
+                    e.stopPropagation();
+                    const targetTop = getRelativeTop(h, pane);
+                    pane.scrollTop = targetTop - 5; 
+                };
+                container.appendChild(item);
+            });
+        };
+
         const setActive = (pane) => { activePane = pane; };
         
         // Track mouse/touch to determine which pane should be the 'Master'
@@ -2531,10 +2948,12 @@ export function getWebviewContent(
 
         leftPane.addEventListener('scroll', () => {
              if (!isInline) syncScroll(leftPane, rightPane);
+             updateBreadcrumbs(leftPane, leftBreadcrumbs);
         });
 
         rightPane.addEventListener('scroll', () => {
              if (!isInline) syncScroll(rightPane, leftPane);
+             updateBreadcrumbs(rightPane, rightBreadcrumbs);
         });
 
         // Double Click to Open Source (Whole File)
@@ -2565,24 +2984,66 @@ export function getWebviewContent(
 
         // Single Click for Quick Edit (Modified Pane only)
         document.body.addEventListener('click', (e) => {
+            // Obsidian Tag Click
+            const tagEl = e.target.closest('.obsidian-tag');
+            if (tagEl) {
+                const tag = tagEl.getAttribute('data-tag');
+                if (tag) {
+                    vscode.postMessage({ command: 'searchTag', tag: tag });
+                    return;
+                }
+            }
+
+            // Obsidian Embed Click
+            const embedEl = e.target.closest('.obsidian-embed');
+            if (embedEl) {
+                const page = embedEl.getAttribute('data-page');
+                if (page) {
+                    // Reuse openSource logic (modified side usually)
+                    vscode.postMessage({ command: 'openSource', side: 'modified', page: page });
+                    return;
+                }
+            }
+
             // Guard against interactive elements
             if (e.target.closest('.toolbar') || 
                 e.target.closest('a') || 
                 e.target.closest('button') || 
                 e.target.closest('input') ||
-                e.target.closest('.block-editor-overlay')) {
+                e.target.closest('.block-editor-overlay') ||
+                e.target.closest('.image-diff-controls') ||
+                e.target.closest('.breadcrumbs-bar')) {
                 return;
             }
 
             const pane = e.target.closest('.pane');
-            if (!pane || pane.id !== 'right-pane' || document.body.classList.contains('marp-mode')) {
+            if (!pane || pane.id !== 'right-pane') {
                 return;
             }
 
-            const lineEl = e.target.closest('[data-line]');
+            // Quick Edit is only for v2 (Modified) content. 
+            // In Inline mode, ignore clicks on deleted (v1-only) content to avoid mismatches.
+            if (e.target.closest('del')) {
+                return;
+            }
+
+            // Pick the alert container if present, otherwise the closest data-line
+            const alertEl = e.target.closest('.markdown-alert');
+            let lineEl = alertEl || e.target.closest('[data-line]');
             if (!lineEl) return;
 
-            const lineStart = parseInt(lineEl.getAttribute('data-line'), 10);
+            let lineAttr = lineEl.getAttribute('data-line');
+            if (!lineAttr && alertEl) {
+                // If alert container lacks data-line, try to find it in a child
+                const childWithLine = alertEl.querySelector('[data-line]');
+                if (childWithLine) {
+                    lineAttr = childWithLine.getAttribute('data-line');
+                }
+            }
+
+            if (!lineAttr) return;
+
+            const lineStart = parseInt(lineAttr, 10);
             const lineEnd = parseInt(lineEl.getAttribute('data-line-end'), 10) || lineStart + 1;
 
             // Optional: Delay slightly to see if it's a double click
@@ -2591,19 +3052,64 @@ export function getWebviewContent(
             BlockEditor.start(lineEl, lineStart, lineEnd);
         });
 
+        // --- Footnote Navigation Support ---
+        document.body.addEventListener('click', (e) => {
+            const anchor = e.target.closest('a');
+            if (!anchor || !anchor.getAttribute('href')) return;
+            
+            const href = anchor.getAttribute('href');
+            // Support both default (fn1) and prefixed (fn-old-1) IDs
+            if (href.startsWith('#fn')) {
+                const targetId = href.substring(1);
+                const pane = anchor.closest('.pane');
+                if (pane) {
+                    // Search for the ID strictly within the same pane to avoid cross-pane jumping
+                    const target = pane.querySelector('[id="' + targetId + '"]');
+                    if (target) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        
+                        // Center the target in the pane
+                        const paneHeight = pane.clientHeight;
+                        const elTop = getRelativeTop(target, pane);
+                        const elHeight = target.getBoundingClientRect().height || 20;
+                        const targetScrollTop = elTop - (paneHeight / 2) + (elHeight / 2);
+                        
+                        pane.scrollTop = Math.max(0, targetScrollTop);
+                        
+                        // Highlight target temporarily
+                        target.classList.add('jump-highlight');
+                        setTimeout(() => target.classList.remove('jump-highlight'), 1500);
+                        
+                        // Sync other pane if in split mode
+                        if (!isInline) {
+                            const otherPane = pane === leftPane ? rightPane : leftPane;
+                            const sourceMax = pane.scrollHeight - pane.clientHeight;
+                            const otherMax = otherPane.scrollHeight - otherPane.clientHeight;
+                            if (sourceMax > 0 && otherMax > 0) {
+                                const pct = pane.scrollTop / sourceMax;
+                                otherPane.scrollTop = pct * otherMax;
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
         // --- Ghost Element Cleanup ---
         function cleanupGhosts() {
              resetGhosts();
              if (document.body.classList.contains('inline-mode')) return;
 
 
-             hideGhostsInPane(leftContent, 'INS');
-             hideGhostsInPane(rightContent, 'DEL');
+             const leftHidden = hideGhostsInPane(leftContent, 'INS');
+             const rightHidden = hideGhostsInPane(rightContent, 'DEL');
              
              // Extra cleanup for complex blocks (Alerts, Pre, etc.)
              // Hide containers whose visible content is entirely the opposite diff type.
-             hideEmptyContainers(leftContent, 'INS');
-             hideEmptyContainers(rightContent, 'DEL');
+             const leftComplexHidden = hideEmptyContainers(leftContent, 'INS');
+             const rightComplexHidden = hideEmptyContainers(rightContent, 'DEL');
+
         }
 
         function resetGhosts() {
@@ -2612,9 +3118,11 @@ export function getWebviewContent(
 
         function hideGhostsInPane(pane, hiddenTagName) {
             const candidates = pane.querySelectorAll('li, tr');
+            let hiddenCount = 0;
             candidates.forEach(el => {
                 if (isGraphicallyEmpty(el, hiddenTagName)) {
                     el.classList.add('ghost-hidden');
+                    hiddenCount++;
                 }
             });
 
@@ -2625,8 +3133,10 @@ export function getWebviewContent(
                  const allHidden = children.every(c => c.classList.contains('ghost-hidden') || c.style.display === 'none');
                  if (children.length > 0 && allHidden) {
                      el.classList.add('ghost-hidden');
+                     hiddenCount++;
                  }
             });
+            return hiddenCount;
         }
 
         // Targeted cleanup for complex blocks (Alerts, Code, Quotes)
@@ -2635,12 +3145,15 @@ export function getWebviewContent(
              const complexSelectors = '.markdown-alert, pre, blockquote, .katex-block, .mermaid, .image-diff-block, h1, h2, h3, h4, h5, h6, p, dt, dd, hr';
              const candidates = pane.querySelectorAll(complexSelectors);
              
+             let hiddenCount = 0;
              candidates.forEach(el => {
                  // Check if graphically empty, respecting hiddenTagName (e.g. INS)
                  if (isGraphicallyEmpty(el, hiddenTagName)) {
                      el.classList.add('ghost-hidden');
+                     hiddenCount++;
                  }
              });
+             return hiddenCount;
         }
 
         function isGraphicallyEmpty(el, hiddenTagName) {
@@ -2663,7 +3176,8 @@ export function getWebviewContent(
                 } else if (node.nodeType === 1) {
                      const tag = node.tagName;
                      if (tag === hiddenTagName) continue;
-                     if (tag === 'IMG') return false;
+                     // Tags that are never "empty" because they render something even without direct text children
+                     if (['IMG', 'BR', 'INPUT', 'IFRAME', 'VIDEO', 'CANVAS', 'SVG', 'MATH', 'HR'].indexOf(tag) !== -1) return false;
                      // Ignore footnote backref links when checking emptiness
                      if (tag === 'A' && node.classList.contains('footnote-backref')) continue;
                      if (node.style.display === 'none' || node.classList.contains('ghost-hidden')) continue;
@@ -2721,7 +3235,8 @@ export function getWebviewContent(
                     tab.className = 'image-diff-tab';
                     if (mode.id === 'side-by-side') tab.classList.add('active');
                     tab.textContent = mode.label;
-                    tab.onclick = () => {
+                    tab.onclick = (e) => {
+                        e.stopPropagation();
                         tabs.querySelectorAll('.image-diff-tab').forEach(t => t.classList.remove('active'));
                         tab.classList.add('active');
                         setMode(block, mode.id, slider, label);
@@ -2740,21 +3255,54 @@ export function getWebviewContent(
                     label.textContent = val + '%';
                     
                     if (mode === 'onion-skin') {
-                        newImg.parentElement.style.opacity = val / 100;
-                        newImg.parentElement.style.clipPath = 'none';
-                    } else if (mode === 'swipe') {
-                        const rect = newImg.getBoundingClientRect();
-                        const wrapperRect = wrapper.getBoundingClientRect();
+                        newImg.style.opacity = val / 100;
+                        oldImg.style.opacity = 1 - (val / 100);
+                        newImg.style.clipPath = 'none';
+                        oldImg.style.clipPath = 'none';
                         
-                        // Calculate clip position relative to the image
-                        // Since img is centered with translate(-50%, -50%)
-                        const width = rect.width;
-                        const clipWidth = (val / 100) * width;
-                        newImg.parentElement.style.clipPath = \`inset(0 \${width - clipWidth}px 0 0)\`;
-                        newImg.parentElement.style.opacity = '1';
+                        const divider = wrapper.querySelector('.image-diff-divider');
+                        if (divider) divider.remove();
+                    } else if (mode === 'swipe') {
+                        const wrapperRect = wrapper.getBoundingClientRect();
+                        const wrapperWidth = wrapperRect.width;
+                        const dividerX = (val / 100) * wrapperWidth;
+                        
+                        // Use the wrapper's rect for consistent relative calculations
+                        const newRect = newImg.getBoundingClientRect();
+                        const oldRect = oldImg.getBoundingClientRect();
+                        
+                        const newLeft = newRect.left - wrapperRect.left;
+                        const oldLeft = oldRect.left - wrapperRect.left;
+                        
+                        // New image: reveal from left (0 to dividerX)
+                        // This means clipping the part of newImg that is to the RIGHT of dividerX
+                        const newClipRight = Math.max(0, Math.min(newRect.width, newRect.width - (dividerX - newLeft)));
+                        newImg.style.clipPath = \`inset(0 \${newClipRight}px 0 0)\`;
+                        
+                        // Old image: reveal from right (dividerX to wrapperWidth)
+                        // This means clipping the part of oldImg that is to the LEFT of dividerX
+                        const oldClipLeft = Math.max(0, Math.min(oldRect.width, dividerX - oldLeft));
+                        oldImg.style.clipPath = \`inset(0 0 0 \${oldClipLeft}px)\`;
+
+                        newImg.style.opacity = '1';
+                        oldImg.style.opacity = '1';
+                        
+                        // Add visual divider line
+                        let divider = wrapper.querySelector('.image-diff-divider');
+                        if (!divider) {
+                            divider = document.createElement('div');
+                            divider.className = 'image-diff-divider';
+                            wrapper.appendChild(divider);
+                        }
+                        divider.style.left = dividerX + 'px';
                     } else {
-                        newImg.parentElement.style.opacity = '1';
-                        newImg.parentElement.style.clipPath = 'none';
+                        newImg.style.opacity = '1';
+                        oldImg.style.opacity = '1';
+                        newImg.style.clipPath = 'none';
+                        oldImg.style.clipPath = 'none';
+                        
+                        const divider = wrapper.querySelector('.image-diff-divider');
+                        if (divider) divider.remove();
                     }
                 };
 
@@ -2782,9 +3330,13 @@ export function getWebviewContent(
              const wrapper = block.querySelector('.image-diff-wrapper');
 
              // Reset styles to a clean state before mode-specific updates
-             if (newImg && newImg.parentElement) {
-                 newImg.parentElement.style.clipPath = 'none';
-                 newImg.parentElement.style.opacity = '1';
+             if (newImg) {
+                 newImg.style.clipPath = 'none';
+                 newImg.style.opacity = '1';
+             }
+             if (oldImg) {
+                 oldImg.style.clipPath = 'none';
+                 oldImg.style.opacity = '1';
              }
 
              if (mode === 'side-by-side') {
@@ -2966,7 +3518,11 @@ export function getWebviewContent(
             }
         };
         if (typeof mermaid !== 'undefined') {
-            mermaid.initialize({ startOnLoad: true, securityLevel: 'strict' });
+            mermaid.initialize({ 
+                startOnLoad: true, 
+                securityLevel: 'strict',
+                nonce: '${nonce}'
+            });
         }
 
         // Global resize listener to refresh image layouts
@@ -3044,11 +3600,24 @@ export function getWebviewContent(
       setTimeout(() => {
           document.body.setAttribute('data-marp-scaled', 'true');
       }, 500);
-
-      // Initialize ruler visibility
-      updateOverviewRulerVisibility();
+      window.__init_ok = true;
     </script>
-    <script>/* VRT_SCRIPT_PLACEHOLDER */</script>
+    <script nonce="${nonce}">
+      // Initialize ruler visibility and breadcrumbs
+      updateOverviewRulerVisibility();
+      updateBreadcrumbs(leftPane, leftBreadcrumbs);
+      updateBreadcrumbs(rightPane, rightBreadcrumbs);
+
+      // Signal that the script has initialized successfully
+      if (window.__init_ok) {
+          try {
+              window.vscode.postMessage({ command: 'ready' });
+          } catch (e) {
+              console.error('Failed to send ready signal:', e);
+          }
+      }
+    </script>
+    <script nonce="${nonce}">/* VRT_SCRIPT_PLACEHOLDER */</script>
 </body>
 </html>`;
 }

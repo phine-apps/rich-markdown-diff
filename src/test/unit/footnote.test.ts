@@ -55,7 +55,7 @@ describe("Footnote Tests", () => {
     );
     // Verify that the second footnote list item has insertion indicators
     assert.ok(
-      /<ins[^>]*>[\s\S]*<li[^>]*id="fn2"|<li[^>]*id="fn2"[^>]*>[\s\S]*<ins[^>]*>/i.test(
+      /<ins[^>]*>[\s\S]*<li[^>]*id="fn-new-2"|<li[^>]*id="fn-new-2"[^>]*>[\s\S]*<ins[^>]*>/i.test(
         diffHtml,
       ),
       "New footnote (LI) should have insertion markers either wrapping it or inside it",
@@ -89,7 +89,7 @@ Another footnote[^2].
 
     // Verify that the second footnote list item has insertion indicators
     assert.ok(
-      /<ins[^>]*>[\s\S]*<li[^>]*id="fn2"|<li[^>]*id="fn2"[^>]*>[\s\S]*<ins[^>]*>/i.test(
+      /<ins[^>]*>[\s\S]*<li[^>]*id="fn-new-2"|<li[^>]*id="fn-new-2"[^>]*>[\s\S]*<ins[^>]*>/i.test(
         diffHtml,
       ),
       "New footnote (LI) should have insertion markers either wrapping it or inside it",
@@ -115,19 +115,19 @@ And another sentence with a second footnote[^2].
     const { html: diffHtml } = provider.computeDiff(oldMd, newMd);
 
     assert.ok(
-      /<li[^>]*id="fn1"[^>]*>[\s\S]*diffins[\s\S]*updated/i.test(
+      /<li[^>]*id="fn-new-1"[^>]*>[\s\S]*diffins[\s\S]*updated/i.test(
         diffHtml,
       ),
       "Existing footnote fn1 should be refined in-place, not replaced wholesale",
     );
 
     assert.ok(
-      !/<ins[^>]*>\s*<li[^>]*id="fn1"[^>]*>/i.test(diffHtml),
+      !/<ins[^>]*>\s*<li[^>]*id="fn-new-1"[^>]*>/i.test(diffHtml),
       "Updated fn1 should not be wrapped as a wholesale insertion",
     );
 
     assert.ok(
-      /<ins[^>]*>[\s\S]*<li[^>]*id="fn2"[^>]*>/i.test(diffHtml),
+      /<ins[^>]*>[\s\S]*<li[^>]*id="fn-new-2"[^>]*>/i.test(diffHtml),
       "New footnote fn2 should remain a standalone insertion",
     );
   });

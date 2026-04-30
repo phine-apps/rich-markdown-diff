@@ -6,7 +6,6 @@
 
 # Source & Tests
 src/
-out/test/
 fixtures/
 
 # Build Configuration & Dependencies
@@ -28,9 +27,6 @@ CONTRIBUTING.md
 DEVELOPMENT.md
 PUBLISHING.md
 
-# Source Maps (debug only, not needed in release)
-out/*.js.map
-
 # Artifacts & Logs
 *.vsix
 *.log
@@ -41,6 +37,9 @@ tmp-*
 images/*.gif
 
 # Development & Test Artifacts
+.gemini/
+data/
+latest-report/
 .pnpm-store/
 scratch/
 playwright-report/
@@ -51,11 +50,6 @@ pnpm-lock.yaml
 playwright.config.ts
 
 # Bundled Extension Inclusion
-# esbuild bundles everything into out/extension.js; exclude tsc output files
-out/commandTarget.js
-out/gitDiffResolver.js
-out/markdownDiff.js
-out/wikilinksPlugin.js
-out/htmlDiffJs.d.js
-out/markdownPlugins.d.js
+# esbuild bundles everything into out/extension.js
+out/**
 !out/extension.js

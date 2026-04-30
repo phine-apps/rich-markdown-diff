@@ -36,8 +36,9 @@ function normalizeHtml(html: string): string {
   return html
     .replace(/\r\n/g, "\n")
     .replace(/>\s+</g, "><")
+    .replace(/\s?data-(line|line-end|mask|original-content|all-inserted|all-deleted|diff-block|diff-label)="[^"]*"/g, "")
     .replace(/\s+/g, " ")
-    .replace(/\s?data-line="\d+"/g, "")
+    .replace(/\s+>/g, ">")
     .trim();
 }
 

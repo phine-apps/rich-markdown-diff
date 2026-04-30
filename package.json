@@ -3,8 +3,8 @@
   "packageManager": "pnpm@10.33.0",
   "publisher": "phine-apps",
   "displayName": "Rich Markdown Diff",
-  "description": "Displays a rich, visual diff of two markdown files.",
-  "version": "1.2.0",
+  "description": "Professional visual Markdown diff with Math, Mermaid, and Git integration for better document reviews.",
+  "version": "1.3.0",
   "icon": "images/icon.png",
   "author": "phine-apps",
   "license": "MIT",
@@ -159,17 +159,7 @@
         {
           "command": "rich-markdown-diff.showRenderedDiff",
           "group": "navigation",
-          "when": "(editorLangId == markdown || resourceLangId == markdown) && rich-markdown-diff.canShowRenderedDiff"
-        },
-        {
-          "command": "rich-markdown-diff.showRenderedDiff",
-          "group": "navigation",
-          "when": "activeWebviewPanelId == 'markdown.preview' || activeCustomEditorId == 'vscode.markdown.preview.editor'"
-        },
-        {
-          "command": "rich-markdown-diff.showRenderedDiff",
-          "group": "navigation",
-          "when": "isInDiffEditor && resourceLangId == markdown"
+          "when": "(resourceLangId == markdown && (rich-markdown-diff.canShowRenderedDiff || isInDiffEditor)) || (editorLangId == markdown && rich-markdown-diff.canShowRenderedDiff) || activeWebviewPanelId == 'markdown.preview' || activeCustomEditorId == 'vscode.markdown.preview.editor'"
         },
         {
           "command": "rich-markdown-diff.prevChange",
@@ -238,12 +228,6 @@
           "group": "inline@1",
           "icon": "$(diff)",
           "when": "scmProvider == git"
-        },
-        {
-          "command": "rich-markdown-diff.showRenderedDiff",
-          "group": "navigation",
-          "icon": "$(diff)",
-          "when": "scmProvider == git"
         }
       ]
     },
@@ -259,6 +243,11 @@
           "type": "boolean",
           "default": true,
           "description": "%rich-markdown-diff.showGitBlame.description%"
+        },
+        "rich-markdown-diff.lineHoverDelay": {
+          "type": "number",
+          "default": 500,
+          "description": "%rich-markdown-diff.lineHoverDelay.description%"
         }
       }
     },
