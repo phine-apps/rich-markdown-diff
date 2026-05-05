@@ -107,7 +107,7 @@ describe("Granularity Tests", () => {
 
     // The math block itself should be unchanged and thus have NO diff markers wrapping it
     // (Consolidation might try to group it if we're not careful)
-    const mathBlockRegex = /<p[^>]*class="katex-block"[\s\S]*?<\/p>/i;
+    const mathBlockRegex = /<p[^>]*class=['"]katex-block['"][^>]*>[\s\S]*?<\/p>/i;
     const mathMatch = diffHtml.match(mathBlockRegex);
     assert.ok(mathMatch, "Math block should be present");
     

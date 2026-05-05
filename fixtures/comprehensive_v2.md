@@ -157,7 +157,7 @@ SOFTWARE.
 
 ## Image Test
 
-![Icon](img_v2.svg)
+![Icon V2](img_v2.svg)
 
 ## Summary
 

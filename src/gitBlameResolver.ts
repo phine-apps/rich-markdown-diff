@@ -61,8 +61,9 @@ export async function resolveBlameInfo(
     // ...
     // filename <name>
     // \t<line_content>
-    child_process.exec(
-      `git blame --porcelain "${fileName}"`,
+    child_process.execFile(
+      "git",
+      ["blame", "--porcelain", fileName],
       { cwd },
       (error, stdout) => {
         if (error) {

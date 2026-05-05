@@ -270,15 +270,15 @@ export function getWebviewContent(
         }
 
         body.show-gutter-markers .pane-content > :is(ins, del, *:has(ins), *:has(del)):not(.marp),
-        /* Support Marp slides even when only inner content changed */
-        body.show-gutter-markers.marp-mode .marp-slide-wrapper:has(ins, del, .fm-changed),
+        /* Support Marp slides even when only inner content changed OR slide is whole ins/del */
+        body.show-gutter-markers.marp-mode .marp-slide-wrapper:is(ins, del, *:has(ins, del, .fm-changed)),
         /* Marp-mode gutter markers: Attached to wrappers */
         body.show-gutter-markers.marp-mode :is(ins:has(> .marp-slide-wrapper), del:has(> .marp-slide-wrapper)) {
             position: relative;
         }
         body.show-gutter-markers .pane-content > :is(ins, del, *:has(ins), *:has(del)):not(.marp)::after,
         /* Support Marp slides */
-        body.show-gutter-markers.marp-mode .marp-slide-wrapper:has(ins, del, .fm-changed)::after,
+        body.show-gutter-markers.marp-mode .marp-slide-wrapper:is(ins, del, *:has(ins, del, .fm-changed))::after,
         body.show-gutter-markers.marp-mode :is(ins:has(> .marp-slide-wrapper), del:has(> .marp-slide-wrapper))::after {
             content: "";
             position: absolute;
@@ -298,7 +298,7 @@ export function getWebviewContent(
             display: none !important; /* Hide all markers in left pane by default */
         }
         body.show-gutter-markers:not(.inline-mode) #left-pane .pane-content > :is(del, *:has(del)):not(.marp)::after,
-        body.show-gutter-markers:not(.inline-mode).marp-mode #left-pane .marp-slide-wrapper:has(del)::after,
+        body.show-gutter-markers:not(.inline-mode).marp-mode #left-pane .marp-slide-wrapper:is(del, *:has(del))::after,
         body.show-gutter-markers:not(.inline-mode).marp-mode #left-pane del:has(> .marp-slide-wrapper)::after {
             display: block !important;
             background-color: #ef4444 !important; /* Strictly Red */
@@ -309,7 +309,7 @@ export function getWebviewContent(
             display: none !important; /* Hide all markers in right pane by default */
         }
         body.show-gutter-markers:not(.inline-mode) #right-pane .pane-content > :is(ins, *:has(ins)):not(.marp)::after,
-        body.show-gutter-markers:not(.inline-mode).marp-mode #right-pane .marp-slide-wrapper:has(ins, .fm-changed)::after,
+        body.show-gutter-markers:not(.inline-mode).marp-mode #right-pane .marp-slide-wrapper:is(ins, *:has(ins, .fm-changed))::after,
         body.show-gutter-markers:not(.inline-mode).marp-mode #right-pane ins:has(> .marp-slide-wrapper)::after {
             display: block !important;
             background-color: #22c55e !important; /* Strictly Green */
@@ -1135,6 +1135,13 @@ export function getWebviewContent(
         /* Right Pane: Hide Old, Show New */
         body:not(.inline-mode) #right-pane .frontmatter-diff .fm-old { display: none; }
         /* Marp Support */
+        .marp:not(.pane), .marpit:not(.pane) {
+            overflow: visible !important;
+        }
+        .marp-slide-wrapper {
+            overflow: visible !important;
+            position: relative;
+        }
         .marp .marpit > svg,
         .marp .marpit > section,
         .marp section {
@@ -1185,15 +1192,18 @@ export function getWebviewContent(
         }
 
         /* If the whole slide is new/deleted, show the tint on the slide itself */
+        /* Use inset box-shadow to ensure visibility over Marp background images */
         ins.diffins:has(> svg) svg,
         ins.diffins:has(> section) section {
             border-color: rgba(34, 197, 94, 0.6) !important;
             background-color: rgba(34, 197, 94, 0.05) !important;
+            box-shadow: inset 0 0 0 5000px rgba(34, 197, 94, 0.15) !important;
         }
         del.diffdel:has(> svg) svg,
         del.diffdel:has(> section) section {
             border-color: rgba(239, 68, 68, 0.6) !important;
             background-color: rgba(239, 68, 68, 0.05) !important;
+            box-shadow: inset 0 0 0 5000px rgba(239, 68, 68, 0.15) !important;
         }
 
         /* Active Change Highlighting */
@@ -1671,13 +1681,13 @@ export function getWebviewContent(
         <div class="header-item" title="${safeRight}">${safeRight}</div>
     </div>
     <div class="container">
-        <div class="pane ${marpCss ? "marp marpit" : ""}" id="left-pane">
+        <div class="pane" id="left-pane">
             <div id="left-breadcrumbs" class="breadcrumbs-bar"></div>
             <div class="pane-content" id="left-content">
                 ${diffHtml}
             </div>
         </div>
-        <div class="pane ${marpCss ? "marp marpit" : ""}" id="right-pane">
+        <div class="pane" id="right-pane">
             <div id="right-breadcrumbs" class="breadcrumbs-bar"></div>
             <div class="pane-content" id="right-content">
                 ${diffHtml}
@@ -2022,21 +2032,60 @@ export function getWebviewContent(
             let noChangeBlock = [];
             let totalFolded = 0;
             
+            const hasContent = (el) => {
+                if (el.querySelector('img, table, iframe, svg, canvas, .image-diff-block')) return true;
+                // Use a regex that works inside the webview's script string
+                const text = el.textContent.replace(/[\s\u00A0]+/g, '');
+                return text.length > 0;
+            };
+
+            const isStronglyMeaningful = (el) => {
+                return el.querySelector('img, table, iframe, svg, canvas, .image-diff-block');
+            };
+
             const flushBlock = () => {
-                if (noChangeBlock.length > 3) { 
-                    const toHide = noChangeBlock.slice(1, noChangeBlock.length - 1);
+                if (noChangeBlock.length > 3) {
+                    // Context preservation: keep the first and last contentful elements, 
+                    // AND any strongly meaningful elements in between.
+                    const contentfulSet = new Set();
+                    noChangeBlock.forEach((el, idx) => {
+                        if (hasContent(el)) contentfulSet.add(idx);
+                    });
+
+                    let startIdx = 0;
+                    while (startIdx < noChangeBlock.length - 1 && !contentfulSet.has(startIdx)) {
+                        startIdx++;
+                    }
                     
-                    if (toHide.length === 0) return;
+                    let endIdx = noChangeBlock.length - 1;
+                    while (endIdx > startIdx && !contentfulSet.has(endIdx)) {
+                        endIdx--;
+                    }
+
+                    // We keep:
+                    // 1. The startIdx element (if it exists)
+                    // 2. The endIdx element (if it exists)
+                    // 3. ANY element that is strongly meaningful (img, table, etc.)
+                    const keptIndices = new Set([startIdx, endIdx]);
+                    contentfulSet.forEach(idx => {
+                        if (isStronglyMeaningful(noChangeBlock[idx])) {
+                            keptIndices.add(idx);
+                        }
+                    });
+
+                    const toHide = noChangeBlock.filter((_, idx) => !keptIndices.has(idx));
+                    
+                    if (toHide.length === 0) {
+                        noChangeBlock = [];
+                        return;
+                    }
 
                      const visibleToHide = toHide.filter(el => {
-                          const text = el.textContent.trim();
-                          if (text.length === 0 && !el.querySelector('img')) return false; 
-                          
+                          if (hasContent(el)) return true;
                           // Changes are already filtered out logic-wise, but excluding valid change tags 
                           // from "unchanged block count" is safer for symmetric logic.
                           if (el.tagName === 'INS' || el.tagName === 'DEL') return false;
-
-                          return true;
+                          return false;
                      });
 
                      const firstHidden = toHide[0];
@@ -2047,10 +2096,10 @@ export function getWebviewContent(
                          placeholder.textContent = t("{0} unchanged blocks", visibleToHide.length);
                          placeholder.title = t("Click to expand");
                          placeholder.onclick = (e) => {
-
                              e.stopPropagation(); // Prevent parent clicks
                              toHide.forEach(el => el.style.display = '');
                              placeholder.remove();
+                             scheduleAsyncLayoutRefresh();
                          };
                          pane.insertBefore(placeholder, firstHidden);
                      }
@@ -2092,7 +2141,12 @@ export function getWebviewContent(
                 // Symmetric Folding: Check for ANY change in the block (INS or DEL).
                 // If there is an insertion OR deletion, we should NOT fold it, 
                 // regardless of which pane we are showing.
-                hasChange = isRealChange('del', 'DEL') || isRealChange('ins', 'INS');
+                hasChange = isRealChange('del', 'DEL') || 
+                            isRealChange('ins', 'INS') || 
+                            child.classList.contains('image-diff-block') || 
+                            child.querySelector('.image-diff-block') ||
+                            child.classList.contains('fm-changed') || 
+                            child.querySelector('.fm-changed');
                 
                 if (!hasChange) {
                     noChangeBlock.push(child);
@@ -2132,8 +2186,10 @@ export function getWebviewContent(
                      if (!el) return false;
                      if (el.tagName === 'IMG') return true;
                      if (el.classList && el.classList.contains('fm-changed')) return true;
+                     if (el.classList && el.classList.contains('image-diff-block')) return true;
                      if (el.textContent && el.textContent.trim().length > 0) return true;
                      if (el.querySelector && el.querySelector('img')) return true;
+                     if (el.querySelector && el.querySelector('.image-diff-block')) return true;
                      if (el.querySelector && el.querySelector('table')) return true;
 
                      // Explicitly allow checkboxes to be navigated to
@@ -2218,12 +2274,12 @@ export function getWebviewContent(
                 let all = [];
 
                 if (isInline) {
-                  const changes = rightContent.querySelectorAll('ins, del, .fm-new.fm-changed, .fm-old.fm-changed');
+                  const changes = rightContent.querySelectorAll('ins, del, .fm-new.fm-changed, .fm-old.fm-changed, .image-diff-block');
                     all = processNodeList(changes, rightPane);
                 } else {
                     // Split Mode
-                  const leftDels = leftContent.querySelectorAll('del, .fm-old.fm-changed');
-                  const rightIns = rightContent.querySelectorAll('ins, .fm-new.fm-changed');
+                  const leftDels = leftContent.querySelectorAll('del, .fm-old.fm-changed, .image-diff-block');
+                  const rightIns = rightContent.querySelectorAll('ins, .fm-new.fm-changed, .image-diff-block');
                     
                     all = [
                         ...processNodeList(leftDels, leftPane),
@@ -2334,6 +2390,10 @@ export function getWebviewContent(
                             hasIns = true;
                         }
                         if (el.tagName === 'DEL' || el.classList.contains('del') || el.classList.contains('diffdel') || el.classList.contains('fm-old')) {
+                            hasDel = true;
+                        }
+                        if (el.classList.contains('image-diff-block')) {
+                            hasIns = true;
                             hasDel = true;
                         }
                     });

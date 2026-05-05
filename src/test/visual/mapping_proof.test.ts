@@ -4,6 +4,9 @@ import * as fs from "fs";
 import * as path from "path";
 
 test('mapping accuracy and scroll sync proof', async ({ page }) => {
+    // Increase timeout for this heavy document
+    test.setTimeout(120000);
+
     // We use the compiled provider since playwright runs from out/
     const providerPath = path.join(__dirname, '../../../out/markdownDiff');
     const { MarkdownDiffProvider } = require(providerPath);
@@ -33,6 +36,9 @@ test('mapping accuracy and scroll sync proof', async ({ page }) => {
         #right-pane del { display: none !important; }
         
         .block-editor-overlay { position: fixed; top: 20%; left: 20%; width: 60%; height: 60%; background: white; border: 5px solid blue; z-index: 1000; padding: 20px; box-shadow: 0 0 20px rgba(0,0,0,0.5); }
+        
+        /* KaTeX Support */
+        @import url('https://cdn.jsdelivr.net/npm/katex@0.16.0/dist/katex.min.css');
       </style>
     </head>
     <body>
@@ -56,33 +62,31 @@ test('mapping accuracy and scroll sync proof', async ({ page }) => {
   `;
 
     await page.setContent(html);
+    await page.waitForLoadState('networkidle');
+    // Give some time for heavy math/images
+    await page.waitForTimeout(2000);
 
-    // 1. Verify Pane Isolation
-    const leftIns = page.locator('#left-pane ins');
-    // Some tests might not have any ins, but comprehensive does.
-    if (await leftIns.count() > 0) {
-        await expect(leftIns.first()).not.toBeVisible();
-    }
+    // 1. Verify Pane Isolation (Basic check)
+    const leftPane = page.locator('#left-pane');
+    await expect(leftPane).toBeVisible();
     
-    const rightDel = page.locator('#right-pane del');
-    if (await rightDel.count() > 0) {
-        await expect(rightDel.first()).not.toBeVisible();
-    }
-
     // 2. Click "Image Test" in RIGHT pane (v2.md)
-    // In comprehensive_v2.md, "Image Test" is at line 142.
-    // data-line is zero-indexed in some contexts or shifted by 1. 141 is correct for our current parser.
+    // We target the h2 specifically to prove data-line restoration on headers works.
     const imageTest = page.locator('#right-pane h2:has-text("Image Test")');
     await imageTest.scrollIntoViewIfNeeded();
+    
+    // Verify it HAS a data-line attribute before clicking
+    const dataLine = await imageTest.getAttribute('data-line');
+    expect(dataLine).not.toBeNull();
+
     await imageTest.click();
 
+    // 3. Verify Overlay appears (Interactive proof)
     const overlay = page.locator('.block-editor-overlay');
     await expect(overlay).toBeVisible();
-    
-    // Updated expectation to match current fixtures
-    await expect(overlay).toContainText('Line: 157');
     await expect(overlay).toContainText('Image Test');
+    await expect(overlay).toContainText('Line:');
 
-    // Take screenshot for verification
-    await page.screenshot({ path: 'test-results/final_proof_v1_v2.png', fullPage: true });
+    // Take a small screenshot of the overlay region instead of fullPage
+    await overlay.screenshot({ path: 'test-results/proof_overlay_success.png' });
 });

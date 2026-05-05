@@ -36,7 +36,8 @@ describe("MarkdownDiffProvider", () => {
   it("should compute simple diff (insertion)", () => {
     const oldMd = "foo";
     const newMd = "foo bar";
-    const { html: diff } = provider.computeDiff(oldMd, newMd);
+    const { html: diff, hasDiff } = provider.computeDiff(oldMd, newMd);
+    assert.ok(hasDiff, "Should report hasDiff=true for insertions");
 
     // Expected: "foo <ins ...>bar</ins>"
     assert.ok(diff.includes("foo"), "Should contain original text");
@@ -47,7 +48,8 @@ describe("MarkdownDiffProvider", () => {
   it("should compute simple diff (deletion)", () => {
     const oldMd = "foo bar";
     const newMd = "foo";
-    const { html: diff } = provider.computeDiff(oldMd, newMd);
+    const { html: diff, hasDiff } = provider.computeDiff(oldMd, newMd);
+    assert.ok(hasDiff, "Should report hasDiff=true for deletions");
 
     // Expected: "foo <del ...>bar</del>"
     assert.ok(diff.includes("foo"), "Should contain original text");
@@ -58,8 +60,9 @@ describe("MarkdownDiffProvider", () => {
   it("should handle frontmatter changes", () => {
     const oldMd = "---\ntitle: Old\n---\nContent";
     const newMd = "---\ntitle: New\n---\nContent";
-    const { html: diff } = provider.computeDiff(oldMd, newMd);
+    const { html: diff, hasDiff } = provider.computeDiff(oldMd, newMd);
 
+    assert.ok(hasDiff, "Should detect frontmatter changes");
     assert.ok(
       diff.includes("Frontmatter Changes"),
       "Should detect frontmatter changes",
@@ -71,8 +74,9 @@ describe("MarkdownDiffProvider", () => {
   it("should show unchanged frontmatter fields without highlight", () => {
     const oldMd = "---\ntitle: Old\nauthor: phine-apps\n---\nContent";
     const newMd = "---\ntitle: New\nauthor: phine-apps\n---\nContent";
-    const { html: diff } = provider.computeDiff(oldMd, newMd);
+    const { html: diff, hasDiff } = provider.computeDiff(oldMd, newMd);
 
+    assert.ok(hasDiff, "Should detect frontmatter changes with unchanged fields");
     assert.ok(
       diff.includes("Frontmatter Changes"),
       "Should render frontmatter table",

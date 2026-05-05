@@ -52,7 +52,12 @@ export async function generateVRTHtml(
   );
   
   const mediaDir = path.join(__dirname, "../../../media");
-  const katexCss = fs.readFileSync(path.join(mediaDir, "katex/katex.min.css"), "utf8");
+  const katexDir = path.join(mediaDir, "katex");
+  let katexCss = fs.readFileSync(path.join(katexDir, "katex.min.css"), "utf8");
+
+  // Fix relative font paths for VRT environment (setContent about:blank needs absolute paths)
+  const absoluteFontPath = "file://" + path.join(katexDir, "fonts").replace(/\\/g, "/");
+  katexCss = katexCss.replace(/url\(fonts\//g, `url(${absoluteFontPath}/`);
 
   
   const translations = {
@@ -201,9 +206,24 @@ export async function generateVRTHtml(
           render: (id, text, cb) => { cb(''); }
       };
       
+      // Wait for fonts to load to prevent flakiness in VRT
+      if (document.fonts) {
+        console.log(' - waiting for fonts to load...');
+        document.fonts.ready.then(() => {
+          console.log(' - fonts loaded');
+          document.body.classList.add('fonts-loaded');
+        }).catch(err => {
+          console.error(' - font load error:', err);
+          document.body.classList.add('fonts-loaded');
+        });
+      } else {
+        document.body.classList.add('fonts-loaded');
+      }
+
       // Safety fallback to unblock baseline updates
       setTimeout(() => {
           document.body.setAttribute('data-marp-scaled', 'true');
+          document.body.classList.add('fonts-loaded');
       }, 5000);
     </script>
   </head>`);

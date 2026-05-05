@@ -26,7 +26,7 @@ import MarkdownIt = require("markdown-it");
 // @ts-ignore
 import * as htmldiff from "htmldiff-js";
 import matter from "gray-matter";
-import { sanitizeHtml } from "./markdown/sanitizer";
+import { sanitizeHtml, escapeHtml } from "./markdown/sanitizer";
 import { getWebviewContent } from "./markdown/webviewTemplate";
 import {
   cleanMarpHtml,
@@ -35,9 +35,13 @@ import {
   splitMarpSlides,
   wrapMarpContainer,
 } from "./markdown/marpRenderer";
-import { createMarkdownRenderer, loadMarkdownPlugins } from "./markdown/renderer";
+import {
+  createMarkdownRenderer,
+  loadMarkdownPlugins,
+} from "./markdown/renderer";
 import {
   executeWithFullPipeline,
+  lcsAlignment,
 } from "./markdown/structuralDiff";
 
 /**
@@ -73,7 +77,6 @@ export class MarkdownDiffProvider {
     this.marp = await loadMarkdownPlugins(this.md);
   }
 
-
   /**
    * Computes the visual difference between two Markdown strings.
    * @param oldMarkdown - The original Markdown content.
@@ -86,15 +89,18 @@ export class MarkdownDiffProvider {
     newMarkdown: string,
     imageResolver?: (src: string) => string,
     oldImageResolver?: (src: string) => string,
-    options: { tokenizeListContainers?: boolean } = {}
-  ): { html: string; marpCss?: string; marpJs?: string; rawDiff?: string } {
+    options: { tokenizeListContainers?: boolean } = {},
+  ): { html: string; marpCss?: string; marpJs?: string; hasDiff: boolean } {
     const oldMatter = matter(oldMarkdown);
     const newMatter = matter(newMarkdown);
 
     const isMarp = !!(oldMatter.data.marp || newMatter.data.marp);
 
     // 1. Render Body Diff
-    const envOld = { imageResolver: oldImageResolver ?? imageResolver, docId: "old" };
+    const envOld = {
+      imageResolver: oldImageResolver ?? imageResolver,
+      docId: "old",
+    };
     let marpCss: string | undefined;
     let marpJs: string | undefined;
 
@@ -102,14 +108,23 @@ export class MarkdownDiffProvider {
     const envNew = { imageResolver, docId: "new" };
 
     if (isMarp && this.marp) {
-      const { html: oHtml, css: cssOld } = this.marp.render(oldMarkdown, envOld);
+      const { html: oHtml, css: cssOld } = this.marp.render(
+        oldMarkdown,
+        envOld,
+      );
       const { cleaned: cleanedOld, scripts: scriptsOld } = cleanMarpHtml(oHtml);
-      
-      const { html: nHtml, css: cssNew } = this.marp.render(newMarkdown, envNew);
+
+      const { html: nHtml, css: cssNew } = this.marp.render(
+        newMarkdown,
+        envNew,
+      );
       const { cleaned: cleanedNew, scripts: scriptsNew } = cleanMarpHtml(nHtml);
 
       // Resolve URLs in CSS
-      const resolvedCssOld = resolveCssUrls(cssOld, oldImageResolver ?? imageResolver);
+      const resolvedCssOld = resolveCssUrls(
+        cssOld,
+        oldImageResolver ?? imageResolver,
+      );
       const resolvedCssNew = resolveCssUrls(cssNew, imageResolver);
 
       // Scope CSS to respective panes to allow different themes without conflict
@@ -125,74 +140,150 @@ export class MarkdownDiffProvider {
 
       marpJs = [...new Set([...scriptsOld, ...scriptsNew])].join("\n");
 
-      // 1b. Granular Slide Diffing
-      // Instead of diffing the whole thing as a string, diff slide-by-slide
-      // to prevent htmldiff from grouping multiple slides into a single block.
-      const oldSlides = splitMarpSlides(cleanedOld).map(s => sanitizeHtml(s));
-      const newSlides = splitMarpSlides(cleanedNew).map(s => sanitizeHtml(s));
-      
       // @ts-ignore
-      const execute = htmldiff.execute || (htmldiff as any).default?.execute || htmldiff;
-      
+      const execute =
+        htmldiff.execute || (htmldiff as any).default?.execute || htmldiff;
+
+      // Tokenize and Diff Marp Slides
+      const oldSlides = splitMarpSlides(cleanedOld);
+      const newSlides = splitMarpSlides(cleanedNew);
+
+      // LCS Alignment for slides to handle insertions/deletions robustly
+      const matches = lcsAlignment(oldSlides, newSlides, (a, b) => {
+        // Heuristic: match by header if present
+        const getHeader = (s: string) => {
+          const m = s.match(/<(h[1-3])\b[^>]*>([\s\S]*?)<\/\1>/i);
+          if (!m) {
+            return null;
+          }
+          // Strip data-line and id attributes as they might shift or be unique
+          return m[0].replace(/\s(data-line(?:-end)?|id)="[^"]*"/g, "");
+        };
+        const hA = getHeader(a);
+        const hB = getHeader(b);
+        if (hA && hB) {
+          // Exact match
+          if (hA === hB) {
+            return true;
+          }
+
+          // Fuzzy match: compare stripped text content
+          const textA = hA.replace(/<[^>]*>/g, "").trim();
+          const textB = hB.replace(/<[^>]*>/g, "").trim();
+
+          if (textA.length >= 5 && textB.length >= 5) {
+            // Match if one contains the other or they share a 10-char prefix
+            if (
+              textA.includes(textB) ||
+              textB.includes(textA) ||
+              textA.substring(0, 10) === textB.substring(0, 10)
+            ) {
+              return true;
+            }
+          }
+        }
+        // Fallback: match by identical content (excluding section attributes)
+        const stripAttrs = (s: string) =>
+          s.replace(/^<section\b[^>]*>/i, "<section>").trim();
+        return stripAttrs(a) === stripAttrs(b);
+      });
+
       let diffSlides = "";
-      const maxSlides = Math.max(oldSlides.length, newSlides.length);
-      for (let i = 0; i < maxSlides; i++) {
-        const oSlide = oldSlides[i];
-        const nSlide = newSlides[i];
-        
-        if (oSlide && nSlide) {
+      let lastOld = 0;
+      let lastNew = 0;
+
+      for (const match of matches) {
+        // 1. Handle deleted slides
+        for (let i = lastOld; i < match.oldIdx; i++) {
+          diffSlides += `<del class="diffdel diff-block marp-slide-wrapper">${oldSlides[i]}</del>`;
+        }
+
+        // 2. Handle inserted slides
+        for (let j = lastNew; j < match.newIdx; j++) {
+          diffSlides += `<ins class="diffins diff-block marp-slide-wrapper">${newSlides[j]}</ins>`;
+        }
+
+        // 3. Diff the matched slides
+        const oSlide = oldSlides[match.oldIdx];
+        const nSlide = newSlides[match.newIdx];
+
+        if (oSlide === nSlide) {
+          diffSlides += `<div class="marp-slide-wrapper">${oSlide}</div>`;
+        } else {
           // Extract content and attributes
-          const oMatch = oSlide.match(/<section([^>]*)>([\s\S]*?)<\/section>/i);
-          const nMatch = nSlide.match(/<section([^>]*)>([\s\S]*?)<\/section>/i);
-          
+          const sectionMatchRegex =
+            /^<section\b([^>]*)>([\s\S]*?)<\/section>$/i;
+          const oMatch = oSlide.match(sectionMatchRegex);
+          const nMatch = nSlide.match(sectionMatchRegex);
+
           if (oMatch && nMatch) {
             const oInner = oMatch[2];
             const nAttrs = nMatch[1];
             const nInner = nMatch[2];
-            
+
             // Diff the inner content
-            const { diff: diffInner } = executeWithFullPipeline(oInner, nInner, execute, {});
-            
+            const { diff: diffInner } = executeWithFullPipeline(
+              oInner,
+              nInner,
+              execute,
+              {},
+            );
+
             // Re-wrap in section using NEW attributes, and add a wrapper for diff markers
             diffSlides += `<div class="marp-slide-wrapper"><section${nAttrs}>${diffInner}</section></div>`;
           } else {
             // Fallback if regex fails
-            const { diff } = executeWithFullPipeline(oSlide, nSlide, execute, {});
+            const { diff } = executeWithFullPipeline(
+              oSlide,
+              nSlide,
+              execute,
+              {},
+            );
             diffSlides += `<div class="marp-slide-wrapper">${diff}</div>`;
           }
-        } else if (oSlide) {
-          diffSlides += `<del class="diffdel diff-block marp-slide-wrapper">${oSlide}</del>`;
-        } else if (nSlide) {
-          diffSlides += `<ins class="diffins diff-block marp-slide-wrapper">${nSlide}</ins>`;
         }
+
+        lastOld = match.oldIdx + 1;
+        lastNew = match.newIdx + 1;
       }
-      
+
+      // Handle remaining slides
+      for (let i = lastOld; i < oldSlides.length; i++) {
+        diffSlides += `<del class="diffdel diff-block marp-slide-wrapper">${oldSlides[i]}</del>`;
+      }
+      for (let j = lastNew; j < newSlides.length; j++) {
+        diffSlides += `<ins class="diffins diff-block marp-slide-wrapper">${newSlides[j]}</ins>`;
+      }
+
       bodyDiffHtml = wrapMarpContainer(diffSlides);
     } else {
-      const oldHtml = sanitizeHtml(this.md.render(oldMatter.content, envOld));
-      const newHtml = sanitizeHtml(this.md.render(newMatter.content, envNew));
-
       // @ts-ignore
-      const execute = htmldiff.execute || (htmldiff as any).default?.execute || htmldiff;
-      if (typeof execute === "function") {
-        const { diff } = executeWithFullPipeline(oldHtml, newHtml, execute, {}, {
-          tokenizeListContainers: options.tokenizeListContainers
-        });
-        bodyDiffHtml = diff;
-      } else {
-        bodyDiffHtml = newHtml;
-      }
+      const execute =
+        htmldiff.execute || (htmldiff as any).default?.execute || htmldiff;
+        
+      const renderedOld = sanitizeHtml(this.md.render(oldMatter.content, envOld));
+      const renderedNew = sanitizeHtml(this.md.render(newMatter.content, envNew));
+      const { diff: diffHtml } = executeWithFullPipeline(
+        renderedOld,
+        renderedNew,
+        execute,
+        {},
+        {
+          tokenizeListContainers: options.tokenizeListContainers,
+        },
+      );
+      bodyDiffHtml = diffHtml;
     }
 
     // 2. Render Frontmatter Diff
-    const fmKeys = new Set([
-      ...Object.keys(oldMatter.data),
-      ...Object.keys(newMatter.data),
-    ]);
+    const oldKeys = Object.keys(oldMatter.data);
+    const newKeys = Object.keys(newMatter.data);
+    const allKeys = [...new Set([...oldKeys, ...newKeys])];
+
     let fmDiffRows = "";
     let hasFmChanges = false;
 
-    fmKeys.forEach((key) => {
+    allKeys.forEach((key) => {
       const oldVal = JSON.stringify(oldMatter.data[key]);
       const newVal = JSON.stringify(newMatter.data[key]);
 
@@ -210,13 +301,13 @@ export class MarkdownDiffProvider {
 
       if (isChanged) {
         fmDiffRows += `<tr>
-                <td>${key}</td>
+                <td>${escapeHtml(key)}</td>
                 <td class="fm-old fm-changed">${safeOldKey}</td>
                 <td class="fm-new fm-changed">${safeNewKey}</td>
             </tr>`;
       } else {
         fmDiffRows += `<tr>
-                <td>${key}</td>
+                <td>${escapeHtml(key)}</td>
                 <td class="fm-old">${safeOldKey}</td>
                 <td class="fm-new">${safeNewKey}</td>
             </tr>`;
@@ -225,8 +316,7 @@ export class MarkdownDiffProvider {
 
     let fmHtml = "";
     if (hasFmChanges) {
-      fmHtml = `
-        <div class="frontmatter-diff">
+      fmHtml = `<div class="frontmatter-diff">
             <h3>Frontmatter Changes</h3>
             <table>
                 <tbody>
@@ -236,9 +326,11 @@ export class MarkdownDiffProvider {
         </div>`;
     }
 
-    return { html: fmHtml + bodyDiffHtml, marpCss, marpJs };
-  }
+    const hasBodyChanges = bodyDiffHtml.includes("<ins") || bodyDiffHtml.includes("<del");
+    const hasDiff = hasFmChanges || hasBodyChanges;
 
+    return { html: fmHtml + bodyDiffHtml, marpCss, marpJs, hasDiff };
+  }
 
   /**
    * Generates the full HTML content for the webview.

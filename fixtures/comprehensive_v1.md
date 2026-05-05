@@ -138,7 +138,7 @@ SOFTWARE.
 
 ## Image Test
 
-![Icon](img_v1.svg)
+![Icon V1](img_v1.svg)
 
 ## Summary
 

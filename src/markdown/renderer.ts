@@ -112,6 +112,12 @@ function configureRules(md: MarkdownIt) {
       const resolved = env.imageResolver(src);
       token.attrSet("src", resolved);
     }
+    
+    // Inject line number from current block context if available
+    if (env && env.currentLine !== undefined && !token.attrGet("data-line")) {
+      token.attrSet("data-line", String(env.currentLine));
+    }
+    
     return defaultImage(tokens, idx, options, env, self);
   };
 }
@@ -190,8 +196,12 @@ export function injectLineNumbers(md: MarkdownIt) {
       }
 
       const hasMap = startLine !== undefined && endLine !== undefined;
+      if (hasMap && env) {
+        env.currentLine = startLine;
+      }
 
       if (hasMap) {
+
         token.attrSet("data-line", String(startLine));
         token.attrSet("data-line-end", String(endLine));
       }

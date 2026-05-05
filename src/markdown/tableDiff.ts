@@ -60,39 +60,82 @@ export function parseTable(html: string) {
   }[] = [];
   const headers: { html: string; attrs: string }[] = [];
 
-  // Extract headers from thead
-  const theadMatch = html.match(/<thead>([\s\S]*?)<\/thead>/i);
-  if (theadMatch) {
-    const trMatches = theadMatch[1].match(/<tr[^>]*>([\s\S]*?)<\/tr>/gi) || [];
-    trMatches.forEach((trHtml) => {
-      const thMatches = trHtml.match(/<th[^>]*>([\s\S]*?)<\/th>/gi) || [];
-      thMatches.forEach((thHtml) => {
-        const inner = thHtml.replace(/<th([^>]*)>([\s\S]*?)<\/th>/i, "$2");
-        const attrs = thHtml.replace(/<th([^>]*)>([\s\S]*?)<\/th>/i, "$1");
-        headers.push({ html: inner, attrs });
-      });
-    });
+  const getInner = (h: string, tag: string) => {
+    const startRegex = new RegExp(`<${tag}([^>]*)>`, "i");
+    const endRegex = new RegExp(`</${tag}>`, "i");
+    const startMatch = h.match(startRegex);
+    const endMatch = h.match(endRegex);
+    if (startMatch && endMatch) {
+      return {
+        attrs: startMatch[1],
+        content: h.substring(startMatch.index! + startMatch[0].length, endMatch.index)
+      };
+    }
+    return null;
+  };
+
+  // Extract thead
+  const theadStart = html.search(/<thead/i);
+  const theadEnd = html.search(/<\/thead>/i);
+  if (theadStart !== -1 && theadEnd !== -1) {
+    const theadContent = html.substring(theadStart, theadEnd + 8);
+    const trRegex = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
+    let trMatch;
+    while ((trMatch = trRegex.exec(theadContent)) !== null) {
+      const thRegex = /<th[^>]*>([\s\S]*?)<\/th>/gi;
+      let thMatch;
+      while ((thMatch = thRegex.exec(trMatch[1])) !== null) {
+        const info = getInner(thMatch[0], "th");
+        if (info) {
+          headers.push({ html: info.content, attrs: info.attrs });
+        }
+      }
+    }
   }
 
-  // Extract rows from tbody
-  const tbodyMatch = html.match(/<tbody>([\s\S]*?)<\/tbody>/i);
-  if (tbodyMatch) {
-    const trMatches = tbodyMatch[1].match(/<tr[^>]*>([\s\S]*?)<\/tr>/gi) || [];
-    trMatches.forEach((trHtml) => {
-      const trAttrs = trHtml.replace(/<tr([^>]*)>[\s\S]*?<\/tr>/i, "$1");
+  // Extract tbody (support multiple tbodies)
+  const tbodyRegex = /<tbody[^>]*>([\s\S]*?)<\/tbody>/gi;
+  let tbodyMatch;
+  while ((tbodyMatch = tbodyRegex.exec(html)) !== null) {
+    const trRegex = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
+    let trMatch;
+    while ((trMatch = trRegex.exec(tbodyMatch[1])) !== null) {
+      const trAttrs = trMatch[0].match(/<tr([^>]*)>/i)?.[1] || "";
       const cells: { html: string; attrs: string; tag: string }[] = [];
-      const tdMatches = trHtml.match(/<td[^>]*>([\s\S]*?)<\/td>/gi) || [];
-      tdMatches.forEach((tdHtml) => {
-        const inner = tdHtml.replace(/<td([^>]*)>([\s\S]*?)<\/td>/i, "$2");
-        const attrs = tdHtml.replace(/<td([^>]*)>([\s\S]*?)<\/td>/i, "$1");
-        cells.push({ html: inner, attrs, tag: "td" });
-      });
+      const tdRegex = /<(td|th)[^>]*>([\s\S]*?)<\/\1>/gi;
+      let tdMatch;
+      while ((tdMatch = tdRegex.exec(trMatch[1])) !== null) {
+        const tag = tdMatch[1].toLowerCase();
+        const info = getInner(tdMatch[0], tag);
+        if (info) {
+          cells.push({ html: info.content, attrs: info.attrs, tag });
+        }
+      }
       rows.push({ cells, attrs: trAttrs });
-    });
+    }
   }
 
-  const tableAttrs =
-    html.match(/<table([^>]*)>/i)?.[1] || "";
+  // Fallback: If no tbody/thead found, try to extract tr directly from table
+  if (rows.length === 0 && headers.length === 0) {
+    const trRegex = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
+    let trMatch;
+    while ((trMatch = trRegex.exec(html)) !== null) {
+      const trAttrs = trMatch[0].match(/<tr([^>]*)>/i)?.[1] || "";
+      const cells: { html: string; attrs: string; tag: string }[] = [];
+      const tdRegex = /<(td|th)[^>]*>([\s\S]*?)<\/\1>/gi;
+      let tdMatch;
+      while ((tdMatch = tdRegex.exec(trMatch[1])) !== null) {
+        const tag = tdMatch[1].toLowerCase();
+        const info = getInner(tdMatch[0], tag);
+        if (info) {
+          cells.push({ html: info.content, attrs: info.attrs, tag });
+        }
+      }
+      rows.push({ cells, attrs: trAttrs });
+    }
+  }
+
+  const tableAttrs = html.match(/<table([^>]*)>/i)?.[1] || "";
   return { headers, rows, tableAttrs };
 }
 
@@ -149,6 +192,7 @@ export function alignRows(
   const usedNew = new Set<number>();
 
   oldRows.forEach((oldR, oldIdx) => {
+    // 1. Try exact identity match on first column (strongest signal)
     const oldId = oldR.cells[0]?.html.replace(/<[^>]+>/g, "").trim();
     let matchedIdx = -1;
     if (oldId) {
@@ -159,12 +203,34 @@ export function alignRows(
       );
     }
 
+    // 2. If no identity match, try similarity match across all cells
+    if (matchedIdx === -1) {
+      let bestScore = 0;
+      newRows.forEach((newR, newIdx) => {
+        if (usedNew.has(newIdx)) {
+          return;
+        }
+        let score = 0;
+        const numCells = Math.min(oldR.cells.length, newR.cells.length);
+        for (let i = 0; i < numCells; i++) {
+          const oText = oldR.cells[i].html.replace(/<[^>]+>/g, "").trim();
+          const nText = newR.cells[i].html.replace(/<[^>]+>/g, "").trim();
+          if (oText && oText === nText) {
+            score++;
+          }
+        }
+        // Requirement: at least 50% of cells must match or at least 2 cells
+        if (score > bestScore && (score >= numCells / 2 || score >= 2)) {
+          bestScore = score;
+          matchedIdx = newIdx;
+        }
+      });
+    }
+
     if (matchedIdx !== -1) {
       usedNew.add(matchedIdx);
       mapping.push({ oldIdx, newIdx: matchedIdx });
     } else {
-      // Fallback to index if content is somewhat similar or just keep it as deleted
-      // For now, simple identity match or unmatched.
       mapping.push({ oldIdx, newIdx: null });
     }
   });

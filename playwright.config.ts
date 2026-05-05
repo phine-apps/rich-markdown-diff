@@ -5,7 +5,7 @@ import { defineConfig, devices } from "@playwright/test";
  */
 export default defineConfig({
   testDir: "./out/test/visual",
-  timeout: 60000,
+  timeout: 120000,
   /* Run tests in files in parallel */
   fullyParallel: true,
   /* Fail the build on CI if you accidentally left test.only in the source code. */
@@ -45,7 +45,7 @@ export default defineConfig({
   /* Snapshot Path configuration */
   snapshotDir: "./src/test/visual/__screenshots__",
   expect: {
-    timeout: 15000,
+    timeout: 30000,
     toHaveScreenshot: {
       maxDiffPixelRatio: 0.1,
       threshold: 0.1,
