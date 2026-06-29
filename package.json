@@ -333,6 +333,9 @@
       "@vscode/vsce-sign",
       "esbuild",
       "keytar"
-    ]
+    ],
+    "patchedDependencies": {
+      "htmldiff-js@1.0.5": "patches/htmldiff-js@1.0.5.patch"
+    }
   }
 }
