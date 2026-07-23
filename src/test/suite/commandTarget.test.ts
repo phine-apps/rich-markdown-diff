@@ -30,6 +30,7 @@ import * as vscode from "vscode";
 import {
   __test__,
   getActiveDiffTabUriPair,
+  getActiveRevisionComparison,
   getCommandTarget,
   getRevisionComparison,
   refersToSameFile,
@@ -310,5 +311,61 @@ describe("Same File Detection", () => {
       refersToSameFile(gitUri(otherUri, commitSha), fileUri),
       false,
     );
+  });
+});
+
+describe("Active Revision Comparison", () => {
+  const fileUri = vscode.Uri.file(
+    path.join(os.tmpdir(), "rmd-active-rev", "doc.md"),
+  );
+  const parentSha = "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678";
+  const commitSha = "c02e3e4a1b2c3d4e5f60718293a4b5c6d7e8f901";
+
+  const gitUri = (ref: string) =>
+    fileUri.with({
+      scheme: "git",
+      query: JSON.stringify({ path: fileUri.fsPath, ref }),
+    });
+
+  afterEach(async () => {
+    await vscode.commands.executeCommand("workbench.action.closeAllEditors");
+  });
+
+  it("detects a commit-to-commit diff tab", async () => {
+    await vscode.commands.executeCommand(
+      "vscode.diff",
+      gitUri(parentSha),
+      gitUri(commitSha),
+      "doc.md (commit)",
+    );
+
+    const revision = getActiveRevisionComparison();
+
+    assert.ok(revision, "Expected a revision comparison");
+    assert.strictEqual(
+      revision?.modifiedUri.toString(),
+      gitUri(commitSha).toString(),
+    );
+  });
+
+  it("ignores a HEAD-to-working-tree diff tab", async () => {
+    await vscode.commands.executeCommand(
+      "vscode.diff",
+      gitUri("HEAD"),
+      fileUri,
+      "doc.md (changes)",
+    );
+
+    assert.strictEqual(getActiveRevisionComparison(), undefined);
+  });
+
+  it("ignores a plain markdown editor", async () => {
+    const document = await vscode.workspace.openTextDocument({
+      language: "markdown",
+      content: "# Heading\n",
+    });
+    await vscode.window.showTextDocument(document);
+
+    assert.strictEqual(getActiveRevisionComparison(), undefined);
   });
 });

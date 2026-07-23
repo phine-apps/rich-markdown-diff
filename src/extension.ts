@@ -35,6 +35,7 @@ import {
   CommandTarget,
   ComparisonUriPair,
   getActiveDiffTabUriPair,
+  getActiveRevisionComparison,
   getCommandTarget,
   getFileUriFromCommandArg,
   getRevisionComparison,
@@ -472,6 +473,34 @@ function isActionableSingleFileComparison(
   return comparison.kind !== "cleanHeadToWorkingTree" || isDirty;
 }
 
+/**
+ * Sets the `canShowRenderedDiff` context key, but only when the value actually
+ * changed and this update has not been superseded by a newer one.
+ *
+ * @param canShow - Whether the rendered diff command should be offered.
+ * @param generation - The generation this update belongs to; a mismatch means a
+ *   later update already ran, so this one is dropped.
+ */
+async function setCanShowRenderedDiff(
+  canShow: boolean,
+  generation: number,
+): Promise<void> {
+  if (generation !== contextUpdateGeneration) {
+    return;
+  }
+
+  if (lastCanShowRenderedDiff === canShow) {
+    return;
+  }
+
+  lastCanShowRenderedDiff = canShow;
+  await vscode.commands.executeCommand(
+    "setContext",
+    "rich-markdown-diff.canShowRenderedDiff",
+    canShow,
+  );
+}
+
 async function updateRenderedDiffContext(
   editor: vscode.TextEditor | undefined = vscode.window.activeTextEditor,
 ) {
@@ -497,14 +526,7 @@ async function updateRenderedDiffContext(
     if (!hasVisibleMarkdownEditor) {
       activeEditorRepositorySubscription?.dispose();
       activeEditorRepositorySubscription = undefined;
-      if (lastCanShowRenderedDiff !== false) {
-        lastCanShowRenderedDiff = false;
-        await vscode.commands.executeCommand(
-          "setContext",
-          "rich-markdown-diff.canShowRenderedDiff",
-          false,
-        );
-      }
+      await setCanShowRenderedDiff(false, myGen);
     } else if (!lastCanShowRenderedDiff) {
       // A markdown editor is visible but context was previously disabled or
       // uninitialized — re-evaluate by finding the visible markdown editor.
@@ -517,6 +539,23 @@ async function updateRenderedDiffContext(
         void updateRenderedDiffContext(mdEditor);
       }
     }
+    return;
+  }
+
+  // A committed revision diff (opened from the Source Control Graph, say) is
+  // renderable, but the comparison resolved below only sees the working tree
+  // and index and would classify the file as unchanged. Detect it from the
+  // active diff tab so the editor context menu offers the command too, matching
+  // the title bar button that the diff editor already shows. The markdown check
+  // stops a non-markdown diff in another editor group from enabling the key.
+  const activeRevision = getActiveRevisionComparison();
+  if (
+    activeRevision &&
+    isMarkdownPath(toFileBackedUri(activeRevision.modifiedUri).fsPath)
+  ) {
+    activeEditorRepositorySubscription?.dispose();
+    activeEditorRepositorySubscription = undefined;
+    await setCanShowRenderedDiff(true, myGen);
     return;
   }
 
@@ -545,14 +584,7 @@ async function updateRenderedDiffContext(
     comparison,
     editor.document.isDirty,
   );
-  if (lastCanShowRenderedDiff !== canShow) {
-    lastCanShowRenderedDiff = canShow;
-    await vscode.commands.executeCommand(
-      "setContext",
-      "rich-markdown-diff.canShowRenderedDiff",
-      canShow,
-    );
-  }
+  await setCanShowRenderedDiff(canShow, myGen);
 
   if (myGen !== contextUpdateGeneration) {
     return;

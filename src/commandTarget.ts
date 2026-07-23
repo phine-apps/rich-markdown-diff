@@ -330,6 +330,27 @@ export function getActiveDiffTabUriPair(): ComparisonUriPair | undefined {
   return undefined;
 }
 
+/**
+ * Reports the revision comparison shown by the diff editor that currently has
+ * focus, if it is one.
+ *
+ * This is what lets the editor context menu offer the rendered diff while a
+ * committed revision diff is open: unlike the working tree and index, a commit
+ * cannot be recovered from the file on disk, so it has to be read from the tab.
+ *
+ * @returns The two sides when the active tab is a revision diff, otherwise
+ *   undefined.
+ */
+export function getActiveRevisionComparison(): ComparisonUriPair | undefined {
+  const pair = getActiveDiffTabUriPair();
+
+  if (!pair) {
+    return undefined;
+  }
+
+  return getRevisionComparison(pair.originalUri, pair.modifiedUri);
+}
+
 export const __test__ = {
   extractComparisonUris,
   inferComparisonHint,
