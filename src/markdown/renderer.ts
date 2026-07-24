@@ -224,8 +224,8 @@ export function injectLineNumbers(md: MarkdownIt) {
       // try to inject them into the first tag of the output.
       if (adjustedStart !== undefined && html && !/data-line="/i.test(html)) {
         html = html.replace(
-          /(\/?>)/,
-          ` data-line="${adjustedStart}" data-line-end="${adjustedEnd}"$1`,
+          /^(<[a-zA-Z0-9-]+(?:\s+[^"'>=\s]+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'>\s]+))?)*\s*)(\/?>)/i,
+          `$1 data-line="${adjustedStart}" data-line-end="${adjustedEnd}"$2`,
         );
       }
       return html;

@@ -85,18 +85,21 @@ export default function mdxPlugin(md: MarkdownIt) {
     let nextLine = startLine + 1;
     let depth = 1;
     const closeTag = `</${tagName}>`;
+    const escapedTagName = tagName.replace(/[-\/\\^$*+?.()|[\]{}]/g, "\\$&");
+    const openTagRegex = new RegExp(`^<${escapedTagName}(?:[\\s/>]|$)`, "i");
+    const closeTagRegex = new RegExp(`^</${escapedTagName}(?:[\\s>]|$)`, "i");
 
     while (nextLine < endLine) {
       const nextPos = state.bMarks[nextLine] + state.tShift[nextLine];
       const nextMax = state.eMarks[nextLine];
       const nextLineText = state.src.slice(nextPos, nextMax).trim();
 
-      if (nextLineText === closeTag) {
+      if (closeTagRegex.test(nextLineText)) {
         depth--;
         if (depth === 0) {
           break;
         }
-      } else if (nextLineText.startsWith(`<${tagName}`)) {
+      } else if (openTagRegex.test(nextLineText)) {
         depth++;
       }
       nextLine++;

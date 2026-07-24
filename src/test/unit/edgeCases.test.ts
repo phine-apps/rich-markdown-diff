@@ -163,4 +163,59 @@ describe("MarkdownDiffProvider - Edge Cases", () => {
     
     assert.ok(wrappedOutput.includes(wrappedInput), "Should not double-wrap already-wrapped table with attributes and spacing");
   });
+
+  it("should validate input types correctly for applyEdit message payload (BUG-07)", () => {
+    const isValidApplyEditPayload = (payload: any): boolean => {
+      return (
+        payload &&
+        payload.uriScheme !== "git" &&
+        payload.uriScheme !== "gitlens" &&
+        typeof payload.lineStart === "number" &&
+        typeof payload.lineEnd === "number" &&
+        typeof payload.newContent === "string" &&
+        payload.lineStart >= 0 &&
+        payload.lineEnd >= payload.lineStart
+      );
+    };
+
+    assert.strictEqual(
+      isValidApplyEditPayload({
+        uriScheme: "file",
+        lineStart: 0,
+        lineEnd: 5,
+        newContent: "hello",
+      }),
+      true,
+    );
+
+    assert.strictEqual(
+      isValidApplyEditPayload({
+        uriScheme: "vscode-remote",
+        lineStart: 0,
+        lineEnd: 5,
+        newContent: "hello",
+      }),
+      true,
+    );
+
+    assert.strictEqual(
+      isValidApplyEditPayload({
+        uriScheme: "git", // Should fail git scheme
+        lineStart: 0,
+        lineEnd: 5,
+        newContent: "hello",
+      }),
+      false,
+    );
+
+    assert.strictEqual(
+      isValidApplyEditPayload({
+        uriScheme: "file",
+        lineStart: "0", // Should fail non-number
+        lineEnd: 5,
+        newContent: "hello",
+      }),
+      false,
+    );
+  });
 });

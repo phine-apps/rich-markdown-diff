@@ -339,10 +339,10 @@ export class MarkdownDiffProvider {
         hasFmChanges = true;
       }
 
-      const safeOldKey = oldMatter.data.hasOwnProperty(key)
+      const safeOldKey = Object.prototype.hasOwnProperty.call(oldMatter.data, key)
         ? oldVal || '""'
         : "(missing)";
-      const safeNewKey = newMatter.data.hasOwnProperty(key)
+      const safeNewKey = Object.prototype.hasOwnProperty.call(newMatter.data, key)
         ? newVal || '""'
         : "(missing)";
 
@@ -413,6 +413,10 @@ export class MarkdownDiffProvider {
     showGutterMarkers: boolean = false,
     showGitBlame: boolean = true,
     lineHoverDelay: number = 500,
+    insertedColor: string = "",
+    deletedColor: string = "",
+    defaultViewMode: string = "side-by-side",
+    defaultFoldUnchanged: boolean = false,
   ): string {
     return getWebviewContent(
       wrapTablesForScrolling(diffHtml),
@@ -430,6 +434,10 @@ export class MarkdownDiffProvider {
       showGutterMarkers,
       showGitBlame,
       lineHoverDelay,
+      insertedColor,
+      deletedColor,
+      defaultViewMode,
+      defaultFoldUnchanged,
     );
   }
 }
