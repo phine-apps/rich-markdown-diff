@@ -92,6 +92,13 @@
         "category": "%rich-markdown-diff.category%",
         "icon": "$(arrow-up)",
         "enablement": "rich-markdown-diff.isDiffActive"
+      },
+      {
+        "command": "rich-markdown-diff.exportHtml",
+        "title": "%rich-markdown-diff.exportHtml.title%",
+        "category": "%rich-markdown-diff.category%",
+        "icon": "$(export)",
+        "enablement": "rich-markdown-diff.isDiffActive"
       }
     ],
     "keybindings": [
@@ -118,6 +125,18 @@
         "when": "rich-markdown-diff.isDiffActive"
       },
       {
+        "command": "rich-markdown-diff.toggleInlineView",
+        "key": "alt+f7",
+        "mac": "alt+f7",
+        "when": "rich-markdown-diff.isDiffActive"
+      },
+      {
+        "command": "rich-markdown-diff.toggleFoldUnchanged",
+        "key": "alt+f8",
+        "mac": "alt+f8",
+        "when": "rich-markdown-diff.isDiffActive"
+      },
+      {
         "command": "rich-markdown-diff.diffClipboard",
         "key": "ctrl+shift+c",
         "mac": "cmd+shift+c",
@@ -140,6 +159,10 @@
         },
         {
           "command": "rich-markdown-diff.prevChange",
+          "when": "rich-markdown-diff.isDiffActive"
+        },
+        {
+          "command": "rich-markdown-diff.exportHtml",
           "when": "rich-markdown-diff.isDiffActive"
         },
         {
@@ -179,6 +202,11 @@
         {
           "command": "rich-markdown-diff.toggleFoldUnchanged",
           "group": "navigation@4",
+          "when": "rich-markdown-diff.isDiffActive"
+        },
+        {
+          "command": "rich-markdown-diff.exportHtml",
+          "group": "navigation@5",
           "when": "rich-markdown-diff.isDiffActive"
         }
       ],
@@ -248,6 +276,30 @@
           "type": "number",
           "default": 500,
           "description": "%rich-markdown-diff.lineHoverDelay.description%"
+        },
+        "rich-markdown-diff.insertedColor": {
+          "type": "string",
+          "default": "",
+          "description": "%rich-markdown-diff.insertedColor.description%"
+        },
+        "rich-markdown-diff.deletedColor": {
+          "type": "string",
+          "default": "",
+          "description": "%rich-markdown-diff.deletedColor.description%"
+        },
+        "rich-markdown-diff.defaultViewMode": {
+          "type": "string",
+          "enum": [
+            "side-by-side",
+            "inline"
+          ],
+          "default": "side-by-side",
+          "description": "%rich-markdown-diff.defaultViewMode.description%"
+        },
+        "rich-markdown-diff.defaultFoldUnchanged": {
+          "type": "boolean",
+          "default": false,
+          "description": "%rich-markdown-diff.defaultFoldUnchanged.description%"
         }
       }
     },

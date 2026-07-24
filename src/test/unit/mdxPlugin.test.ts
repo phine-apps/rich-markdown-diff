@@ -147,4 +147,25 @@ Admonition
     assert.ok(diffHtml.includes('data-line="1"'), "TabItem block should have a data-line");
     assert.ok(diffHtml.includes('data-line="6"'), "Admonition block should have a data-line");
   });
+
+  it("should not count <TabItem> as nested <Tabs> open tag (BUG-02)", () => {
+    const oldDoc = `<Tabs>
+  <TabItem value="apple" label="Apple">
+    This is an apple.
+  </TabItem>
+</Tabs>
+Paragraph outside tabs.`;
+
+    const newDoc = `<Tabs>
+  <TabItem value="apple" label="Apple">
+    This is a fresh apple.
+  </TabItem>
+</Tabs>
+Paragraph outside tabs.`;
+
+    const result = provider.computeDiff(oldDoc, newDoc);
+    assert.ok(result.html.includes("mdx-tabs-container"));
+    assert.ok(result.html.includes("Paragraph outside tabs"));
+    assert.ok(result.html.indexOf("Paragraph outside tabs") > 0);
+  });
 });

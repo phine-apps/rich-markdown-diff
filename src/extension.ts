@@ -640,6 +640,10 @@ async function renderDiffPanel(
   const showGutterMarkers = config.get<boolean>("showGutterMarkers", true);
   const showGitBlame = config.get<boolean>("showGitBlame", true);
   const lineHoverDelay = config.get<number>("lineHoverDelay", 500);
+  const insertedColor = config.get<string>("insertedColor", "");
+  const deletedColor = config.get<string>("deletedColor", "");
+  const defaultViewMode = config.get<string>("defaultViewMode", "side-by-side");
+  const defaultFoldUnchanged = config.get<boolean>("defaultFoldUnchanged", false);
 
   const {
     html: diffHtml,
@@ -676,6 +680,10 @@ async function renderDiffPanel(
     showGutterMarkers,
     showGitBlame,
     lineHoverDelay,
+    insertedColor,
+    deletedColor,
+    defaultViewMode,
+    defaultFoldUnchanged,
   );
   panel.webview.html = html;
 
@@ -792,7 +800,11 @@ async function bindDiffPanel(
     if (
       e.affectsConfiguration("rich-markdown-diff.showGutterMarkers") ||
       e.affectsConfiguration("rich-markdown-diff.showGitBlame") ||
-      e.affectsConfiguration("rich-markdown-diff.lineHoverDelay")
+      e.affectsConfiguration("rich-markdown-diff.lineHoverDelay") ||
+      e.affectsConfiguration("rich-markdown-diff.insertedColor") ||
+      e.affectsConfiguration("rich-markdown-diff.deletedColor") ||
+      e.affectsConfiguration("rich-markdown-diff.defaultViewMode") ||
+      e.affectsConfiguration("rich-markdown-diff.defaultFoldUnchanged")
     ) {
       lastContentKey = undefined; // Force re-render
       scheduleUpdate("document");
@@ -870,12 +882,23 @@ async function bindDiffPanel(
 
     if (message.command === "applyEdit" && currentState) {
       const uri = currentState.modifiedUri ?? currentState.fallbackSourceUri;
-      if (uri) {
+      const start = message.lineStart;
+      const end = message.lineEnd;
+      const newContent = message.newContent;
+
+      if (
+        uri &&
+        uri.scheme !== "git" &&
+        uri.scheme !== "gitlens" &&
+        typeof start === "number" &&
+        typeof end === "number" &&
+        typeof newContent === "string" &&
+        start >= 0 &&
+        end >= start
+      ) {
         try {
           const document = await vscode.workspace.openTextDocument(uri);
           const edit = new vscode.WorkspaceEdit();
-          const start = message.lineStart;
-          const end = message.lineEnd;
 
           // Construct range. end is exclusive line in markdown-it,
           // but in VS Code Range, (start, 0) to (end, 0) means lines [start, end-1].
@@ -886,7 +909,7 @@ async function bindDiffPanel(
           );
 
           // Ensure newContent ends with newline if we replaced full lines
-          let text = message.newContent;
+          let text = newContent;
           if (end < document.lineCount && !text.endsWith("\n")) {
             text += "\n";
           }
@@ -1116,6 +1139,82 @@ export function activate(context: vscode.ExtensionContext) {
         return false;
       },
     ),
+    vscode.commands.registerCommand("rich-markdown-diff.exportHtml", async () => {
+      if (!activePanel) {
+        vscode.window.showWarningMessage(
+          l10n.t("No active diff panel found to export."),
+        );
+        return;
+      }
+
+      let cleanTitle = activePanel.title
+        .replace(/[\/\\:\*\?"<>\|]/g, "_")
+        .trim();
+      cleanTitle = cleanTitle.replace(/\.[a-zA-Z0-9]+$/i, "");
+      if (!cleanTitle.endsWith("-diff.html")) {
+        cleanTitle += "-diff.html";
+      }
+
+      const defaultUri = vscode.workspace.workspaceFolders?.[0]
+        ? vscode.Uri.joinPath(
+            vscode.workspace.workspaceFolders[0].uri,
+            cleanTitle,
+          )
+        : undefined;
+
+      const saveUri = await vscode.window.showSaveDialog({
+        defaultUri,
+        filters: {
+          "HTML Files": ["html"],
+        },
+        saveLabel: l10n.t("Export HTML"),
+      });
+
+      if (!saveUri) {
+        return;
+      }
+
+      try {
+        let htmlContent = activePanel.webview.html;
+
+        const mermaidCdn = "https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js";
+        const hljsLightCdn = "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github.min.css";
+        const hljsDarkCdn = "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github-dark.min.css";
+
+        htmlContent = htmlContent
+          .replace(
+            /href="[^"]*github\.min\.css[^"]*"/i,
+            `href="${hljsLightCdn}"`
+          )
+          .replace(
+            /href="[^"]*github-dark\.min\.css[^"]*"/i,
+            `href="${hljsDarkCdn}"`
+          )
+          .replace(
+            /src="[^"]*mermaid\.min\.js[^"]*"/i,
+            `src="${mermaidCdn}"`
+          );
+
+        await vscode.workspace.fs.writeFile(
+          saveUri,
+          Buffer.from(htmlContent, "utf8"),
+        );
+
+        const openOption = l10n.t("Open File");
+        const selected = await vscode.window.showInformationMessage(
+          l10n.t("Exported Markdown diff to {0}", path.basename(saveUri.fsPath)),
+          openOption,
+        );
+
+        if (selected === openOption) {
+          await vscode.env.openExternal(saveUri);
+        }
+      } catch (error) {
+        vscode.window.showErrorMessage(
+          l10n.t("Failed to export HTML: {0}", String(error)),
+        );
+      }
+    }),
   );
 
   context.subscriptions.push(

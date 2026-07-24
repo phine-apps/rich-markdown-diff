@@ -65,7 +65,7 @@ export async function resolveBlameInfo(
     // ...
     // filename <name>
     // \t<line_content>
-    const child = child_process.spawn("git", ["blame", "--porcelain", fileName], { cwd });
+    const child = child_process.spawn("git", ["blame", "--porcelain", "--", fileName], { cwd });
 
     child.stderr?.resume();
 
@@ -118,7 +118,7 @@ export async function resolveBlameInfo(
 
       // Check if it's the start of a new line block in the porcelain output
       const headerMatch = line.match(
-        /^([0-9a-f]{40})\s+(\d+)\s+(\d+)(?:\s+(\d+))?$/,
+        /^([0-9a-f]{40,64})\s+(\d+)\s+(\d+)(?:\s+(\d+))?$/,
       );
       if (headerMatch) {
         currentHash = headerMatch[1];

@@ -469,7 +469,7 @@ describe("MarkdownDiffProvider", () => {
       (match) => match[1],
     );
     const runtimeScript = scriptBlocks.find((script) =>
-      script.includes("const vscode = acquireVsCodeApi();"),
+      script.includes("acquireVsCodeApi"),
     );
 
     assert.ok(runtimeScript, "Webview should include the main runtime script");
@@ -1750,5 +1750,162 @@ describe("MarkdownDiffProvider", () => {
       true, false // showGutterMarkers=true, showGitBlame=false
     );
     assert.ok(!webviewWithoutBlame.includes('show-git-blame"'), "Body should NOT have show-git-blame class when disabled");
+  });
+
+  it("should not throw error when frontmatter contains hasOwnProperty key (BUG-01)", () => {
+    const oldDoc = `---
+hasOwnProperty: "old value"
+title: "Doc 1"
+---
+# Hello
+`;
+
+    const newDoc = `---
+hasOwnProperty: "new value"
+title: "Doc 1"
+---
+# Hello
+`;
+
+    assert.doesNotThrow(() => {
+      const result = provider.computeDiff(oldDoc, newDoc);
+      assert.ok(result.hasDiff);
+      assert.ok(result.html.includes("Frontmatter Changes"));
+      assert.ok(result.html.includes("hasOwnProperty"));
+    });
+  });
+
+  it("should render table diff without throwing TypeError when rows have fewer cells than header (BUG-03)", () => {
+    const oldDoc = `
+| H1 | H2 | H3 |
+|---|---|---|
+| A1 | A2 |
+`;
+
+    const newDoc = `
+| H1 | H2 | H3 |
+|---|---|---|
+| A1 | A2_mod | A3_new |
+`;
+
+    assert.doesNotThrow(() => {
+      const result = provider.computeDiff(oldDoc, newDoc);
+      assert.ok(result.html.includes("<table"));
+      assert.ok(result.html.includes("A1"));
+    });
+  });
+
+  it("should inject data-line correctly without truncating attributes containing > (BUG-06)", () => {
+    const { createMarkdownRenderer, injectLineNumbers } = require("../../markdown/renderer");
+    const md = createMarkdownRenderer();
+
+    md.renderer.rules.paragraph_open = () => {
+      return '<p title="Comparison: A > B" class="test-p">';
+    };
+    injectLineNumbers(md);
+
+    const html = md.render("Hello World");
+    assert.ok(html.includes('title="Comparison: A > B"'));
+    assert.ok(html.includes('data-line="0"'));
+    assert.ok(html.includes('class="test-p"'));
+  });
+
+  it("should generate valid standalone HTML content containing diff output (Feature 2-1)", () => {
+    const html = provider.getWebviewContent(
+      "<p>Diff test</p>",
+      "/* katex */",
+      "https://example.com/mermaid.js",
+      "https://example.com/light.css",
+      "https://example.com/dark.css",
+      "Original",
+      "Modified",
+    );
+
+    assert.ok(html.includes("<!DOCTYPE html>"));
+    assert.ok(html.includes("<p>Diff test</p>"));
+    assert.ok(html.includes("Original"));
+    assert.ok(html.includes("Modified"));
+  });
+
+  it("should inject custom ins and del background colors into style tag (Feature 3-1)", () => {
+    const customIns = "#e6ffec";
+    const customDel = "#ffeef0";
+
+    const html = provider.getWebviewContent(
+      "<p>Diff</p>",
+      "",
+      "",
+      "",
+      "",
+      "Original",
+      "Modified",
+      "",
+      {},
+      undefined,
+      undefined,
+      undefined,
+      true,
+      true,
+      500,
+      customIns,
+      customDel,
+    );
+
+    assert.ok(html.includes(`--custom-ins-bg: ${customIns}`));
+    assert.ok(html.includes(`--custom-del-bg: ${customDel}`));
+    assert.ok(html.includes("ins.diffins, ins.diffmod, .diff-col-ins { background-color: var(--custom-ins-bg) !important; }"));
+    assert.ok(html.includes("del.diffdel, del.diffmod, .diff-col-del { background-color: var(--custom-del-bg) !important; }"));
+  });
+
+  it("should apply inline-mode class to body when defaultViewMode is inline (Feature 3-2)", () => {
+    const html = provider.getWebviewContent(
+      "<p>Diff</p>",
+      "",
+      "",
+      "",
+      "",
+      "Original",
+      "Modified",
+      "",
+      {},
+      undefined,
+      undefined,
+      undefined,
+      true,
+      true,
+      500,
+      "",
+      "",
+      "inline",
+      false,
+    );
+
+    assert.ok(html.includes("class=\"VRT_LAYOUT_CLASS inline-mode"));
+  });
+
+  it("should include initial toggleFold trigger when defaultFoldUnchanged is true (Feature 3-2)", () => {
+    const html = provider.getWebviewContent(
+      "<p>Diff</p>",
+      "",
+      "",
+      "",
+      "",
+      "Original",
+      "Modified",
+      "",
+      {},
+      undefined,
+      undefined,
+      undefined,
+      true,
+      true,
+      500,
+      "",
+      "",
+      "side-by-side",
+      true,
+    );
+
+    assert.ok(html.includes("toggleFold();"));
   });
 });

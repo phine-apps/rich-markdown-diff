@@ -13,5 +13,10 @@
   "rich-markdown-diff.customEditor.displayName": "Markdown Diff プレビュー",
   "rich-markdown-diff.showGutterMarkers.description": "ガター領域に垂直な差分マーカーを表示するかどうか。",
   "rich-markdown-diff.showGitBlame.description": "比較対象ファイルの Git Blame メタデータを読み込むかどうか。",
-  "rich-markdown-diff.lineHoverDelay.description": "ホバー時に Git Blame や Quick Edit のインジケーターを表示するまでの遅延時間（ミリ秒）。"
+  "rich-markdown-diff.lineHoverDelay.description": "ホバー時に Git Blame や Quick Edit のインジケーターを表示するまでの遅延時間（ミリ秒）。",
+  "rich-markdown-diff.exportHtml.title": "差分を HTML としてエクスポート",
+  "rich-markdown-diff.insertedColor.description": "追加された差分要素のカスタム背景色（例: #e6ffec または rgba(46,160,67,0.15)）。",
+  "rich-markdown-diff.deletedColor.description": "削除された差分要素のカスタム背景色（例: #ffeef0 または rgba(248,81,73,0.15)）。",
+  "rich-markdown-diff.defaultViewMode.description": "差分パネルを開いた際のデフォルトレイアウト表示モード（side-by-side または inline）。",
+  "rich-markdown-diff.defaultFoldUnchanged.description": "差分パネルを開いた際にデフォルトで変更のないブロックを折りたたむかどうか。"
 }

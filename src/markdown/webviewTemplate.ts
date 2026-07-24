@@ -60,6 +60,10 @@ export function getWebviewContent(
   showGutterMarkers: boolean = true,
   showGitBlame: boolean = true,
   lineHoverDelay: number = 500,
+  insertedColor: string = "",
+  deletedColor: string = "",
+  defaultViewMode: string = "side-by-side",
+  defaultFoldUnchanged: boolean = false,
 ): string {
   const nonce = crypto.randomBytes(16).toString("hex");
 
@@ -2192,9 +2196,15 @@ export function getWebviewContent(
             color: var(--vscode-descriptionForeground);
             margin: 0 2px;
         }
+        :root {
+            ${insertedColor ? `--custom-ins-bg: ${escapeHtml(insertedColor)};` : ""}
+            ${deletedColor ? `--custom-del-bg: ${escapeHtml(deletedColor)};` : ""}
+        }
+        ${insertedColor ? `ins.diffins, ins.diffmod, .diff-col-ins { background-color: var(--custom-ins-bg) !important; }` : ""}
+        ${deletedColor ? `del.diffdel, del.diffmod, .diff-col-del { background-color: var(--custom-del-bg) !important; }` : ""}
     </style>
 </head>
-<body class="VRT_LAYOUT_CLASS ${marpCss ? "marp-mode" : ""} ${showGutterMarkers ? "show-gutter-markers" : ""} ${showGitBlame ? "show-git-blame" : ""}">
+<body class="VRT_LAYOUT_CLASS ${defaultViewMode === "inline" ? "inline-mode" : ""} ${marpCss ? "marp-mode" : ""} ${showGutterMarkers ? "show-gutter-markers" : ""} ${showGitBlame ? "show-git-blame" : ""}">
     <div class="toolbar">
         <!-- Buttons removed, moved to VS Code View Actions -->
     <span id="status-msg" class="toolbar-status"></span>
@@ -2221,7 +2231,7 @@ export function getWebviewContent(
     <div class="overview-ruler" id="right-overview-ruler"></div>
     ${showGitBlame ? '<div id="blame-tooltip" class="blame-tooltip"></div>' : ''}
     <script nonce="${nonce}">
-        const vscode = acquireVsCodeApi();
+        const vscode = typeof acquireVsCodeApi !== 'undefined' ? acquireVsCodeApi() : { postMessage: () => {} };
         window.vscode = vscode;
     </script>
     <script nonce="${nonce}">
@@ -4173,6 +4183,7 @@ export function getWebviewContent(
         // Initial cleanup
         cleanupGhosts();
         initImageDiffs();
+        ${defaultFoldUnchanged ? "toggleFold();" : ""}
 
         // Listen for standard shortcut commands from Extension
         window.addEventListener('message', event => {

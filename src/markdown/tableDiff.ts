@@ -364,17 +364,18 @@ export function renderMergedTable(
           ? "diff-col-ins"
           : "";
 
-    if (m.oldIdx !== null && m.newIdx !== null) {
-      const oldH = oldTable.headers[m.oldIdx];
-      const newH = newTable.headers[m.newIdx];
+    const oldH = m.oldIdx !== null && m.oldIdx >= 0 && m.oldIdx < oldTable.headers.length ? oldTable.headers[m.oldIdx] : undefined;
+    const newH = m.newIdx !== null && m.newIdx >= 0 && m.newIdx < newTable.headers.length ? newTable.headers[m.newIdx] : undefined;
+
+    if (oldH && newH) {
       const diff = execute(oldH.html, newH.html);
       html += `<th${appendClass(newH.attrs, colClass)}>${diff}</th>`;
-    } else if (m.oldIdx !== null) {
-      const oldH = oldTable.headers[m.oldIdx];
+    } else if (oldH) {
       html += `<th${appendClass(oldH.attrs, colClass)}><del class="diffdel">${oldH.html}</del></th>`;
-    } else {
-      const newH = newTable.headers[m.newIdx!];
+    } else if (newH) {
       html += `<th${appendClass(newH.attrs, colClass)}><ins class="diffins">${newH.html}</ins></th>`;
+    } else {
+      html += `<th${appendClass("", colClass)}></th>`;
     }
   });
   html += "</tr></thead>";
@@ -394,17 +395,18 @@ export function renderMergedTable(
               ? "diff-col-ins"
               : "";
 
-        if (cm.oldIdx !== null && cm.newIdx !== null) {
-          const oldC = oldR.cells[cm.oldIdx];
-          const newC = newR.cells[cm.newIdx];
+        const oldC = cm.oldIdx !== null && cm.oldIdx >= 0 && cm.oldIdx < oldR.cells.length ? oldR.cells[cm.oldIdx] : undefined;
+        const newC = cm.newIdx !== null && cm.newIdx >= 0 && cm.newIdx < newR.cells.length ? newR.cells[cm.newIdx] : undefined;
+
+        if (oldC && newC) {
           const diff = execute(oldC.html, newC.html);
           html += `<td${appendClass(newC.attrs, colClass)}>${diff}</td>`;
-        } else if (cm.oldIdx !== null) {
-          const oldC = oldR.cells[cm.oldIdx];
+        } else if (oldC) {
           html += `<td${appendClass(oldC.attrs, colClass)}><del class="diffdel">${oldC.html}</del></td>`;
-        } else {
-          const newC = newR.cells[cm.newIdx!];
+        } else if (newC) {
           html += `<td${appendClass(newC.attrs, colClass)}><ins class="diffins">${newC.html}</ins></td>`;
+        } else {
+          html += `<td${appendClass("", colClass)}></td>`;
         }
       });
       html += "</tr>";
@@ -418,8 +420,8 @@ export function renderMergedTable(
             : cm.oldIdx === null
               ? "diff-col-ins"
               : "";
-        if (cm.oldIdx !== null) {
-          const oldC = oldR.cells[cm.oldIdx];
+        const oldC = cm.oldIdx !== null && cm.oldIdx >= 0 && cm.oldIdx < oldR.cells.length ? oldR.cells[cm.oldIdx] : undefined;
+        if (oldC) {
           html += `<td${appendClass(oldC.attrs, colClass)}><del class="diffdel">${oldC.html}</del></td>`;
         } else {
           html += `<td${appendClass("", colClass)}></td>`;
@@ -436,8 +438,8 @@ export function renderMergedTable(
             : cm.oldIdx === null
               ? "diff-col-ins"
               : "";
-        if (cm.newIdx !== null) {
-          const newC = newR.cells[cm.newIdx];
+        const newC = cm.newIdx !== null && cm.newIdx >= 0 && cm.newIdx < newR.cells.length ? newR.cells[cm.newIdx] : undefined;
+        if (newC) {
           html += `<td${appendClass(newC.attrs, colClass)}><ins class="diffins">${newC.html}</ins></td>`;
         } else {
           html += `<td${appendClass("", colClass)}></td>`;

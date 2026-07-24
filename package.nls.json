@@ -13,5 +13,10 @@
   "rich-markdown-diff.customEditor.displayName": "Markdown Diff Preview",
   "rich-markdown-diff.showGutterMarkers.description": "Whether to show vertical diff markers in the gutter area.",
   "rich-markdown-diff.showGitBlame.description": "Whether to load Git Blame metadata for the compared files.",
-  "rich-markdown-diff.lineHoverDelay.description": "The delay in milliseconds before showing Git Blame and Quick Edit indicators on hover."
+  "rich-markdown-diff.lineHoverDelay.description": "The delay in milliseconds before showing Git Blame and Quick Edit indicators on hover.",
+  "rich-markdown-diff.exportHtml.title": "Export Diff to HTML",
+  "rich-markdown-diff.insertedColor.description": "Custom background color for inserted diff elements (e.g. #e6ffec or rgba(46,160,67,0.15)).",
+  "rich-markdown-diff.deletedColor.description": "Custom background color for deleted diff elements (e.g. #ffeef0 or rgba(248,81,73,0.15)).",
+  "rich-markdown-diff.defaultViewMode.description": "Default layout view mode when opening a diff panel (side-by-side or inline).",
+  "rich-markdown-diff.defaultFoldUnchanged.description": "Whether to fold unchanged blocks by default when opening a diff panel."
 }
