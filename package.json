@@ -4,7 +4,7 @@
   "publisher": "phine-apps",
   "displayName": "Rich Markdown Diff",
   "description": "Professional visual Markdown diff with Math, Mermaid, and Git integration for better document reviews.",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "icon": "images/icon.png",
   "author": "phine-apps",
   "license": "MIT",
@@ -307,6 +307,16 @@
       {
         "viewType": "rich-markdown-diff.diffPreview",
         "displayName": "%rich-markdown-diff.customEditor.displayName%",
+        "selector": [
+          {
+            "filenamePattern": "*.md"
+          }
+        ],
+        "priority": "option"
+      },
+      {
+        "viewType": "rich-markdown-diff.conflictResolver",
+        "displayName": "Markdown Visual Conflict Resolver",
         "selector": [
           {
             "filenamePattern": "*.md"
