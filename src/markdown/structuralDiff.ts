@@ -25,6 +25,8 @@
 import * as crypto from "crypto";
 import { diffTables } from "./tableDiff";
 import { findClosing } from "./domUtils";
+import { computeMermaidDiff } from "./mermaidDiff";
+import { escapeHtml } from "./sanitizer";
 
 /**
  * Main entrance for computing granular HTML diffs.
@@ -1567,6 +1569,21 @@ export function refineBlockDiffs(
           attributes,
         )
       ) {
+        if (/class=["'][^"']*mermaid[^"']*["']/i.test(attributes)) {
+          const unescapeHtml = (str: string) =>
+            str
+              .replace(/&lt;/g, "<")
+              .replace(/&gt;/g, ">")
+              .replace(/&quot;/g, '"')
+              .replace(/&#39;/g, "'")
+              .replace(/&amp;/g, "&");
+
+          const oldCode = unescapeHtml(delInner.replace(/<[^>]+>/g, "").trim());
+          const newCode = unescapeHtml(insInner.replace(/<[^>]+>/g, "").trim());
+          const diffMermaid = computeMermaidDiff(oldCode, newCode);
+          const escapedDiff = escapeHtml(diffMermaid);
+          return `<${insTag}${attributes}>${escapedDiff}</${insTag}>`;
+        }
         return match;
       }
 

@@ -23,6 +23,7 @@
  */
 
 import * as vscode from "vscode";
+import { ConflictEditorProvider } from "./conflictEditorProvider";
 import { MarkdownDiffProvider } from "./markdownDiff";
 import {
   describeComparisonSide,
@@ -1054,6 +1055,7 @@ export function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
+    ConflictEditorProvider.register(context),
     vscode.window.onDidChangeActiveTextEditor((editor) => {
       void updateRenderedDiffContext(editor);
     }),
