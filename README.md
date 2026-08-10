@@ -7,6 +7,8 @@ A professional VS Code extension for visual Markdown comparison. Compare rendere
 ## Key Features
 
 - **Visual Diff**: Compare rendered HTML side-by-side or inline instead of raw source code.
+- ⚔️ **Visual Conflict Resolver**: Resolve Git merge conflicts (`<<<<<<<`, `|||||||`, `=======`, `>>>>>>>`) in rendered Markdown with an interactive 3-Way Merge View (`Accept Mine`, `Accept Theirs`, `Accept Both`).
+- 📊 **Semantic Mermaid Diff**: Element-level diff highlighting for Mermaid flowcharts. Added, deleted, and modified nodes and edges are dynamically color-coded with ghost outlines for deleted elements.
 - **Git Integration**: Compare changes directly from the VS Code Source Control view (Workspace, Staged, or HEAD).
 - **Git Blame**: Hover over any line in the diff view to instantly see its commit author and history.
 - **Interactive Image Diff**: Compare visual changes in images using "Swipe" and "Onion Skin" comparison modes.
@@ -21,7 +23,7 @@ A professional VS Code extension for visual Markdown comparison. Compare rendere
 | **MDX / Custom** | Native diffing for MDX, Docusaurus, and Astro Starlight components (Tabs, Steps, Badges, Cards, and Admonitions). |
 | **Marp** | Render and diff slide decks with full theme support. |
 | **Math** | High-quality KaTeX rendering for formulas. |
-| **Mermaid** | Flowcharts, sequence diagrams, and Gantt charts with VS Code theme-aware rendering. |
+| **Mermaid** | Flowcharts with element-level diff highlighting, plus sequence diagrams and Gantt charts with VS Code theme-aware rendering. |
 | **Obsidian** | Native support for Tags (`#tag`) and Transclusions (`![[link]]`). |
 | **Alerts** | GitHub-style `[!NOTE]`, `[!WARNING]`, etc. |
 | **Structure** | Robust diffing for Tables, Nested Lists, Footnotes, and block-level math/code changes. |
@@ -29,6 +31,7 @@ A professional VS Code extension for visual Markdown comparison. Compare rendere
 
 ## Use Cases
 
+- ⚔️ **Merge Conflicts**: Resolve Git merge conflicts in Markdown docs visually rather than inspecting raw syntax markers.
 - 🖼️ **Marp Presentations**: Verify slide layout and theme changes visually.
 - 📚 **Knowledge Bases**: Review changes in foam/wiki notes with wikilinks and footnotes.
 - 🌐 **Modern Tech Docs**: Catch rendering issues in MDX, Docusaurus, and Astro Starlight components.
@@ -42,12 +45,30 @@ A professional VS Code extension for visual Markdown comparison. Compare rendere
 Select two `.md` files in the Explorer, right-click, and select **Show Markdown Diff**.
 
 ### 2. Git & SCM
-Click the **Show Markdown Diff** icon next to any modified Markdown file in the Source Control view.
+- **Working Tree & Staged**: Click the **Show Markdown Diff** icon next to any modified Markdown file in the Source Control view.
+- **Committed Revisions**: When viewing committed file diffs from Git history or the Git Graph, click the **Show Markdown Diff** icon in the editor title bar or right-click inside the diff editor and choose **Show Rich Markdown Diff**.
 
 ![SCM Diff](https://raw.githubusercontent.com/phine-apps/rich-markdown-diff/main/images/scm-diff.gif)
 
 ### 3. Clipboard Comparison
-Right-click in any Markdown editor and choose **Compare with Clipboard**.
+Right-click in any Markdown editor and choose **Compare with Clipboard** (or press `Cmd+Shift+C` / `Ctrl+Shift+C`).
+
+### 4. Visual Conflict Resolver
+Right-click any Markdown file containing Git conflict markers, choose **Open With...**, and select **Markdown Visual Conflict Resolver**. Click **Accept Mine**, **Accept Theirs**, or **Accept Both** on any conflict block to resolve it directly.
+
+### 5. Export to HTML
+Click the **Export to HTML** icon in the diff view toolbar, or run **Export Rendered Diff to HTML** from the Command Palette (`Cmd+Shift+P` / `Ctrl+Shift+P`) to generate a standalone HTML document.
+
+## Keyboard Shortcuts
+
+The following default shortcuts are available when the visual diff panel is active:
+
+| Shortcut (Mac) | Shortcut (Windows/Linux) | Command | Description |
+| --- | --- | --- | --- |
+| `F7` / `Shift+F7` | `F7` / `Shift+F7` | Next / Previous Change | Jump to the next or previous diff highlight. |
+| `Alt+F7` | `Alt+F7` | Toggle Inline View | Toggle between Side-by-Side and Inline diff layouts. |
+| `Alt+F8` | `Alt+F8` | Toggle Fold Unchanged | Fold or unfold unchanged Markdown blocks. |
+| `Cmd+Shift+C` | `Ctrl+Shift+C` | Compare with Clipboard | Compare active Markdown document with clipboard content. |
 
 ## Technical Details
 

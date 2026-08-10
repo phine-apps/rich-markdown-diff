@@ -4,7 +4,7 @@
   "publisher": "phine-apps",
   "displayName": "Rich Markdown Diff",
   "description": "Professional visual Markdown diff with Math, Mermaid, and Git integration for better document reviews.",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "icon": "images/icon.png",
   "author": "phine-apps",
   "license": "MIT",
@@ -313,6 +313,16 @@
           }
         ],
         "priority": "option"
+      },
+      {
+        "viewType": "rich-markdown-diff.conflictResolver",
+        "displayName": "Markdown Visual Conflict Resolver",
+        "selector": [
+          {
+            "filenamePattern": "*.md"
+          }
+        ],
+        "priority": "option"
       }
     ]
   },
@@ -348,7 +358,7 @@
     "@typescript-eslint/eslint-plugin": "^8.63.0",
     "@typescript-eslint/parser": "^8.63.0",
     "@vscode/l10n-dev": "^0.0.35",
-    "@vscode/test-electron": "^3.0.0",
+    "@vscode/test-electron": "^3.1.0",
     "@vscode/vsce": "^3.9.2",
     "esbuild": "^0.28.1",
     "eslint": "^10.7.0",
