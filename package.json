@@ -354,7 +354,7 @@
     "@types/mocha": "^10.0.10",
     "@types/node": "^26.1.2",
     "@types/sanitize-html": "^2.16.1",
-    "@types/vscode": "1.80.0",
+    "@types/vscode": "1.125.0",
     "@typescript-eslint/eslint-plugin": "^8.66.0",
     "@typescript-eslint/parser": "^8.66.0",
     "@vscode/l10n-dev": "^0.0.35",
@@ -369,7 +369,7 @@
     "ovsx": "^1.1.0",
     "playwright": "1.62.1",
     "ts-node": "^10.9.2",
-    "typescript": "~6.0.3",
+    "typescript": "~7.0.2",
     "typescript-eslint": "^8.66.0"
   },
   "dependencies": {
@@ -379,8 +379,8 @@
     "gray-matter": "^4.0.3",
     "highlight.js": "^11.11.1",
     "htmldiff-js": "^1.0.5",
-    "markdown-it": "^14.3.0",
-    "markdown-it-deflist": "^3.0.1",
+    "markdown-it": "^15.0.0",
+    "markdown-it-deflist": "^4.0.0",
     "markdown-it-emoji": "^3.0.0",
     "markdown-it-footnote": "^4.0.0",
     "markdown-it-github-alerts": "^1.0.1",
