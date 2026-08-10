@@ -1,9 +1,9 @@
-FROM mcr.microsoft.com/playwright:v1.60.0-jammy
+FROM mcr.microsoft.com/playwright:v1.62.1-jammy
 
 # Install git and build-essential for git-hosted dependencies
 RUN apt-get update && apt-get install -y git build-essential && rm -rf /var/lib/apt/lists/*
 
 # Enable corepack
-RUN corepack enable && corepack prepare pnpm@10.33.0 --activate
+RUN corepack enable && corepack prepare pnpm --activate
 
 WORKDIR /app

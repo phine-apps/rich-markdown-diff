@@ -12,6 +12,7 @@ services:
     environment:
       - NODE_ENV=test
       - DOCKER=true
+      - COREPACK_ENABLE_DOWNLOAD_PROMPT=0
     ipc: host
     ports:
       - "9323:9323"
