@@ -26,7 +26,8 @@ Added </ins><strong><ins class="diffins">new bold text</ins></strong><ins class=
 <li class="task-list-item" data-line="31" data-line-end="32"><input class="task-list-item-checkbox" checked disabled type="checkbox" /> Task 2</li>
 <ins class="diffins diff-block"><li data-all-inserted="true" class="task-list-item" data-line="32" data-line-end="34"><input class="task-list-item-checkbox" checked disabled type="checkbox" /> Task 3</li></ins></ul>
 <h2 data-line="34" data-line-end="35">Code Blocks</h2>
-<div class="code-block-wrapper"><pre><code data-line="36" data-line-end="46" class="language-javascript"><span class="hljs-keyword">function</span> <span class="hljs-title function_">greet</span>(<span class="hljs-params">name</span>) {<span class="hljs-comment"><ins class="diffins">// Updated comment in v2</ins></span>
+<div class="code-block-wrapper"><pre><code data-line="36" data-line-end="46" class="language-javascript"><span class="hljs-keyword">function</span> <span class="hljs-title function_">greet</span>(<span class="hljs-params">name</span>) {<ins class="diffins">
+  </ins><span class="hljs-comment"><ins class="diffins">// Updated comment in v2</ins></span>
   <span class="hljs-variable language_">console</span>.<span class="hljs-title function_">log</span>(<span class="hljs-string">`Hello, <span class="hljs-subst">${name}</span>!<ins class="diffins">&nbsp;Welcome!</ins>`</span>);<ins class="diffins">
 }
 
@@ -86,7 +87,17 @@ c-6,0,-10,-1,-12,-3s-194,-422,-194,-422s-65,47,-65,47z
 M834 80h400000v40h-400000z"></path></svg></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.190845em"><span></span></span></span></span></span></span></span></span></span></p>
 <ins class="diffins diff-block"><p data-line="74" data-line-end="75">New equation added:</p></ins><ins class="diffins diff-block"><p class="katex-block" data-line="76" data-line-end="79"><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><munderover><mo>∑</mo><mrow><mi>i</mi><mo>=</mo><mn>1</mn></mrow><mi>n</mi></munderover><mi>i</mi><mo>=</mo><mfrac><mrow><mi>n</mi><mo>(</mo><mi>n</mi><mo>+</mo><mn>1</mn><mo>)</mo></mrow><mn>2</mn></mfrac></mrow><annotation encoding="application/x-tex">\sum_{i=1}^{n} i = \frac{n(n+1)}{2}
 </annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:2.929066em;vertical-align:-1.277669em"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.6513970000000002em"><span style="top:-1.872331em;margin-left:0em"><span class="pstrut" style="height:3.05em"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">i</span><span class="mrel mtight">=</span><span class="mord mtight">1</span></span></span></span><span style="top:-3.050005em"><span class="pstrut" style="height:3.05em"></span><span><span class="mop op-symbol large-op">∑</span></span></span><span style="top:-4.3000050000000005em;margin-left:0em"><span class="pstrut" style="height:3.05em"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">n</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.277669em"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.16666666666666666em"></span><span class="mord mathnormal">i</span><span class="mspace" style="margin-right:0.2777777777777778em"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2777777777777778em"></span></span><span class="base"><span class="strut" style="height:2.113em;vertical-align:-0.686em"></span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.427em"><span style="top:-2.314em"><span class="pstrut" style="height:3em"></span><span class="mord"><span class="mord">2</span></span></span><span style="top:-3.23em"><span class="pstrut" style="height:3em"></span><span class="frac-line" style="border-bottom-width:0.04em"></span></span><span style="top:-3.677em"><span class="pstrut" style="height:3em"></span><span class="mord"><span class="mord mathnormal">n</span><span class="mopen">(</span><span class="mord mathnormal">n</span><span class="mspace" style="margin-right:0.2222222222222222em"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222222222222222em"></span><span class="mord">1</span><span class="mclose">)</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.686em"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span></span></span></span></span></p></ins><h2 data-line="80" data-line-end="81">Mermaid Diagrams</h2>
-<div class="mermaid" data-line="82" data-line-end="94" data-original-content="graph TD
+<del class="diffmod diff-block"><div class="mermaid" data-line="72" data-line-end="78" data-original-content="graph TD;
+    A--&gt;B;
+    B--&gt;C;
+    C--&gt;D;
+">
+graph TD;
+    A--&gt;B;
+    B--&gt;C;
+    C--&gt;D;
+
+</div></del><ins class="diffmod diff-block"><div class="mermaid" data-line="82" data-line-end="94" data-original-content="graph TD
     A[Start] --&gt; B{Decision}
     B -- Yes --&gt; C[Process One]
     B -- No --&gt; D[Process Two]
@@ -96,7 +107,8 @@ M834 80h400000v40h-400000z"></path></svg></span></span></span><span class="vlist
     E --&gt; H[End]
     F --&gt; H
     G --&gt; H
-">graph TD
+">
+graph TD
     A[Start] --&gt; B{Decision}
     B -- Yes --&gt; C[Process One]
     B -- No --&gt; D[Process Two]
@@ -107,32 +119,7 @@ M834 80h400000v40h-400000z"></path></svg></span></span></span><span class="vlist
     F --&gt; H
     G --&gt; H
 
-%% Ghost definitions for deleted elements
-    A--[&quot;A--&quot;]
-    B--[&quot;B--&quot;]
-    C--[&quot;C--&quot;]
-    C -.-&gt; D
-
-%% Dynamic Diff Styles
-    style A fill:#e6ffec,stroke:#22863a,stroke-width:2px;
-    style E fill:#e6ffec,stroke:#22863a,stroke-width:2px;
-    style F fill:#e6ffec,stroke:#22863a,stroke-width:2px;
-    style G fill:#e6ffec,stroke:#22863a,stroke-width:2px;
-    style H fill:#e6ffec,stroke:#22863a,stroke-width:2px;
-    style A-- fill:#ffeef0,stroke:#d73a49,stroke-width:1px,stroke-dasharray:5 5,opacity:0.75;
-    style B-- fill:#ffeef0,stroke:#d73a49,stroke-width:1px,stroke-dasharray:5 5,opacity:0.75;
-    style C-- fill:#ffeef0,stroke:#d73a49,stroke-width:1px,stroke-dasharray:5 5,opacity:0.75;
-    style B fill:#fffdef,stroke:#b08800,stroke-width:2px;
-    style C fill:#fffdef,stroke:#b08800,stroke-width:2px;
-    style D fill:#fffdef,stroke:#b08800,stroke-width:2px;
-    linkStyle 2 stroke:#22863a,stroke-width:2px;
-    linkStyle 3 stroke:#22863a,stroke-width:2px;
-    linkStyle 4 stroke:#22863a,stroke-width:2px;
-    linkStyle 5 stroke:#22863a,stroke-width:2px;
-    linkStyle 6 stroke:#22863a,stroke-width:2px;
-    linkStyle 7 stroke:#22863a,stroke-width:2px;
-    linkStyle 8 stroke:#22863a,stroke-width:2px;
-    linkStyle 9 stroke:#d73a49,stroke-width:1px,stroke-dasharray:3 3,opacity:0.75;</div><h2 data-line="95" data-line-end="96">GitHub Alerts</h2>
+</div></ins><h2 data-line="95" data-line-end="96">GitHub Alerts</h2>
 <div class="markdown-alert markdown-alert-note" data-line="97" data-line-end="99"><p class="markdown-alert-title"><svg class="octicon octicon-info mr-2" width="16" height="16" aria-hidden="true"><path d="M0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8Zm8-6.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13ZM6.5 7.75A.75.75 0 0 1 7.25 7h1a.75.75 0 0 1 .75.75v2.75h.25a.75.75 0 0 1 0 1.5h-2a.75.75 0 0 1 0-1.5h.25v-2h-.25a.75.75 0 0 1-.75-.75ZM8 6a1 1 0 1 1 0-2 1 1 0 0 1 0 2Z"></path></svg>Note</p>
 <p data-line="97" data-line-end="99">This is a note alert<ins class="diffins">&nbsp;with updated content</ins>.</p></div>
 <div class="markdown-alert markdown-alert-warning" data-line="100" data-line-end="102"><p class="markdown-alert-title"><svg class="octicon octicon-alert mr-2" width="16" height="16" aria-hidden="true"><path d="M6.457 1.047c.659-1.234 2.427-1.234 3.086 0l6.082 11.378A1.75 1.75 0 0 1 14.082 15H1.918a1.75 1.75 0 0 1-1.543-2.575Zm1.763.707a.25.25 0 0 0-.44 0L1.698 13.132a.25.25 0 0 0 .22.368h12.164a.25.25 0 0 0 .22-.368Zm.53 3.996v2.5a.75.75 0 0 1-1.5 0v-2.5a.75.75 0 0 1 1.5 0ZM9 11a1 1 0 1 1-2 0 1 1 0 0 1 2 0Z"></path></svg>Warning</p><p data-line="100" data-line-end="102">This is a warning alert.</p>

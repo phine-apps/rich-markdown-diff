@@ -2,12 +2,11 @@
 
 All notable changes to **Rich Markdown Diff** will be documented in this file.
 
-## [1.5.0] - 2026-08-DD
+## [1.5.0] - 2026-08-11
 
 ### Added in 1.5.0
 
 - **Visual Conflict Resolver**: Interactive 3-way merge editor for resolving Git merge conflicts (`<<<<<<<`, `=======`, `>>>>>>>`) directly in rendered Markdown.
-- **Semantic Mermaid Diff**: Element-level diff highlighting for Mermaid flowcharts with dynamic color-coding and ghost outlines.
 - **HTML Export**: Export rendered side-by-side or inline diffs to standalone HTML files via the `Export Rendered Diff to HTML` command.
 - **Custom Diff Colors & View Preferences**: Added settings for custom insertion/deletion highlight colors and default view/folding modes.
 - **Committed Revision Diffs**: Render visual diffs for committed revisions from Git history and the editor context menu.
