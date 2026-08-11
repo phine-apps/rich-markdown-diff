@@ -70,4 +70,17 @@ describe("Checkbox Regression Test", () => {
     assert.strictEqual(restored.includes('<input type="checkbox" />'), true, "Should restore token despite mangled casing");
     assert.strictEqual(restored.includes('zChEcKbOxZ'), false, "Token string should be gone");
   });
+
+  it('should preserve text and checkbox integrity when comparing tight and loose task lists', () => {
+    const oldMd = `- [ ] Task A\n- [x] Task B\n- [ ] Task C`;
+    const newMd = `- [x] Task A (Checked)\n\n- [ ] Task C`;
+
+    const { html: diffHtml } = provider.computeDiff(oldMd, newMd);
+
+    // Verify Task A text is NOT wrapped inside an ins tag along with p
+    assert.strictEqual(/<ins[^>]*><p/i.test(diffHtml), false, "Should not produce corrupted <ins><p> wrapper");
+    assert.ok(diffHtml.includes("Task A"), "Task A text must be present in diff HTML");
+    assert.ok(diffHtml.includes("Task C"), "Task C text must be present in diff HTML");
+  });
 });
+

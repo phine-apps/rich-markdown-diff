@@ -104,6 +104,18 @@ describe("MarkdownDiffProvider", () => {
     assert.ok(diff.includes("graph TD;"), "Should contain mermaid content");
   });
 
+  it("should generate separate del (original) and ins (modified) blocks for modified mermaid diagrams", () => {
+    const oldMd = "```mermaid\ngraph TD;\nA-->B;\nB-->C;\n```";
+    const newMd = "```mermaid\ngraph TD\nA[Start] --> B{Decision}\nB --> C[Process One]\nB --> D[Process Two]\n```";
+
+    const { html: diff } = provider.computeDiff(oldMd, newMd);
+    assert.ok(diff.includes('class="mermaid"'), "Should contain mermaid class");
+    assert.ok(diff.includes("<del"), "Should contain del block for original version");
+    assert.ok(diff.includes("<ins"), "Should contain ins block for modified version");
+    assert.ok(diff.includes("A--&gt;B;"), "Original version should be preserved inside del");
+    assert.ok(diff.includes("Decision"), "Modified version should be preserved inside ins");
+  });
+
   it("should resolve relative image paths when resolver is provided", () => {
     const oldMd = "![Icon](images/icon.png)";
     const newMd = "![Icon](images/icon.png)";
@@ -334,6 +346,41 @@ describe("MarkdownDiffProvider", () => {
     assert.ok(
       diff.includes("<ins") || diff.includes("<del"),
       "Should still contain diff markup for table changes",
+    );
+  });
+
+  it("should accurately align columns and cell changes when column count changes", () => {
+    const table3Cols = [
+      "| ID | Name | Role |",
+      "| :-- | :--- | :--- |",
+      "| 1 | Alice | Admin |",
+      "| 2 | Bob | User |",
+      "| 3 | Charlie | Guest |",
+    ].join("\n");
+
+    const table4Cols = [
+      "| ID | Name | Role | Status |",
+      "| :-- | :--- | :--- | :----- |",
+      "| 1 | Alice | Administrator | Active |",
+      "| 2 | Bob | User | Inactive |",
+      "| 3 | Charlie | Guest | Active |",
+      "| 4 | Dave | User | Active |",
+    ].join("\n");
+
+    // 1. 3 cols -> 4 cols (Column inserted)
+    const { html: diff3to4 } = provider.computeDiff(table3Cols, table4Cols);
+    assert.ok(diff3to4.includes("diff-col-ins"), "Inserted 4th column should have diff-col-ins class");
+    assert.ok(
+      diff3to4.includes("<del class=\"diffmod\">Admin</del><ins class=\"diffmod\">Administrator</ins>"),
+      "Role cell should show inline modification between Admin and Administrator",
+    );
+
+    // 2. 4 cols -> 3 cols (Column deleted in reverse diff)
+    const { html: diff4to3 } = provider.computeDiff(table4Cols, table3Cols);
+    assert.ok(diff4to3.includes("diff-col-del"), "Deleted 4th column should have diff-col-del class");
+    assert.ok(
+      diff4to3.includes("<del class=\"diffmod\">Administrator</del><ins class=\"diffmod\">Admin</ins>"),
+      "Role cell in reverse diff should align Administrator -> Admin in the Role column, not drift to Status column",
     );
   });
 
@@ -1308,6 +1355,21 @@ describe("MarkdownDiffProvider", () => {
     assert.ok(
       !/<del[^>]*class="[^"]*diff-block[^"]*"[^>]*>\s*<pre/.test(diff),
       "Changed code blocks should not be wrapped in a diff-block del/ins",
+    );
+  });
+
+  it("should preserve newlines when appending code with blank lines inside code blocks", () => {
+    const oldMd = '```javascript\nfunction farewell(name) {\n  console.log(`Goodbye, ${name}!`);\n}\n```';
+    const newMd = '```javascript\nfunction farewell(name) {\n  console.log(`Goodbye, ${name}!`);\n}\n\nfunction good_morning(name) {\n  console.log(`Hello, ${name}!`);\n}\n```';
+    const { html: diff } = provider.computeDiff(oldMd, newMd);
+
+    assert.ok(
+      /<ins[^>]*>\s*\n\s*<\/ins>/.test(diff) || diff.includes("<ins class=\"diffins\">\n\n</ins>") || diff.includes("\n\n"),
+      "Diff should preserve newlines between functions in code blocks",
+    );
+    assert.ok(
+      !diff.includes("}function good_morning") && !diff.includes("}<span"),
+      "New function declaration should not be immediately attached to preceding closing brace without line break",
     );
   });
 
