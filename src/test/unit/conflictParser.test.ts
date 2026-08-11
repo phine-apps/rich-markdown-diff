@@ -2,6 +2,8 @@ import * as assert from "assert";
 import {
   parseConflictBlocks,
   reconstructDocument,
+  renderConflictBlocks,
+  getConflictResolverShellHtml,
 } from "../../markdown/conflictParser";
 
 describe("Conflict Parser", () => {
@@ -111,5 +113,36 @@ Unclosed mine content`;
     assert.strictEqual(blocks[0].type, "common");
     assert.strictEqual(blocks[1].type, "common");
     assert.ok(blocks[1].text.includes("Unclosed mine content"));
+  });
+
+  it("should render conflict buttons with data attributes and no inline onclick handlers", () => {
+    const text = `<<<<<<< HEAD
+Mine content
+=======
+Theirs content
+>>>>>>> feature`;
+    const blocks = parseConflictBlocks(text);
+
+    const html = renderConflictBlocks(blocks);
+
+    // Verify buttons have .btn-resolve and data attributes
+    assert.ok(html.includes('class="btn-resolve"'), "Buttons should have btn-resolve class");
+    assert.ok(html.includes('data-block-id="conflict-1"'), "Buttons should have data-block-id attribute");
+    assert.ok(html.includes('data-choice="mine"'), "Accept Mine button should have data-choice='mine'");
+    assert.ok(html.includes('data-choice="theirs"'), "Accept Theirs button should have data-choice='theirs'");
+    assert.ok(html.includes('data-choice="both"'), "Accept Both button should have data-choice='both'");
+
+    // Crucial: Ensure NO inline onclick attributes are generated (blocked by CSP)
+    assert.strictEqual(html.includes("onclick="), false, "HTML must not contain inline onclick attributes");
+  });
+
+  it("should generate shell HTML with CSP nonce and event delegation for .btn-resolve", () => {
+    const nonce = "test-nonce-12345";
+
+    const shellHtml = getConflictResolverShellHtml(nonce);
+
+    assert.ok(shellHtml.includes(`script-src 'nonce-${nonce}'`), "Shell HTML should include CSP nonce");
+    assert.ok(shellHtml.includes(".btn-resolve"), "Shell HTML script should delegate clicks on .btn-resolve");
+    assert.ok(shellHtml.includes("resolveConflict"), "Shell HTML should define resolveConflict function");
   });
 });

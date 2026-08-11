@@ -12,4 +12,10 @@ describe("consolidateWrappedItems bug", () => {
         assert.strictEqual(result.includes('<ul><ins'), false, "Should not move <ins> outside of <li> if inside <ul>");
         assert.strictEqual(result, input, "Should leave <ins> inside <li>");
     });
+    it("should NOT move diff tags outside when block contains multiple diff tags", () => {
+        const input = '<p><ins class="diffmod"><input type="checkbox" /></ins> Task A<ins class="diffins">&nbsp;(Checked)</ins></p>';
+        const result = consolidateWrappedItems(input);
+        assert.strictEqual(result, input, "Should leave multiple <ins> tags intact without broken wrapping");
+    });
 });
+

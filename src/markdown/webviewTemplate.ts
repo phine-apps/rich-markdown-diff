@@ -1008,6 +1008,10 @@ export function getWebviewContent(
         .task-list-item {
             position: relative;
         }
+        .task-list-item p {
+            display: inline;
+            margin: 0;
+        }
         .task-list-item-checkbox {
             margin: 0 0.2em 0.25em -1.6em;
             vertical-align: middle;
@@ -3679,7 +3683,14 @@ export function getWebviewContent(
 
             if (!activeHeading) {
                 // Before first heading
-                container.innerHTML = '<span class="breadcrumb-item" onclick="' + pane.id + '.scrollTop = 0">' + t("Top") + '</span>';
+                container.innerHTML = '';
+                const topItem = document.createElement('span');
+                topItem.className = 'breadcrumb-item';
+                topItem.textContent = t("Top");
+                topItem.onclick = () => {
+                    pane.scrollTop = 0;
+                };
+                container.appendChild(topItem);
                 return;
             }
 

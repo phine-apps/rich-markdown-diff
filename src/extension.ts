@@ -45,6 +45,7 @@ import {
 } from "./commandTarget";
 import * as path from "path";
 import * as l10n from "@vscode/l10n";
+import { prepareExportHtml } from "./exportHtml";
 
 /**
  * Escapes HTML special characters to prevent XSS in webview content.
@@ -1177,25 +1178,12 @@ export function activate(context: vscode.ExtensionContext) {
       }
 
       try {
-        let htmlContent = activePanel.webview.html;
-
-        const mermaidCdn = "https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js";
-        const hljsLightCdn = "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github.min.css";
-        const hljsDarkCdn = "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github-dark.min.css";
-
-        htmlContent = htmlContent
-          .replace(
-            /href="[^"]*github\.min\.css[^"]*"/i,
-            `href="${hljsLightCdn}"`
-          )
-          .replace(
-            /href="[^"]*github-dark\.min\.css[^"]*"/i,
-            `href="${hljsDarkCdn}"`
-          )
-          .replace(
-            /src="[^"]*mermaid\.min\.js[^"]*"/i,
-            `src="${mermaidCdn}"`
-          );
+        const rawHtml = activePanel.webview.html;
+        const htmlContent = await prepareExportHtml(rawHtml, {
+          readFile: async (fsPath: string) => {
+            return await vscode.workspace.fs.readFile(vscode.Uri.file(fsPath));
+          },
+        });
 
         await vscode.workspace.fs.writeFile(
           saveUri,
