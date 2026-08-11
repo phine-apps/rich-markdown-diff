@@ -25,8 +25,6 @@
 import * as crypto from "crypto";
 import { diffTables } from "./tableDiff";
 import { findClosing } from "./domUtils";
-import { computeMermaidDiff } from "./mermaidDiff";
-import { escapeHtml } from "./sanitizer";
 
 /**
  * Main entrance for computing granular HTML diffs.
@@ -144,7 +142,10 @@ export function executeWithFullPipeline(
   }
 
   // 5. Restore checkboxes
-  restored = restoreCheckboxes(restored, cbTokensNew);
+  restored = restoreCheckboxes(restored, {
+    ...cbTokensOld,
+    ...cbTokensNew,
+  });
 
   // Apply post-restoration refinements (like list Ghost items)
   if (!options.skipRefinement) {
@@ -548,7 +549,17 @@ export function balanceDiffTags(html: string): string {
 }
 
 export function cleanupUnbalancedDiffTags(html: string): string {
-  let result = balanceDiffTags(html);
+  // Protect pre/code blocks from having whitespace/newline diff tags stripped
+  const preBlocks: string[] = [];
+  const maskedHtml = html.replace(/<pre\b[^>]*>[\s\S]*?<\/pre>/gi, (match) => {
+    // Inside <pre>, only remove strictly empty diff tags with no content at all
+    const cleanedPre = match.replace(/<(ins|del)[^>]*><\/\1>/gi, "");
+    const token = `__PRE_CLEANUP_${preBlocks.length}_TOKEN__`;
+    preBlocks.push(cleanedPre);
+    return token;
+  });
+
+  let result = balanceDiffTags(maskedHtml);
 
   // Fix cases like <section></del></ins> which happen if htmldiff gets confused by fragments
   result = result.replace(/<section>\s*<\/del>\s*<\/ins>/gi, "<section>");
@@ -559,6 +570,11 @@ export function cleanupUnbalancedDiffTags(html: string): string {
 
   // Remove empty diff tags
   result = result.replace(/<(ins|del)[^>]*>\s*<\/\1>/gi, "");
+
+  // Restore protected pre blocks
+  for (let i = 0; i < preBlocks.length; i++) {
+    result = result.replace(`__PRE_CLEANUP_${i}_TOKEN__`, () => preBlocks[i]);
+  }
 
   return result;
 }
@@ -716,11 +732,16 @@ export function consolidateWrappedItems(html: string): string {
   return html.replace(
     /<(h[1-6]|p|blockquote)([^>]*)>\s*<(ins|del)[^>]*>\s*([\s\S]*?)\s*<\/\3>\s*<\/\1>/gi,
     (match, tag, attrs, type, content) => {
-      const diffClass = type === "ins" ? "diffins" : "diffdel";
       // Ensure we don't wrap twice
       if (match.includes("diff-block")) {
         return match;
       }
+      // Safety guard: ensure content does not contain additional unclosed/nested diff tags
+      // which indicates multiple diff tags inside the block rather than the entire block being wrapped
+      if (/<(ins|del)\b/i.test(content) || /<\/(ins|del)>/i.test(content)) {
+        return match;
+      }
+      const diffClass = type === "ins" ? "diffins" : "diffdel";
       return `<${type} class="${diffClass}"><${tag}${attrs}>${content}</${tag}></${type}>`;
     },
   );
@@ -1538,6 +1559,16 @@ export function refineBlockDiffs(
     },
   );
 
+  const tableRegex =
+    /(<del[^>]*>\s*(<table[^>]*>[\s\S]*?<\/table>)\s*<\/del>)\s*(<ins[^>]*>\s*(<table[^>]*>[\s\S]*?<\/table>)\s*<\/ins>)/gi;
+
+  resultHtml = resultHtml.replace(
+    tableRegex,
+    (match, delBlock, oldInner, insBlock, newInner) => {
+      return diffTables(oldInner, newInner, execute);
+    },
+  );
+
   const genericBlockRegex =
     /(<del[^>]*>\s*<([a-z1-6]+)(?:\s+[^>]*)?>([\s\S]*?)<\/\2>\s*<\/del>)\s*(<ins[^>]*>\s*<([a-z1-6]+)(?:\s+[^>]*)?>([\s\S]*?)<\/\5>\s*<\/ins>)/gi;
 
@@ -1548,9 +1579,9 @@ export function refineBlockDiffs(
         return match;
       }
 
-      // Special handling for pre blocks to ensure we don't break syntax highlighting
-      // if it's already highlighted.
-      if (delTag.toLowerCase() === "pre") {
+      // Special handling for pre and table blocks to ensure we don't break syntax highlighting
+      // or bypass structured table diffing.
+      if (delTag.toLowerCase() === "pre" || delTag.toLowerCase() === "table") {
         return match;
       }
 
@@ -1562,28 +1593,13 @@ export function refineBlockDiffs(
         attributesMatch && attributesMatch[1] ? attributesMatch[1] : "";
 
       // EXCEPTION: Do not re-diff the inside of specialized blocks like Mermaid or GitHub Alerts.
-      // For Mermaid: Re-diffing injects <ins>/<del> tags that break their specific parsers.
+      // For Mermaid: Preserve separate <del> (original) and <ins> (modified) blocks for split/inline view.
       // For Alerts: It often causes redundant nesting (double vertical bars).
       if (
         /class=["'][^"']*(?:mermaid|markdown-alert|katex)[^"']*["']/i.test(
           attributes,
         )
       ) {
-        if (/class=["'][^"']*mermaid[^"']*["']/i.test(attributes)) {
-          const unescapeHtml = (str: string) =>
-            str
-              .replace(/&lt;/g, "<")
-              .replace(/&gt;/g, ">")
-              .replace(/&quot;/g, '"')
-              .replace(/&#39;/g, "'")
-              .replace(/&amp;/g, "&");
-
-          const oldCode = unescapeHtml(delInner.replace(/<[^>]+>/g, "").trim());
-          const newCode = unescapeHtml(insInner.replace(/<[^>]+>/g, "").trim());
-          const diffMermaid = computeMermaidDiff(oldCode, newCode);
-          const escapedDiff = escapeHtml(diffMermaid);
-          return `<${insTag}${attributes}>${escapedDiff}</${insTag}>`;
-        }
         return match;
       }
 
@@ -1624,16 +1640,6 @@ export function refineBlockDiffs(
         return match;
       }
       return `<p><strong>${insInner}</strong></p>`;
-    },
-  );
-
-  const tableRegex =
-    /(<del[^>]*>\s*(<table[^>]*>[\s\S]*?<\/table>)\s*<\/del>)\s*(<ins[^>]*>\s*(<table[^>]*>[\s\S]*?<\/table>)\s*<\/ins>)/gi;
-
-  resultHtml = resultHtml.replace(
-    tableRegex,
-    (match, delBlock, oldInner, insBlock, newInner) => {
-      return diffTables(oldInner, newInner, execute);
     },
   );
 

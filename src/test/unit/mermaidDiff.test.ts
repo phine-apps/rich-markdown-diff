@@ -178,4 +178,49 @@ describe("Mermaid Semantic Diff", () => {
     assert.ok(diff.includes("linkStyle 0 stroke:#d73a49"), "Edge 0 should be styled as deleted");
     assert.ok(diff.includes("linkStyle 1 stroke:#d73a49"), "Edge 1 should be styled as deleted");
   });
+
+  // --- MERMAID-03 regression tests ---
+
+  it("[MERMAID-03] should not consume arrow hyphens as part of node IDs (A-->B;)", () => {
+    const code = `
+      graph TD;
+        A-->B;
+        B-->C;
+        C-->D;
+    `;
+    const nodes = parseMermaidNodes(code);
+    assert.strictEqual(nodes.size, 4, "Should detect exactly 4 nodes (A, B, C, D)");
+    assert.ok(nodes.has("A"), "Node A must be present");
+    assert.ok(nodes.has("B"), "Node B must be present");
+    assert.ok(nodes.has("C"), "Node C must be present");
+    assert.ok(nodes.has("D"), "Node D must be present");
+    assert.ok(!nodes.has("A--"), "A-- must NOT be recognized as a node");
+    assert.ok(!nodes.has("B--"), "B-- must NOT be recognized as a node");
+    assert.ok(!nodes.has("C--"), "C-- must NOT be recognized as a node");
+  });
+
+  it("[MERMAID-03] should correctly compute diff between compact arrow diagrams and modified diagrams", () => {
+    const oldCode = `
+      graph TD;
+        A-->B;
+        B-->C;
+        C-->D;
+    `;
+    const newCode = `
+      graph TD
+        A[Start] --> B{Decision}
+        B -- Yes --> C[Process One]
+        B -- No --> D[Process Two]
+        C --> E[Branch A]
+        C --> F[Branch B]
+        E --> H[End]
+        F --> H
+        G --> H
+    `;
+    const diff = computeMermaidDiff(oldCode, newCode);
+    assert.ok(!diff.includes("A--"), "Should not include bogus A-- node");
+    assert.ok(diff.includes("style E fill:#e6ffec"), "Should style added node E as inserted");
+    assert.ok(diff.includes("style A fill:#fffdef"), "Should style modified node A as modified");
+    assert.ok(diff.includes("C -.-> D"), "Should include ghost edge for removed C-->D");
+  });
 });
