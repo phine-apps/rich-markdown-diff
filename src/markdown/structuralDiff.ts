@@ -27,6 +27,27 @@ import { diffTables } from "./tableDiff";
 import { findClosing } from "./domUtils";
 
 /**
+ * Linear check: is `s` a run of one-or-more complete block-level elements
+ * separated only by whitespace? Used instead of the catastrophic
+ * `(BLOCK(?:\s*BLOCK)*)` regex form, which backtracked exponentially (O(2^n))
+ * when an <ins>/<del> region wrapped a long run of sibling blocks.
+ */
+function isBlockLevelRun(s: string, blockElementPattern: string): boolean {
+  const one = new RegExp(`^${blockElementPattern}`, "i");
+  let i = 0;
+  let seen = false;
+  while (i < s.length) {
+    while (i < s.length && /\s/.test(s[i])) i++;
+    if (i >= s.length) break;
+    const m = one.exec(s.slice(i));
+    if (!m) return false;
+    i += m[0].length;
+    seen = true;
+  }
+  return seen;
+}
+
+/**
  * Main entrance for computing granular HTML diffs.
  */
 export function diffHtmlFragments(
@@ -1693,15 +1714,21 @@ export function consolidateBlockDiffs(html: string): string {
   const selfClosingTags = "hr";
   const blockElementPattern = `(?:<(?:${blockTags})[^>]*>[\\s\\S]*?<\\/(?:${blockTags})>|<(?:${selfClosingTags})[^>]*\\/?>)`;
 
-  const fullWrapRegex = new RegExp(
-    `(<(ins|del)[^>]*>)\\s*(${blockElementPattern}(?:\\s*${blockElementPattern})*)\\s*(<\\/\\2>)`,
-    "gi",
-  );
+  // Match any ins/del region with a lazy inner (linear scan), then validate in
+  // the callback that its content is a run of complete block-level elements.
+  // The previous `(BLOCK(?:\s*BLOCK)*)` form backtracked catastrophically
+  // (O(2^n)) when an ins/del region wrapped a long run of sibling blocks,
+  // freezing the extension host on documents with large multi-block edits.
+  const fullWrapRegex = /(<(ins|del)\b[^>]*>)([\s\S]*?)(<\/\2>)/gi;
 
   result = result.replace(
     fullWrapRegex,
-    (match, openTag, type, content, closeTag) => {
+    (match, openTag, type, inner, closeTag) => {
       if (match.includes('class="diff-block"')) {
+        return match;
+      }
+      const content = inner.trim();
+      if (!content || !isBlockLevelRun(content, blockElementPattern)) {
         return match;
       }
       const tagWithClass = openTag.includes("class=")
