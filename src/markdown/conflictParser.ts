@@ -250,6 +250,23 @@ export function parseConflictBlocks(content: string): DocBlock[] {
 
     // Git conflict markers start with <<<<<<<, |||||||, =======, >>>>>>>
     if (line.startsWith("<<<<<<<")) {
+      if (inConflict) {
+        // Safely rescue the previous unclosed conflict block as common text to prevent data loss
+        const unclosedLines: string[] = [
+          `<<<<<<< ${mineLabel}`,
+          ...conflictMineLines,
+        ];
+        if (conflictBaseLines.length > 0) {
+          unclosedLines.push("|||||||");
+          unclosedLines.push(...conflictBaseLines);
+        }
+        if (section === "theirs") {
+          unclosedLines.push("=======");
+          unclosedLines.push(...conflictTheirsLines);
+        }
+        currentCommonLines.push(...unclosedLines);
+      }
+
       if (currentCommonLines.length > 0) {
         blocks.push({
           type: "common",
@@ -267,12 +284,12 @@ export function parseConflictBlocks(content: string): DocBlock[] {
       continue;
     }
 
-    if (inConflict && line.startsWith("|||||||")) {
+    if (inConflict && section === "mine" && line.startsWith("|||||||")) {
       section = "base";
       continue;
     }
 
-    if (inConflict && line.startsWith("=======")) {
+    if (inConflict && (section === "mine" || section === "base") && line.startsWith("=======")) {
       section = "theirs";
       continue;
     }
@@ -345,22 +362,36 @@ export function reconstructDocument(blocks: DocBlock[]): string {
       resultLines.push(block.text);
     } else {
       if (block.choice === "mine") {
-        resultLines.push(block.mine);
+        if (block.mine.length > 0) {
+          resultLines.push(block.mine);
+        }
       } else if (block.choice === "theirs") {
-        resultLines.push(block.theirs);
+        if (block.theirs.length > 0) {
+          resultLines.push(block.theirs);
+        }
       } else if (block.choice === "both") {
-        resultLines.push(block.mine);
-        resultLines.push(block.theirs);
+        if (block.mine.length > 0) {
+          resultLines.push(block.mine);
+        }
+        if (block.theirs.length > 0) {
+          resultLines.push(block.theirs);
+        }
       } else {
         // Unresolved: keep conflict markers intact
         resultLines.push(`<<<<<<< ${block.mineLabel || "HEAD"}`);
-        resultLines.push(block.mine);
+        if (block.mine.length > 0) {
+          resultLines.push(block.mine);
+        }
         if (block.base !== undefined) {
           resultLines.push("|||||||");
-          resultLines.push(block.base);
+          if (block.base.length > 0) {
+            resultLines.push(block.base);
+          }
         }
         resultLines.push("=======");
-        resultLines.push(block.theirs);
+        if (block.theirs.length > 0) {
+          resultLines.push(block.theirs);
+        }
         resultLines.push(`>>>>>>> ${block.theirsLabel || "Incoming"}`);
       }
     }

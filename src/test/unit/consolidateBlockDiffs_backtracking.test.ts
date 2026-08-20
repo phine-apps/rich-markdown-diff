@@ -38,4 +38,62 @@ describe("consolidateBlockDiffs block-run detection", () => {
     const elapsed = Date.now() - start;
     assert.ok(elapsed < 1000, `expected linear time, took ${elapsed}ms`);
   });
+
+  it("marks an <ins> wrapping multiple sibling block elements as a block-level diff", () => {
+    const input =
+      '<ins class="diffins"><h2>Heading</h2><table><tr><td>Cell</td></tr></table><div>Content</div></ins>';
+    const result = consolidateBlockDiffs(input);
+    assert.ok(
+      result.includes('class="diffins diff-block"'),
+      "outer <ins> should gain diff-block for sibling block elements",
+    );
+  });
+
+  it("marks an <ins> wrapping mixed self-closing hr and block elements as a block-level diff", () => {
+    const input = '<ins class="diffins"><hr><div>Block</div><hr/></ins>';
+    const result = consolidateBlockDiffs(input);
+    assert.ok(
+      result.includes('class="diffins diff-block"'),
+      "outer <ins> should gain diff-block for hr and block mix",
+    );
+  });
+
+  it("marks an <ins> wrapping self-closing svg as a block-level diff", () => {
+    const input = '<ins class="diffins"><svg width="24" height="24"/></ins>';
+    const result = consolidateBlockDiffs(input);
+    assert.ok(
+      result.includes('class="diffins diff-block"'),
+      "outer <ins> should gain diff-block for self-closing svg",
+    );
+  });
+
+  it("handles <ins> without existing class attribute correctly", () => {
+    const input = "<ins><div>Block</div></ins>";
+    const result = consolidateBlockDiffs(input);
+    assert.strictEqual(result, '<ins class="diff-block"><div>Block</div></ins>');
+  });
+
+  it("handles multiple independent <ins> tags in the same document without collision", () => {
+    const input =
+      '<ins class="diffins"><div>First</div></ins> middle text <ins class="diffins"><div>Second</div></ins>';
+    const result = consolidateBlockDiffs(input);
+    assert.strictEqual(
+      result,
+      '<ins class="diffins diff-block"><div>First</div></ins> middle text <ins class="diffins diff-block"><div>Second</div></ins>',
+    );
+  });
+
+  it("does not duplicate diff-block class if already present", () => {
+    const input =
+      '<ins class="diffins diff-block"><div>Already marked</div></ins>';
+    const result = consolidateBlockDiffs(input);
+    assert.strictEqual(result, input);
+  });
+
+  it("leaves unclosed block tags unchanged without crashing", () => {
+    const input = '<ins class="diffins"><div>Unclosed block</ins>';
+    const result = consolidateBlockDiffs(input);
+    assert.strictEqual(result, input);
+  });
 });
+

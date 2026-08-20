@@ -26,6 +26,17 @@ import * as crypto from "crypto";
 import { diffTables } from "./tableDiff";
 import { findClosing } from "./domUtils";
 
+const BLOCK_TAGS =
+  "table|ul|ol|dl|blockquote|div|h1|h2|h3|h4|h5|h6|section|svg|pre";
+const SELF_CLOSING_BLOCK_TAGS = "hr";
+
+const OPEN_BLOCK_REGEX = new RegExp(`<(${BLOCK_TAGS})\\b[^>]*>`, "iy");
+const SELF_CLOSING_BLOCK_REGEX = new RegExp(
+  `<(?:${SELF_CLOSING_BLOCK_TAGS})\\b[^>]*\\/?>|<(?:${BLOCK_TAGS})\\b[^>]*\\/>`,
+  "iy",
+);
+const FULL_WRAP_DIFF_REGEX = /(<(ins|del)\b[^>]*>)([\s\S]*?)(<\/\2>)/gi;
+
 /**
  * Linear check: is `s` a run of one-or-more complete block-level elements
  * separated only by whitespace? Each paired block is consumed via depth
@@ -35,32 +46,30 @@ import { findClosing } from "./domUtils";
  * catastrophic `(BLOCK(?:\s*BLOCK)*)` regex form, which backtracked
  * exponentially (O(2^n)) when an <ins>/<del> region wrapped a long block run.
  */
-function isBlockLevelRun(
-  s: string,
-  blockTags: string,
-  selfClosingTags: string,
-): boolean {
-  const openBlock = new RegExp(`<(${blockTags})\\b[^>]*>`, "iy");
-  const selfClosing = new RegExp(`<(?:${selfClosingTags})\\b[^>]*\\/?>`, "iy");
+function isBlockLevelRun(s: string): boolean {
   let i = 0;
   let seen = false;
   while (i < s.length) {
-    while (i < s.length && /\s/.test(s[i])) i++;
-    if (i >= s.length) break;
+    while (i < s.length && /\s/.test(s[i])) {
+      i++;
+    }
+    if (i >= s.length) {
+      break;
+    }
 
-    // Self-closing block (e.g. <hr>): consume in place.
-    selfClosing.lastIndex = i;
-    const sc = selfClosing.exec(s);
+    // Self-closing block (e.g. <hr> or <svg .../>): consume in place.
+    SELF_CLOSING_BLOCK_REGEX.lastIndex = i;
+    const sc = SELF_CLOSING_BLOCK_REGEX.exec(s);
     if (sc && sc.index === i) {
-      i = selfClosing.lastIndex;
+      i = SELF_CLOSING_BLOCK_REGEX.lastIndex;
       seen = true;
       continue;
     }
 
     // Paired block: find its matching close via depth tracking so nested
     // same/other block tags inside it are skipped correctly.
-    openBlock.lastIndex = i;
-    const ob = openBlock.exec(s);
+    OPEN_BLOCK_REGEX.lastIndex = i;
+    const ob = OPEN_BLOCK_REGEX.exec(s);
     if (!ob || ob.index !== i) {
       return false;
     }
@@ -73,6 +82,7 @@ function isBlockLevelRun(
   }
   return seen;
 }
+
 
 /**
  * Main entrance for computing granular HTML diffs.
@@ -1736,25 +1746,19 @@ export function consolidateBlockDiffs(html: string): string {
     "hr",
   ];
   let result = html;
-  const blockTags =
-    "table|ul|ol|dl|blockquote|div|h1|h2|h3|h4|h5|h6|section|svg|pre";
-  const selfClosingTags = "hr";
-
   // Match any ins/del region with a lazy inner (linear scan), then validate in
   // the callback that its content is a run of complete block-level elements.
   // The previous `(BLOCK(?:\s*BLOCK)*)` form backtracked catastrophically
   // (O(2^n)) when an ins/del region wrapped a long run of sibling blocks,
   // freezing the extension host on documents with large multi-block edits.
-  const fullWrapRegex = /(<(ins|del)\b[^>]*>)([\s\S]*?)(<\/\2>)/gi;
-
   result = result.replace(
-    fullWrapRegex,
+    FULL_WRAP_DIFF_REGEX,
     (match, openTag, type, inner, closeTag) => {
       if (match.includes('class="diff-block"')) {
         return match;
       }
       const content = inner.trim();
-      if (!content || !isBlockLevelRun(content, blockTags, selfClosingTags)) {
+      if (!content || !isBlockLevelRun(content)) {
         return match;
       }
       const tagWithClass = openTag.includes("class=")

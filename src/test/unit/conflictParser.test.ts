@@ -64,6 +64,23 @@ Line 2`;
     assert.strictEqual(reconstructedTheirs, "Line 1\nTheirs content\nLine 2");
   });
 
+  it("should reconstruct document without extraneous blank lines when choosing empty deletion side", () => {
+    const text = `Line 1
+<<<<<<< HEAD
+=======
+Incoming addition
+>>>>>>> feature
+Line 2`;
+
+    const blocks = parseConflictBlocks(text);
+    if (blocks[1].type === "conflict") {
+      blocks[1].choice = "mine"; // mine is empty (deletion)
+    }
+
+    const reconstructed = reconstructDocument(blocks);
+    assert.strictEqual(reconstructed, "Line 1\nLine 2");
+  });
+
   it("should parse conflict markers inside code blocks", () => {
     const text = `\`\`\`typescript
 <<<<<<< HEAD
@@ -134,6 +151,64 @@ Theirs content
 
     // Crucial: Ensure NO inline onclick attributes are generated (blocked by CSP)
     assert.strictEqual(html.includes("onclick="), false, "HTML must not contain inline onclick attributes");
+  });
+
+  it("should not lose data when encountering consecutive conflict start markers without closure", () => {
+    const text = `Line A
+<<<<<<< HEAD
+Important Line 1
+<<<<<<< SUB
+Important Line 2
+=======
+Incoming addition
+>>>>>>> branch
+Line B`;
+
+    const blocks = parseConflictBlocks(text);
+    assert.strictEqual(blocks.length, 4);
+    assert.strictEqual(blocks[0].type, "common");
+    assert.strictEqual(blocks[0].text, "Line A");
+
+    assert.strictEqual(blocks[1].type, "common");
+    assert.ok(blocks[1].text.includes("Important Line 1"), "First unclosed block content must be preserved in rescued common block");
+    assert.ok(blocks[1].text.includes("<<<<<<< HEAD"));
+
+    assert.strictEqual(blocks[2].type, "conflict");
+    if (blocks[2].type === "conflict") {
+      assert.strictEqual(blocks[2].mine, "Important Line 2");
+      assert.strictEqual(blocks[2].theirs, "Incoming addition");
+      assert.strictEqual(blocks[2].mineLabel, "SUB");
+      assert.strictEqual(blocks[2].theirsLabel, "branch");
+    }
+
+    assert.strictEqual(blocks[3].type, "common");
+    assert.strictEqual(blocks[3].text, "Line B");
+
+    // Verify reconstruction retains all text
+    const reconstructed = reconstructDocument(blocks);
+    assert.ok(reconstructed.includes("Important Line 1"));
+    assert.ok(reconstructed.includes("Important Line 2"));
+  });
+
+  it("should treat out-of-order base markers after separator as normal content without corruption", () => {
+    const text = `<<<<<<< HEAD
+Mine
+=======
+Theirs line 1
+||||||| rogue marker
+Theirs line 2
+>>>>>>> feature`;
+
+    const blocks = parseConflictBlocks(text);
+    assert.strictEqual(blocks.length, 1);
+    assert.strictEqual(blocks[0].type, "conflict");
+    if (blocks[0].type === "conflict") {
+      assert.strictEqual(blocks[0].mine, "Mine");
+      assert.strictEqual(
+        blocks[0].theirs,
+        "Theirs line 1\n||||||| rogue marker\nTheirs line 2",
+      );
+    }
   });
 
   it("should generate shell HTML with CSP nonce and event delegation for .btn-resolve", () => {

@@ -32,7 +32,7 @@ const MIME_TYPES: Record<string, string> = {
  * - file://...
  */
 export function extractLocalFsPath(uriStr: string): string | undefined {
-  if (!uriStr) {
+  if (!uriStr || uriStr.includes("\0")) {
     return undefined;
   }
 
@@ -97,11 +97,22 @@ export function extractLocalFsPath(uriStr: string): string | undefined {
 }
 
 /**
- * Returns MIME type based on file extension.
+ * Checks if a file path has an allowed asset extension (image or font).
  */
-export function getMimeType(filePath: string): string {
+export function isAllowedAsset(filePath: string): boolean {
+  if (!filePath || filePath.includes("\0")) {
+    return false;
+  }
   const ext = path.extname(filePath).toLowerCase();
-  return MIME_TYPES[ext] || "application/octet-stream";
+  return Object.prototype.hasOwnProperty.call(MIME_TYPES, ext);
+}
+
+/**
+ * Returns MIME type based on file extension if allowed, or undefined.
+ */
+export function getMimeType(filePath: string): string | undefined {
+  const ext = path.extname(filePath).toLowerCase();
+  return MIME_TYPES[ext];
 }
 
 /**
@@ -197,13 +208,17 @@ export async function prepareExportHtml(
     }
 
     const fsPath = extractLocalFsPath(uri);
-    if (!fsPath) {
+    if (!fsPath || !isAllowedAsset(fsPath)) {
+      continue;
+    }
+
+    const mime = getMimeType(fsPath);
+    if (!mime) {
       continue;
     }
 
     try {
       const fileBytes = await readFile(fsPath);
-      const mime = getMimeType(fsPath);
       const base64 = Buffer.from(fileBytes).toString("base64");
       const dataUri = `data:${mime};base64,${base64}`;
       uriToDataMap.set(uri, dataUri);
@@ -212,11 +227,21 @@ export async function prepareExportHtml(
     }
   }
 
-  // Replace URIs in HTML
-  for (const [origUri, replacement] of uriToDataMap.entries()) {
-    // Escape for literal replace
-    html = html.split(origUri).join(replacement);
-  }
+  // Replace URIs specifically within src attributes and CSS url() expressions
+  html = html.replace(
+    /(src=["'])([^"']+)(["'])|url\((['"]?)([^'")]+)\4\)/gi,
+    (fullMatch, srcPrefix, srcVal, srcSuffix, quote, urlVal) => {
+      if (srcVal) {
+        const replacement = uriToDataMap.get(srcVal);
+        return replacement ? `${srcPrefix}${replacement}${srcSuffix}` : fullMatch;
+      } else if (urlVal) {
+        const replacement = uriToDataMap.get(urlVal);
+        const q = quote || "";
+        return replacement ? `url(${q}${replacement}${q})` : fullMatch;
+      }
+      return fullMatch;
+    },
+  );
 
   return html;
 }

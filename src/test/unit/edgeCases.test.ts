@@ -14,6 +14,8 @@ import {
   splitConsolidatedDiffs,
   lcsAlignment,
 } from "../../markdown/structuralDiff";
+import { appendClass } from "../../markdown/tableDiff";
+import { findClosing } from "../../markdown/domUtils";
 
 describe("MarkdownDiffProvider - Edge Cases", () => {
   let provider: MarkdownDiffProvider;
@@ -217,5 +219,109 @@ describe("MarkdownDiffProvider - Edge Cases", () => {
       }),
       false,
     );
+  });
+
+  describe("appendClass attribute handling", () => {
+    it("should handle empty attrs and empty className", () => {
+      assert.strictEqual(appendClass("", ""), "");
+      assert.strictEqual(appendClass(' id="t1"', ""), ' id="t1"');
+      assert.strictEqual(appendClass("", "diff-col-del"), ' class="diff-col-del"');
+    });
+
+    it("should prepend class when existing double-quoted class exists", () => {
+      assert.strictEqual(
+        appendClass(' class="existing"', "diff-col-ins"),
+        ' class="diff-col-ins existing"',
+      );
+    });
+
+    it("should prepend class when existing single-quoted class exists", () => {
+      assert.strictEqual(
+        appendClass(" class='existing'", "diff-col-ins"),
+        " class='diff-col-ins existing'",
+      );
+    });
+
+    it("should not confuse data-class with class attribute", () => {
+      const result = appendClass(' data-class="custom" align="center"', "diff-col-del");
+      assert.ok(result.includes('class="diff-col-del"'));
+      assert.ok(result.includes('data-class="custom"'));
+      assert.strictEqual(result.includes('data-class="diff-col-del'), false);
+    });
+
+    it("should not match class attribute string inside another attribute value", () => {
+      const attrs = ' data-template="<div class=\\"nested-icon\\">" align="center"';
+      const result = appendClass(attrs, "diff-col-ins");
+      assert.ok(result.includes('class="diff-col-ins"'));
+      assert.ok(result.includes('data-template="<div class=\\"nested-icon\\">"'));
+      assert.strictEqual(result.includes('nested-icon diff-col-ins'), false);
+    });
+  });
+
+  describe("domUtils findClosing edge cases", () => {
+    it("should find closing tag for simple element", () => {
+      const html = "<div>Hello World</div>";
+      const end = findClosing(html, 0, "div");
+      assert.strictEqual(end, html.length);
+    });
+
+    it("should find closing tag for nested elements with same tag name", () => {
+      const html = "<div>Outer <div>Inner</div> More Outer</div> Tail";
+      const end = findClosing(html, 0, "div");
+      assert.strictEqual(end, "<div>Outer <div>Inner</div> More Outer</div>".length);
+    });
+
+    it("should handle self-closing target element correctly", () => {
+      const html = '<svg width="24" height="24"/> Following text';
+      const end = findClosing(html, 0, "svg");
+      assert.strictEqual(end, '<svg width="24" height="24"/>'.length);
+    });
+
+    it("should not miscount self-closing child elements inside parent", () => {
+      const html = '<div>Before <div class="self-closing-child"/> After</div> Tail';
+      const end = findClosing(html, 0, "div");
+      assert.strictEqual(end, '<div>Before <div class="self-closing-child"/> After</div>'.length);
+    });
+
+    it("should ignore closing tag text inside quoted attribute values", () => {
+      const html = '<div title="</div>">Content with fake closing in attribute</div> Tail';
+      const end = findClosing(html, 0, "div");
+      assert.strictEqual(
+        end,
+        '<div title="</div>">Content with fake closing in attribute</div>'.length,
+      );
+    });
+
+    it("should ignore opening tag text inside quoted attribute values of other tags", () => {
+      const html = '<div><span data-info="<div>nested</div>">Text</span> Real content</div>';
+      const end = findClosing(html, 0, "div");
+      assert.strictEqual(end, html.length);
+    });
+
+    it("should ignore tags inside HTML comments", () => {
+      const html = "<div><!-- <div>fake open</div> -->Real content</div>";
+      const end = findClosing(html, 0, "div");
+      assert.strictEqual(end, html.length);
+    });
+
+    it("should return -1 when matching closing tag is missing", () => {
+      const html = "<div>Unclosed content without closing tag";
+      const end = findClosing(html, 0, "div");
+      assert.strictEqual(end, -1);
+    });
+
+    it("should perform in linear time without backtracking on large documents", () => {
+      const depth = 500;
+      const opens = "<div>".repeat(depth);
+      const closes = "</div>".repeat(depth);
+      const html = opens + "content" + closes;
+
+      const start = Date.now();
+      const end = findClosing(html, 0, "div");
+      const elapsed = Date.now() - start;
+
+      assert.strictEqual(end, html.length);
+      assert.ok(elapsed < 200, `Expected linear time execution, took ${elapsed}ms`);
+    });
   });
 });
