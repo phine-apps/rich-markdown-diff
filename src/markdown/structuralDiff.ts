@@ -27,6 +27,54 @@ import { diffTables } from "./tableDiff";
 import { findClosing } from "./domUtils";
 
 /**
+ * Linear check: is `s` a run of one-or-more complete block-level elements
+ * separated only by whitespace? Each paired block is consumed via depth
+ * tracking (`findClosing`), so nested blocks
+ * (e.g. `<blockquote><ul>...</ul></blockquote>`) are treated as a single unit
+ * rather than being cut short at the first inner close tag. Used instead of the
+ * catastrophic `(BLOCK(?:\s*BLOCK)*)` regex form, which backtracked
+ * exponentially (O(2^n)) when an <ins>/<del> region wrapped a long block run.
+ */
+function isBlockLevelRun(
+  s: string,
+  blockTags: string,
+  selfClosingTags: string,
+): boolean {
+  const openBlock = new RegExp(`<(${blockTags})\\b[^>]*>`, "iy");
+  const selfClosing = new RegExp(`<(?:${selfClosingTags})\\b[^>]*\\/?>`, "iy");
+  let i = 0;
+  let seen = false;
+  while (i < s.length) {
+    while (i < s.length && /\s/.test(s[i])) i++;
+    if (i >= s.length) break;
+
+    // Self-closing block (e.g. <hr>): consume in place.
+    selfClosing.lastIndex = i;
+    const sc = selfClosing.exec(s);
+    if (sc && sc.index === i) {
+      i = selfClosing.lastIndex;
+      seen = true;
+      continue;
+    }
+
+    // Paired block: find its matching close via depth tracking so nested
+    // same/other block tags inside it are skipped correctly.
+    openBlock.lastIndex = i;
+    const ob = openBlock.exec(s);
+    if (!ob || ob.index !== i) {
+      return false;
+    }
+    const end = findClosing(s, i, ob[1]);
+    if (end === -1) {
+      return false;
+    }
+    i = end;
+    seen = true;
+  }
+  return seen;
+}
+
+/**
  * Main entrance for computing granular HTML diffs.
  */
 export function diffHtmlFragments(
@@ -1691,17 +1739,22 @@ export function consolidateBlockDiffs(html: string): string {
   const blockTags =
     "table|ul|ol|dl|blockquote|div|h1|h2|h3|h4|h5|h6|section|svg|pre";
   const selfClosingTags = "hr";
-  const blockElementPattern = `(?:<(?:${blockTags})[^>]*>[\\s\\S]*?<\\/(?:${blockTags})>|<(?:${selfClosingTags})[^>]*\\/?>)`;
 
-  const fullWrapRegex = new RegExp(
-    `(<(ins|del)[^>]*>)\\s*(${blockElementPattern}(?:\\s*${blockElementPattern})*)\\s*(<\\/\\2>)`,
-    "gi",
-  );
+  // Match any ins/del region with a lazy inner (linear scan), then validate in
+  // the callback that its content is a run of complete block-level elements.
+  // The previous `(BLOCK(?:\s*BLOCK)*)` form backtracked catastrophically
+  // (O(2^n)) when an ins/del region wrapped a long run of sibling blocks,
+  // freezing the extension host on documents with large multi-block edits.
+  const fullWrapRegex = /(<(ins|del)\b[^>]*>)([\s\S]*?)(<\/\2>)/gi;
 
   result = result.replace(
     fullWrapRegex,
-    (match, openTag, type, content, closeTag) => {
+    (match, openTag, type, inner, closeTag) => {
       if (match.includes('class="diff-block"')) {
+        return match;
+      }
+      const content = inner.trim();
+      if (!content || !isBlockLevelRun(content, blockTags, selfClosingTags)) {
         return match;
       }
       const tagWithClass = openTag.includes("class=")
