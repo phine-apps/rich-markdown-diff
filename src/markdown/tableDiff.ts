@@ -454,14 +454,106 @@ export function renderMergedTable(
 
 /**
  * Appends a class to an existing attributes string.
+ * Uses a single-pass scanner to safely identify top-level class attributes
+ * without misidentifying class strings inside other attribute values.
  */
 export function appendClass(attrs: string, className: string): string {
   if (!className) {
     return attrs;
   }
-  if (attrs.includes('class="')) {
-    return attrs.replace('class="', `class="${className} `);
-  } else {
-    return ` class="${className}"${attrs}`;
+
+  let i = 0;
+  const len = attrs.length;
+
+  while (i < len) {
+    // Skip leading whitespace
+    while (i < len && /\s/.test(attrs[i])) {
+      i++;
+    }
+    if (i >= len) {
+      break;
+    }
+
+    const attrStart = i;
+    // Read attribute name until '=', whitespace, or end
+    while (i < len && !/[\s=>/]/.test(attrs[i])) {
+      i++;
+    }
+
+    if (attrStart === i) {
+      // Advance past non-attribute characters to prevent stalling
+      i++;
+      continue;
+    }
+
+    const attrName = attrs.substring(attrStart, i);
+
+    // Skip whitespace before '='
+    while (i < len && /\s/.test(attrs[i])) {
+      i++;
+    }
+
+    if (i < len && attrs[i] === "=") {
+      i++; // Skip '='
+      // Skip whitespace after '='
+      while (i < len && /\s/.test(attrs[i])) {
+        i++;
+      }
+
+      if (i < len) {
+        const quote = attrs[i];
+        if (quote === '"' || quote === "'") {
+          const valStart = i + 1;
+          i++; // Skip opening quote
+          while (i < len && attrs[i] !== quote) {
+            if (attrs[i] === "\\" && i + 1 < len) {
+              i += 2; // Skip escaped character inside quotes
+              continue;
+            }
+            i++;
+          }
+          const valEnd = i;
+          if (i < len) {
+            i++; // Skip closing quote
+          }
+
+          if (attrName.toLowerCase() === "class") {
+            const existingVal = attrs.substring(valStart, valEnd).trim();
+            const newVal = `${className}${existingVal ? " " + existingVal : ""}`;
+            return (
+              attrs.substring(0, valStart) +
+              newVal +
+              attrs.substring(valEnd)
+            );
+          }
+        } else {
+          // Unquoted attribute value
+          const valStart = i;
+          while (i < len && !/\s/.test(attrs[i])) {
+            i++;
+          }
+          const valEnd = i;
+          if (attrName.toLowerCase() === "class") {
+            const existingVal = attrs.substring(valStart, valEnd).trim();
+            const newVal = `"${className}${existingVal ? " " + existingVal : ""}"`;
+            return (
+              attrs.substring(0, attrStart) +
+              `class=${newVal}` +
+              attrs.substring(valEnd)
+            );
+          }
+        }
+      }
+    } else if (attrName.toLowerCase() === "class") {
+      // Boolean class attribute without value
+      return (
+        attrs.substring(0, attrStart) +
+        `class="${className}"` +
+        attrs.substring(i)
+      );
+    }
   }
+
+  // Otherwise, prepend the class attribute
+  return ` class="${className}"${attrs.startsWith(" ") ? attrs : (attrs ? " " + attrs : "")}`;
 }

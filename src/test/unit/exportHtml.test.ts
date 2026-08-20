@@ -2,6 +2,7 @@ import * as assert from "assert";
 import {
   extractLocalFsPath,
   getMimeType,
+  isAllowedAsset,
   prepareExportHtml,
 } from "../../exportHtml";
 
@@ -42,9 +43,28 @@ describe("Export HTML Module", () => {
       assert.strictEqual(extractLocalFsPath(uri), "/Users/test/image.png");
     });
 
-    it("should return undefined for non-file URLs", () => {
+    it("should return undefined for non-file URLs and null bytes", () => {
       assert.strictEqual(extractLocalFsPath("https://example.com/image.png"), undefined);
       assert.strictEqual(extractLocalFsPath("data:image/png;base64,..."), undefined);
+      assert.strictEqual(extractLocalFsPath("file:///path/to/test\0.png"), undefined);
+    });
+  });
+
+  describe("isAllowedAsset", () => {
+    it("should allow valid image and font extensions", () => {
+      assert.strictEqual(isAllowedAsset("/path/to/image.png"), true);
+      assert.strictEqual(isAllowedAsset("/path/to/image.SVG"), true);
+      assert.strictEqual(isAllowedAsset("/path/to/font.woff2"), true);
+      assert.strictEqual(isAllowedAsset("/path/to/photo.jpg"), true);
+    });
+
+    it("should reject sensitive or non-asset files", () => {
+      assert.strictEqual(isAllowedAsset("/etc/passwd"), false);
+      assert.strictEqual(isAllowedAsset("/Users/test/.env"), false);
+      assert.strictEqual(isAllowedAsset("/Users/test/.ssh/id_rsa"), false);
+      assert.strictEqual(isAllowedAsset("/Users/test/script.sh"), false);
+      assert.strictEqual(isAllowedAsset("/Users/test/app.ts"), false);
+      assert.strictEqual(isAllowedAsset("/path/to/image.png\0.txt"), false);
     });
   });
 
@@ -57,6 +77,12 @@ describe("Export HTML Module", () => {
       assert.strictEqual(getMimeType("test.gif"), "image/gif");
       assert.strictEqual(getMimeType("test.webp"), "image/webp");
       assert.strictEqual(getMimeType("test.woff2"), "font/woff2");
+    });
+
+    it("should return undefined for unknown or disallowed extensions", () => {
+      assert.strictEqual(getMimeType("passwd"), undefined);
+      assert.strictEqual(getMimeType("secret.env"), undefined);
+      assert.strictEqual(getMimeType("script.js"), undefined);
     });
   });
 
@@ -151,6 +177,45 @@ describe("Export HTML Module", () => {
 
       // Should keep original URL if reading fails
       assert.ok(result.includes("https://file%2B.vscode-resource.vscode-cdn.net/Users/missing/image.png"));
+    });
+
+    it("should not replace image filename text occurrences in markdown body", async () => {
+      const uri = "https://file%2B.vscode-resource.vscode-cdn.net/Users/test/logo.png";
+      const mockHtml = `
+<p>Please refer to logo.png or ${uri} for details.</p>
+<img src="${uri}" alt="logo.png">
+`;
+      const pngContent = Buffer.from("fake-logo-png");
+      const result = await prepareExportHtml(mockHtml, {
+        readFile: async () => pngContent,
+      });
+
+      const expectedBase64 = pngContent.toString("base64");
+      assert.ok(result.includes(`src="data:image/png;base64,${expectedBase64}"`));
+      assert.ok(result.includes(`alt="logo.png"`));
+      assert.ok(result.includes(`<p>Please refer to logo.png or ${uri} for details.</p>`));
+    });
+
+    it("should reject inlining of non-asset or sensitive files like .env or /etc/passwd", async () => {
+      const sensitiveUri = "file:///etc/passwd";
+      const envUri = "file:///Users/test/.env";
+      const mockHtml = `
+<img src="${sensitiveUri}">
+<img src="${envUri}">
+`;
+      let readAttempted = false;
+      const result = await prepareExportHtml(mockHtml, {
+        readFile: async () => {
+          readAttempted = true;
+          return Buffer.from("SECRET_DATA");
+        },
+      });
+
+      assert.strictEqual(readAttempted, false, "readFile must not be called for non-asset files");
+      assert.ok(result.includes(`src="${sensitiveUri}"`), "Sensitive file URI should remain untouched");
+      assert.ok(result.includes(`src="${envUri}"`), "Env file URI should remain untouched");
+      assert.strictEqual(result.includes("data:application/octet-stream"), false);
+      assert.strictEqual(result.includes("SECRET_DATA"), false);
     });
   });
 });
