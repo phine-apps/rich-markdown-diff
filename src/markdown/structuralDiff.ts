@@ -25,6 +25,12 @@
 import * as crypto from "crypto";
 import { diffTables } from "./tableDiff";
 import { findClosing } from "./domUtils";
+import {
+  computeMermaidDiff,
+  computeMermaidDiffPair,
+  isFlowchartMermaid,
+} from "./mermaidDiff";
+import { escapeHtml } from "./sanitizer";
 
 const BLOCK_TAGS =
   "table|ul|ol|dl|blockquote|div|h1|h2|h3|h4|h5|h6|section|svg|pre";
@@ -1651,13 +1657,52 @@ export function refineBlockDiffs(
         attributesMatch && attributesMatch[1] ? attributesMatch[1] : "";
 
       // EXCEPTION: Do not re-diff the inside of specialized blocks like Mermaid or GitHub Alerts.
-      // For Mermaid: Preserve separate <del> (original) and <ins> (modified) blocks for split/inline view.
-      // For Alerts: It often causes redundant nesting (double vertical bars).
+      // For Mermaid Flowcharts: Compute semantic diff and inject element-level styles & ghost outlines.
+      // For Alerts & non-flowchart Mermaid: Preserve separate <del> and <ins> blocks to prevent layout issues.
       if (
         /class=["'][^"']*(?:mermaid|markdown-alert|katex)[^"']*["']/i.test(
           attributes,
         )
       ) {
+        if (/class=["'][^"']*mermaid[^"']*["']/i.test(attributes)) {
+          const unescapeHtml = (str: string) =>
+            str
+              .replace(/<[^>]+>/g, "")
+              .replace(/&lt;/g, "<")
+              .replace(/&gt;/g, ">")
+              .replace(/&quot;/g, '"')
+              .replace(/&#39;/g, "'")
+              .replace(/&amp;/g, "&");
+
+          const oldCode = unescapeHtml(delInner).trim();
+          const newCode = unescapeHtml(insInner).trim();
+
+          if (isFlowchartMermaid(oldCode) || isFlowchartMermaid(newCode)) {
+            const { oldMermaid, newMermaid } = computeMermaidDiffPair(
+              oldCode,
+              newCode,
+            );
+            const escapedOld = escapeHtml(oldMermaid);
+            const escapedNew = escapeHtml(newMermaid);
+
+            const delAttrsMatch = delWrapper.match(
+              /<del[^>]*>\s*<[a-z1-6]+(\s+[^>]*)?>/i,
+            );
+            const delAttrs =
+              delAttrsMatch && delAttrsMatch[1] ? delAttrsMatch[1] : "";
+            const updatedDelAttrs = delAttrs.replace(
+              /data-original-content=(?:"[^"]*"|'[^']*'|[^\s>]+)/i,
+              `data-original-content="${escapedOld}"`,
+            );
+
+            const updatedInsAttrs = attributes.replace(
+              /data-original-content=(?:"[^"]*"|'[^']*'|[^\s>]+)/i,
+              `data-original-content="${escapedNew}"`,
+            );
+
+            return `<del class="diffdel diff-block"><${delTag}${updatedDelAttrs}>\n${escapedOld}\n</${delTag}></del><ins class="diffins diff-block"><${insTag}${updatedInsAttrs}>\n${escapedNew}\n</${insTag}></ins>`;
+          }
+        }
         return match;
       }
 
