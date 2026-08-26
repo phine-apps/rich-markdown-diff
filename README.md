@@ -7,13 +7,14 @@ A professional VS Code extension for visual Markdown comparison. Compare rendere
 ## Key Features
 
 - **Visual Diff**: Compare rendered HTML side-by-side or inline instead of raw source code.
-- ⚔️ **Visual Conflict Resolver**: Resolve Git merge conflicts (`<<<<<<<`, `|||||||`, `=======`, `>>>>>>>`) in rendered Markdown with an interactive 3-Way Merge View (`Accept Mine`, `Accept Theirs`, `Accept Both`).
+- **Visual Conflict Resolver**: Resolve Git merge conflicts (`<<<<<<<`, `|||||||`, `=======`, `>>>>>>>`) in rendered Markdown with an interactive 3-Way Merge View (`Accept Mine`, `Accept Theirs`, `Accept Both`).
+- **Semantic Mermaid Diff**: Element-level diff highlighting for Mermaid flowcharts. Added, deleted, and modified nodes and edges are dynamically color-coded with ghost outlines for deleted elements.
 - **Git Integration**: Compare changes directly from the VS Code Source Control view (Workspace, Staged, or HEAD).
 - **Git Blame**: Hover over any line in the diff view to instantly see its commit author and history.
 - **Interactive Image Diff**: Compare visual changes in images using "Swipe" and "Onion Skin" comparison modes.
 - **Quick Edit**: Modify image paths and frontmatter metadata directly within the preview panels.
 - **Clipboard Compare**: Instantly compare any active Markdown file against your clipboard contents.
-- 📤 **HTML Export**: Save the entire diff view as a standalone HTML file. It preserves custom styles and client-side interactions, making it perfect for offline sharing and peer reviews in standard web browsers.
+- **HTML Export**: Save the entire diff view as a standalone HTML file. It preserves custom styles and client-side interactions, making it perfect for offline sharing and peer reviews in standard web browsers.
 
 ## Supported Extensions
 
@@ -22,7 +23,7 @@ A professional VS Code extension for visual Markdown comparison. Compare rendere
 | **MDX / Custom** | Native diffing for MDX, Docusaurus, and Astro Starlight components (Tabs, Steps, Badges, Cards, and Admonitions). |
 | **Marp** | Render and diff slide decks with full theme support. |
 | **Math** | High-quality KaTeX rendering for formulas. |
-| **Mermaid** | Flowcharts, sequence diagrams, and Gantt charts with VS Code theme-aware rendering. |
+| **Mermaid** | Flowcharts with element-level diff highlighting, plus sequence diagrams and Gantt charts with VS Code theme-aware rendering. |
 | **Obsidian** | Native support for Tags (`#tag`) and Transclusions (`![[link]]`). |
 | **Alerts** | GitHub-style `[!NOTE]`, `[!WARNING]`, etc. |
 | **Structure** | Robust diffing for Tables, Nested Lists, Footnotes, and block-level math/code changes. |

@@ -87,137 +87,145 @@ c-6,0,-10,-1,-12,-3s-194,-422,-194,-422s-65,47,-65,47z
 M834 80h400000v40h-400000z"></path></svg></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.190845em"><span></span></span></span></span></span></span></span></span></span></p>
 <ins class="diffins diff-block"><p data-line="74" data-line-end="75">New equation added:</p></ins><ins class="diffins diff-block"><p class="katex-block" data-line="76" data-line-end="79"><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><munderover><mo>∑</mo><mrow><mi>i</mi><mo>=</mo><mn>1</mn></mrow><mi>n</mi></munderover><mi>i</mi><mo>=</mo><mfrac><mrow><mi>n</mi><mo>(</mo><mi>n</mi><mo>+</mo><mn>1</mn><mo>)</mo></mrow><mn>2</mn></mfrac></mrow><annotation encoding="application/x-tex">\sum_{i=1}^{n} i = \frac{n(n+1)}{2}
 </annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:2.929066em;vertical-align:-1.277669em"></span><span class="mop op-limits"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.6513970000000002em"><span style="top:-1.872331em;margin-left:0em"><span class="pstrut" style="height:3.05em"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">i</span><span class="mrel mtight">=</span><span class="mord mtight">1</span></span></span></span><span style="top:-3.050005em"><span class="pstrut" style="height:3.05em"></span><span><span class="mop op-symbol large-op">∑</span></span></span><span style="top:-4.3000050000000005em;margin-left:0em"><span class="pstrut" style="height:3.05em"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">n</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.277669em"><span></span></span></span></span></span><span class="mspace" style="margin-right:0.16666666666666666em"></span><span class="mord mathnormal">i</span><span class="mspace" style="margin-right:0.2777777777777778em"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2777777777777778em"></span></span><span class="base"><span class="strut" style="height:2.113em;vertical-align:-0.686em"></span><span class="mord"><span class="mopen nulldelimiter"></span><span class="mfrac"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.427em"><span style="top:-2.314em"><span class="pstrut" style="height:3em"></span><span class="mord"><span class="mord">2</span></span></span><span style="top:-3.23em"><span class="pstrut" style="height:3em"></span><span class="frac-line" style="border-bottom-width:0.04em"></span></span><span style="top:-3.677em"><span class="pstrut" style="height:3em"></span><span class="mord"><span class="mord mathnormal">n</span><span class="mopen">(</span><span class="mord mathnormal">n</span><span class="mspace" style="margin-right:0.2222222222222222em"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222222222222222em"></span><span class="mord">1</span><span class="mclose">)</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.686em"><span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span></span></span></span></span></p></ins><h2 data-line="80" data-line-end="81">Mermaid Diagrams</h2>
-<del class="diffmod diff-block"><div class="mermaid" data-line="72" data-line-end="78" data-original-content="graph TD;
-    A--&gt;B;
-    B--&gt;C;
-    C--&gt;D;
-">
-graph TD;
-    A--&gt;B;
-    B--&gt;C;
-    C--&gt;D;
+<del class="diffdel diff-block"><div class="mermaid" data-line="72" data-line-end="78" data-original-content="graph TD
+    Start[User Login] --&gt; B[Review Request]
+    B --&gt; LegacyStep[Manual Approval]
+    B --&gt; End[Complete]
 
-</div></del><ins class="diffmod diff-block"><div class="mermaid" data-line="82" data-line-end="94" data-original-content="graph TD
-    A[Start] --&gt; B{Decision}
-    B -- Yes --&gt; C[Process One]
-    B -- No --&gt; D[Process Two]
-    C --&gt; E[Branch A]
-    C --&gt; F[Branch B]
-    D --&gt; G[Branch C]
-    E --&gt; H[End]
-    F --&gt; H
-    G --&gt; H
-">
+%% Dynamic Diff Styles (Original)
+    style LegacyStep fill:#2c1214,stroke:#ef4444,stroke-width:2px,color:#f87171;
+    style B fill:#2e2305,stroke:#f59e0b,stroke-width:2.5px,color:#fbbf24;
+    linkStyle 1 stroke:#ef4444,stroke-width:2px;">
 graph TD
-    A[Start] --&gt; B{Decision}
-    B -- Yes --&gt; C[Process One]
-    B -- No --&gt; D[Process Two]
-    C --&gt; E[Branch A]
-    C --&gt; F[Branch B]
-    D --&gt; G[Branch C]
-    E --&gt; H[End]
-    F --&gt; H
-    G --&gt; H
+    Start[User Login] --&gt; B[Review Request]
+    B --&gt; LegacyStep[Manual Approval]
+    B --&gt; End[Complete]
 
-</div></ins><h2 data-line="95" data-line-end="96">GitHub Alerts</h2>
-<div class="markdown-alert markdown-alert-note" data-line="97" data-line-end="99"><p class="markdown-alert-title"><svg class="octicon octicon-info mr-2" width="16" height="16" aria-hidden="true"><path d="M0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8Zm8-6.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13ZM6.5 7.75A.75.75 0 0 1 7.25 7h1a.75.75 0 0 1 .75.75v2.75h.25a.75.75 0 0 1 0 1.5h-2a.75.75 0 0 1 0-1.5h.25v-2h-.25a.75.75 0 0 1-.75-.75ZM8 6a1 1 0 1 1 0-2 1 1 0 0 1 0 2Z"></path></svg>Note</p>
-<p data-line="97" data-line-end="99">This is a note alert<ins class="diffins">&nbsp;with updated content</ins>.</p></div>
-<div class="markdown-alert markdown-alert-warning" data-line="100" data-line-end="102"><p class="markdown-alert-title"><svg class="octicon octicon-alert mr-2" width="16" height="16" aria-hidden="true"><path d="M6.457 1.047c.659-1.234 2.427-1.234 3.086 0l6.082 11.378A1.75 1.75 0 0 1 14.082 15H1.918a1.75 1.75 0 0 1-1.543-2.575Zm1.763.707a.25.25 0 0 0-.44 0L1.698 13.132a.25.25 0 0 0 .22.368h12.164a.25.25 0 0 0 .22-.368Zm.53 3.996v2.5a.75.75 0 0 1-1.5 0v-2.5a.75.75 0 0 1 1.5 0ZM9 11a1 1 0 1 1-2 0 1 1 0 0 1 2 0Z"></path></svg>Warning</p><p data-line="100" data-line-end="102">This is a warning alert.</p>
+%% Dynamic Diff Styles (Original)
+    style LegacyStep fill:#2c1214,stroke:#ef4444,stroke-width:2px,color:#f87171;
+    style B fill:#2e2305,stroke:#f59e0b,stroke-width:2.5px,color:#fbbf24;
+    linkStyle 1 stroke:#ef4444,stroke-width:2px;
+</div></del><ins class="diffins diff-block"><div class="mermaid" data-line="82" data-line-end="89" data-original-content="graph TD
+    Start[User Login] --&gt; B[Automated Review]
+    B --&gt; NewFeature[Security Check]
+    NewFeature --&gt; End[Complete]
+    B --&gt; End
+
+%% Dynamic Diff Styles (Modified)
+    style NewFeature fill:#132a1c,stroke:#22c55e,stroke-width:2.5px,color:#4ade80;
+    style B fill:#2e2305,stroke:#f59e0b,stroke-width:2.5px,color:#fbbf24;
+    linkStyle 1 stroke:#22c55e,stroke-width:2px;
+    linkStyle 2 stroke:#22c55e,stroke-width:2px;">
+graph TD
+    Start[User Login] --&gt; B[Automated Review]
+    B --&gt; NewFeature[Security Check]
+    NewFeature --&gt; End[Complete]
+    B --&gt; End
+
+%% Dynamic Diff Styles (Modified)
+    style NewFeature fill:#132a1c,stroke:#22c55e,stroke-width:2.5px,color:#4ade80;
+    style B fill:#2e2305,stroke:#f59e0b,stroke-width:2.5px,color:#fbbf24;
+    linkStyle 1 stroke:#22c55e,stroke-width:2px;
+    linkStyle 2 stroke:#22c55e,stroke-width:2px;
+</div></ins><h2 data-line="90" data-line-end="91">GitHub Alerts</h2>
+<div class="markdown-alert markdown-alert-note" data-line="92" data-line-end="94"><p class="markdown-alert-title"><svg class="octicon octicon-info mr-2" width="16" height="16" aria-hidden="true"><path d="M0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8Zm8-6.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13ZM6.5 7.75A.75.75 0 0 1 7.25 7h1a.75.75 0 0 1 .75.75v2.75h.25a.75.75 0 0 1 0 1.5h-2a.75.75 0 0 1 0-1.5h.25v-2h-.25a.75.75 0 0 1-.75-.75ZM8 6a1 1 0 1 1 0-2 1 1 0 0 1 0 2Z"></path></svg>Note</p>
+<p data-line="92" data-line-end="94">This is a note alert<ins class="diffins">&nbsp;with updated content</ins>.</p></div>
+<div class="markdown-alert markdown-alert-warning" data-line="95" data-line-end="97"><p class="markdown-alert-title"><svg class="octicon octicon-alert mr-2" width="16" height="16" aria-hidden="true"><path d="M6.457 1.047c.659-1.234 2.427-1.234 3.086 0l6.082 11.378A1.75 1.75 0 0 1 14.082 15H1.918a1.75 1.75 0 0 1-1.543-2.575Zm1.763.707a.25.25 0 0 0-.44 0L1.698 13.132a.25.25 0 0 0 .22.368h12.164a.25.25 0 0 0 .22-.368Zm.53 3.996v2.5a.75.75 0 0 1-1.5 0v-2.5a.75.75 0 0 1 1.5 0ZM9 11a1 1 0 1 1-2 0 1 1 0 0 1 2 0Z"></path></svg>Warning</p><p data-line="95" data-line-end="97">This is a warning alert.</p>
 </div>
-<del class="diffdel diff-block"><h1 data-line="87" data-line-end="88">Obsidian</h1></del><p data-line="89" data-line-end="90"><span class="obsidian-tag" data-tag="mermaid"><del class="diffmod">#mermaid</del></span><del class="diffmod">&nbsp;</del><span class="obsidian-tag" data-tag="日本語"><del class="diffmod">#日本語</del></span></p><p data-line="91" data-line-end="92"></p><div class="obsidian-embed" data-page="Page"><span class="obsidian-embed-icon"><del class="diffmod">📄</del></span><span class="obsidian-embed-link"><del class="diffmod">Page</del></span></div><p></p><ins class="diffmod diff-block"><div class="markdown-alert markdown-alert-tip" data-line="103" data-line-end="105"><p class="markdown-alert-title"><svg class="octicon octicon-light-bulb mr-2" width="16" height="16" aria-hidden="true"><path d="M8 1.5c-2.363 0-4 1.69-4 3.75 0 .984.424 1.625.984 2.304l.214.253c.223.264.47.556.673.848.284.411.537.896.621 1.49a.75.75 0 0 1-1.484.211c-.04-.282-.163-.547-.37-.847a8.456 8.456 0 0 0-.542-.68c-.084-.1-.173-.205-.268-.32C3.201 7.75 2.5 6.766 2.5 5.25 2.5 2.31 4.863 0 8 0s5.5 2.31 5.5 5.25c0 1.516-.701 2.5-1.328 3.259-.095.115-.184.22-.268.319-.207.245-.383.453-.541.681-.208.3-.33.565-.37.847a.751.751 0 0 1-1.485-.212c.084-.593.337-1.078.621-1.489.203-.292.45-.584.673-.848.075-.088.147-.173.213-.253.561-.679.985-1.32.985-2.304 0-2.06-1.637-3.75-4-3.75ZM5.75 12h4.5a.75.75 0 0 1 0 1.5h-4.5a.75.75 0 0 1 0-1.5ZM6 15.25a.75.75 0 0 1 .75-.75h2.5a.75.75 0 0 1 0 1.5h-2.5a.75.75 0 0 1-.75-.75Z"></path></svg>Tip</p><p data-line="103" data-line-end="105">This is a new tip alert added in v2.</p>
+<del class="diffdel diff-block"><h1 data-line="87" data-line-end="88">Obsidian</h1></del><p data-line="89" data-line-end="90"><span class="obsidian-tag" data-tag="mermaid"><del class="diffmod">#mermaid</del></span><del class="diffmod">&nbsp;</del><span class="obsidian-tag" data-tag="日本語"><del class="diffmod">#日本語</del></span></p><p data-line="91" data-line-end="92"></p><div class="obsidian-embed" data-page="Page"><span class="obsidian-embed-icon"><del class="diffmod">📄</del></span><span class="obsidian-embed-link"><del class="diffmod">Page</del></span></div><p></p><ins class="diffmod diff-block"><div class="markdown-alert markdown-alert-tip" data-line="98" data-line-end="100"><p class="markdown-alert-title"><svg class="octicon octicon-light-bulb mr-2" width="16" height="16" aria-hidden="true"><path d="M8 1.5c-2.363 0-4 1.69-4 3.75 0 .984.424 1.625.984 2.304l.214.253c.223.264.47.556.673.848.284.411.537.896.621 1.49a.75.75 0 0 1-1.484.211c-.04-.282-.163-.547-.37-.847a8.456 8.456 0 0 0-.542-.68c-.084-.1-.173-.205-.268-.32C3.201 7.75 2.5 6.766 2.5 5.25 2.5 2.31 4.863 0 8 0s5.5 2.31 5.5 5.25c0 1.516-.701 2.5-1.328 3.259-.095.115-.184.22-.268.319-.207.245-.383.453-.541.681-.208.3-.33.565-.37.847a.751.751 0 0 1-1.485-.212c.084-.593.337-1.078.621-1.489.203-.292.45-.584.673-.848.075-.088.147-.173.213-.253.561-.679.985-1.32.985-2.304 0-2.06-1.637-3.75-4-3.75ZM5.75 12h4.5a.75.75 0 0 1 0 1.5h-4.5a.75.75 0 0 1 0-1.5ZM6 15.25a.75.75 0 0 1 .75-.75h2.5a.75.75 0 0 1 0 1.5h-2.5a.75.75 0 0 1-.75-.75Z"></path></svg>Tip</p><p data-line="98" data-line-end="100">This is a new tip alert added in v2.</p>
 </div></ins>
-<h2 data-line="106" data-line-end="107">Footnotes</h2>
-<p data-line="108" data-line-end="110">This is a sentence with a footnote<sup class="footnote-ref"><a href="#fn-new-1" id="fnref-new-1">[1]</a></sup>.<ins class="diffins">
+<h2 data-line="101" data-line-end="102">Footnotes</h2>
+<p data-line="103" data-line-end="105">This is a sentence with a footnote<sup class="footnote-ref"><a href="#fn-new-1" id="fnref-new-1">[1]</a></sup>.<ins class="diffins">
 And another sentence with a second footnote</ins><sup class="footnote-ref"><a href="#fn-new-2" id="fnref-new-2"><ins class="diffins">[2]</ins></a></sup><ins class="diffins">.</ins></p>
-<h2 data-line="115" data-line-end="116">Wikilinks</h2>
-<p data-line="117" data-line-end="119">See <a href="Related%20Page" class="wikilink" data-page="Related Page">Related Page</a> for more information<ins class="diffins">.
+<h2 data-line="110" data-line-end="111">Wikilinks</h2>
+<p data-line="112" data-line-end="114">See <a href="Related%20Page" class="wikilink" data-page="Related Page">Related Page</a> for more information<ins class="diffins">.
 Also check </ins><a href="New%20Page" class="wikilink" data-page="New Page"><ins class="diffins">New Page</ins></a><ins class="diffins">&nbsp;for recent updates</ins>.</p>
-<h2 data-line="120" data-line-end="121">Subscript and Superscript</h2>
-<p data-line="122" data-line-end="126">Water formula: H<sub>2</sub>O
+<h2 data-line="115" data-line-end="116">Subscript and Superscript</h2>
+<p data-line="117" data-line-end="121">Water formula: H<sub>2</sub>O
 <ins class="diffins">Sulfuric acid: H</ins><sub><ins class="diffins">2</ins></sub>SO<sub><ins class="diffins">4</ins></sub>
 Einstein’s equation: E = mc<sup><ins class="diffins">2</ins></sup>
 Quadratic: x<sup>2</sup>&nbsp;+ y<sup>2</sup><ins class="diffins">&nbsp;= z<sup>2</ins></sup></p>
-<h2 data-line="127" data-line-end="128">Definition Lists</h2>
+<h2 data-line="122" data-line-end="123">Definition Lists</h2>
 <dl>
-<dt data-line="129" data-line-end="130">Term 1</dt>
-<dd data-line="130" data-line-end="132">Definition for term 1<ins class="diffins">&nbsp;(updated)</ins></dd>
-<dt data-line="132" data-line-end="133">Term 2</dt>
-<dd data-line="133" data-line-end="135">Definition for term 2</dd><ins class="diffins diff-block"><dt data-line="135" data-line-end="136">Term 3 (new)</dt></ins><ins class="diffins diff-block"><dd data-line="136" data-line-end="138">Definition for the new term</dd></ins>
+<dt data-line="124" data-line-end="125">Term 1</dt>
+<dd data-line="125" data-line-end="127">Definition for term 1<ins class="diffins">&nbsp;(updated)</ins></dd>
+<dt data-line="127" data-line-end="128">Term 2</dt>
+<dd data-line="128" data-line-end="130">Definition for term 2</dd><ins class="diffins diff-block"><dt data-line="130" data-line-end="131">Term 3 (new)</dt></ins><ins class="diffins diff-block"><dd data-line="131" data-line-end="133">Definition for the new term</dd></ins>
 </dl>
-<h2 data-line="138" data-line-end="139">Common Block (Folding Test)</h2>
-<p data-line="140" data-line-end="141">MIT License</p>
-<p data-line="142" data-line-end="143">Copyright © 2026 Rich Markdown Diff Authors</p>
-<p data-line="144" data-line-end="150">Permission is hereby granted, free of charge, to any person obtaining a copy
+<h2 data-line="133" data-line-end="134">Common Block (Folding Test)</h2>
+<p data-line="135" data-line-end="136">MIT License</p>
+<p data-line="137" data-line-end="138">Copyright © 2026 Rich Markdown Diff Authors</p>
+<p data-line="139" data-line-end="145">Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the “Software”), to deal
 in the Software without restriction, including without limitation the rights
 to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 copies of the Software, and to permit persons to whom the Software is
 furnished to do so, subject to the following conditions:</p>
-<p data-line="151" data-line-end="153">The above copyright notice and this permission notice shall be included in all
+<p data-line="146" data-line-end="148">The above copyright notice and this permission notice shall be included in all
 copies or substantial portions of the Software.</p>
-<p data-line="154" data-line-end="161">THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+<p data-line="149" data-line-end="156">THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
 AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.</p>
-<h2 data-line="162" data-line-end="163">Image Test</h2>
-<div class="image-diff-block" data-image-diff="true" data-line="164">
+<h2 data-line="157" data-line-end="158">Image Test</h2>
+<div class="image-diff-block" data-image-diff="true" data-line="159">
         <div class="image-diff-wrapper">
           <div class="diff-image-old"><img src="img_v1.svg" alt="Icon V1" data-line="142" /></div>
-          <div class="diff-image-new"><img src="img_v2.svg" alt="Icon V2" data-line="164" /></div>
+          <div class="diff-image-new"><img src="img_v2.svg" alt="Icon V2" data-line="159" /></div>
         </div>
       </div>
-<h2 data-line="166" data-line-end="167">MDX and Custom Components</h2>
-<div class="mdx-tabs-container" data-line="168" data-line-end="169"><div class="mdx-tab-content" data-value="npm" data-label="NPM" data-default="true" data-line="169" data-line-end="170"><pre data-line="170" data-line-end="174"><code>- Install package<ins class="diffins">&nbsp;globally</ins>:
+<h2 data-line="161" data-line-end="162">MDX and Custom Components</h2>
+<div class="mdx-tabs-container" data-line="163" data-line-end="164"><div class="mdx-tab-content" data-value="npm" data-label="NPM" data-default="true" data-line="164" data-line-end="165"><pre data-line="165" data-line-end="169"><code>- Install package<ins class="diffins">&nbsp;globally</ins>:
   ```bash
   npm install <ins class="diffins">-g </ins>my-package
   ```
 </code></pre>
-</div><div class="mdx-tab-content" data-value="yarn" data-label="Yarn" data-line="175" data-line-end="176"><pre data-line="176" data-line-end="180"><code>- Install package:
+</div><div class="mdx-tab-content" data-value="yarn" data-label="Yarn" data-line="170" data-line-end="171"><pre data-line="171" data-line-end="175"><code>- Install package:
   ```bash
   yarn add my-package
   ```
-</code></pre></div><ins class="diffins diff-block"><div class="mdx-tab-content" data-value="pnpm" data-label="PNPM" data-line="181" data-line-end="182"><pre data-line="182" data-line-end="186"><code>- Install package:
+</code></pre></div><ins class="diffins diff-block"><div class="mdx-tab-content" data-value="pnpm" data-label="PNPM" data-line="176" data-line-end="177"><pre data-line="177" data-line-end="181"><code>- Install package:
   ```bash
   pnpm add my-package
   ```
 </code></pre>
-</div></ins></div><p data-line="189" data-line-end="190">Let’s test inline badges: <span class="mdx-badge mdx-badge-warning"><del class="diffmod">Caution</del><ins class="diffmod">Warning</ins></span> and <span class="mdx-badge mdx-badge-danger"><del class="diffmod">Deprecated</del><ins class="diffmod">Removed</ins></span>.</p>
-<p data-line="191" data-line-end="193">And here is a Starlight steps component:<span class="mdx-inline-fallback"><ins class="diffins">&lt;Steps /&gt;</ins></span></p>
+</div></ins></div><p data-line="184" data-line-end="185">Let’s test inline badges: <span class="mdx-badge mdx-badge-warning"><del class="diffmod">Caution</del><ins class="diffmod">Warning</ins></span> and <span class="mdx-badge mdx-badge-danger"><del class="diffmod">Deprecated</del><ins class="diffmod">Removed</ins></span>.</p>
+<p data-line="186" data-line-end="188">And here is a Starlight steps component:<span class="mdx-inline-fallback"><ins class="diffins">&lt;Steps /&gt;</ins></span></p>
 <div class="mdx-steps" data-line="165" data-line-end="166"><ol>
-<li data-line="194" data-line-end="195">Download the tool<ins class="diffins">&nbsp;(new version)</ins></li>
-<li data-line="195" data-line-end="196">Configure settings<ins class="diffins">&nbsp;securely</ins></li>
-<li data-line="196" data-line-end="199">Start running<ins class="diffins">&nbsp;the process
+<li data-line="189" data-line-end="190">Download the tool<ins class="diffins">&nbsp;(new version)</ins></li>
+<li data-line="190" data-line-end="191">Configure settings<ins class="diffins">&nbsp;securely</ins></li>
+<li data-line="191" data-line-end="194">Start running<ins class="diffins">&nbsp;the process
 </ins></li>
 </ol>
-</div><p data-line="199" data-line-end="200">Here is a Starlight Card:</p>
-<div class="mdx-card" data-line="201" data-line-end="202">
+</div><p data-line="194" data-line-end="195">Here is a Starlight Card:</p>
+<div class="mdx-card" data-line="196" data-line-end="197">
         <div class="mdx-card-header">
           <span class="mdx-card-icon mdx-codicon mdx-icon-note"></span>
           <span class="mdx-card-title">Introduction</span>
         </div>
-        <div class="mdx-card-body"><p data-line="202" data-line-end="203">Welcome to the premium card view<ins class="diffins">, now with updated content</ins>.</p>
-</div></div><p data-line="205" data-line-end="209">And a Docusaurus Admonition:
+        <div class="mdx-card-body"><p data-line="197" data-line-end="198">Welcome to the premium card view<ins class="diffins">, now with updated content</ins>.</p>
+</div></div><p data-line="200" data-line-end="204">And a Docusaurus Admonition:
 :::note Note Title
 This is standard admonition text <ins class="diffins">with updates </ins>in <del class="diffmod">v1</del><ins class="diffmod">v2</ins>.
 :::</p>
-<div class="mdx-admonition mdx-admonition-danger" data-line="210" data-line-end="211"><div class="mdx-admonition-header"><span class="mdx-admonition-icon mdx-codicon mdx-icon-danger"></span><span class="mdx-admonition-title"><ins class="diffins">Warning</ins></span></div><ins class="diffins diff-block"><div class="mdx-admonition-body"><p data-line="211" data-line-end="212">Critical warning!</p>
-</div></ins></div><p data-line="214" data-line-end="215">And a custom unknown fallback element:</p>
-<div class="mdx-fallback-card mdx-self-closing" data-line="216" data-line-end="217">
+<div class="mdx-admonition mdx-admonition-danger" data-line="205" data-line-end="206"><div class="mdx-admonition-header"><span class="mdx-admonition-icon mdx-codicon mdx-icon-danger"></span><span class="mdx-admonition-title"><ins class="diffins">Warning</ins></span></div><ins class="diffins diff-block"><div class="mdx-admonition-body"><p data-line="206" data-line-end="207">Critical warning!</p>
+</div></ins></div><p data-line="209" data-line-end="210">And a custom unknown fallback element:</p>
+<div class="mdx-fallback-card mdx-self-closing" data-line="211" data-line-end="212">
       <div class="mdx-fallback-header">
         <span class="mdx-fallback-badge">Custom Component: &lt;CustomReactComponent /&gt;</span>
       </div>
       <div class="mdx-fallback-body">
         <ul class="mdx-fallback-props"><li><code>user</code>: <code>alice</code></li><li><code>role</code>: <code><ins class="diffins">super-</ins>admin</code></li><li data-all-inserted="true"><code><ins class="diffins">theme</ins></code><ins class="diffins">: </ins><code><ins class="diffins">dark</ins></code></li></ul>
       </div>
-    </div><h2 data-line="218" data-line-end="219">Summary</h2>
-<p data-line="220" data-line-end="221">This is version <del class="diffmod">1</del><ins class="diffmod">2</ins> of the comprehensive test document<ins class="diffins">&nbsp;with modifications</ins>.</p>
+    </div><h2 data-line="213" data-line-end="214">Summary</h2>
+<p data-line="215" data-line-end="216">This is version <del class="diffmod">1</del><ins class="diffmod">2</ins> of the comprehensive test document<ins class="diffins">&nbsp;with modifications</ins>.</p>
 <hr class="footnotes-sep" />
 <section class="footnotes">
 <ol class="footnotes-list">
-<li id="fn-new-1" class="footnote-item"><p data-line="111" data-line-end="112">This is the footnote content<ins class="diffins">&nbsp;(updated). </ins><a href="#fnref-new-1" class="footnote-backref"><ins class="diffins">↩︎</ins></a></p></li><li id="fn-new-2" class="footnote-item" data-all-inserted="true"><p data-line="113" data-line-end="114"><ins class="diffins">This is a new footnote added in v2</ins>. <a href="#fnref-new-2" class="footnote-backref">↩︎</a></p>
+<li id="fn-new-1" class="footnote-item"><p data-line="106" data-line-end="107">This is the footnote content<ins class="diffins">&nbsp;(updated). </ins><a href="#fnref-new-1" class="footnote-backref"><ins class="diffins">↩︎</ins></a></p></li><li id="fn-new-2" class="footnote-item" data-all-inserted="true"><p data-line="108" data-line-end="109"><ins class="diffins">This is a new footnote added in v2</ins>. <a href="#fnref-new-2" class="footnote-backref">↩︎</a></p>
 </li>
 </ol>
 </section>

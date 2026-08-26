@@ -851,8 +851,6 @@ export function getWebviewContent(
 
 
         ins:has(.markdown-alert), del:has(.markdown-alert),
-        ins:has(.katex-block), del:has(.katex-block),
-        ins:has(.mermaid), del:has(.mermaid),
         ins:has(.footnote-item), del:has(.footnote-item),
         ins:has(li), del:has(li),
         ins:has(pre), del:has(pre),
@@ -870,6 +868,11 @@ export function getWebviewContent(
             padding: 0 !important;
             margin: 0 !important;
             margin-bottom: var(--markdown-block-spacing);
+        }
+
+        #left-pane del:has(.mermaid),
+        #right-pane ins:has(.mermaid) {
+            background-color: transparent !important;
         }
 
         /* Optimization for Marp slides: Do not force display: block or add margins, 
@@ -1065,6 +1068,16 @@ export function getWebviewContent(
           overflow: hidden;
         }
         :is(del.diffdel.diff-block, del.diffmod.diff-block, ins.diffins.diff-block, ins.diffmod.diff-block):has(> pre) > pre {
+          margin: 0;
+          border: none;
+          border-radius: 0;
+          background-color: transparent;
+        }
+        :is(del.diffdel.diff-block, del.diffmod.diff-block, ins.diffins.diff-block, ins.diffmod.diff-block):has(> .katex-block) {
+          padding: 0;
+          overflow: hidden;
+        }
+        :is(del.diffdel.diff-block, del.diffmod.diff-block, ins.diffins.diff-block, ins.diffmod.diff-block):has(> .katex-block) > .katex-block {
           margin: 0;
           border: none;
           border-radius: 0;
@@ -1738,6 +1751,17 @@ export function getWebviewContent(
           max-width: 100%;
           height: auto;
           background: transparent;
+        }
+
+        /* Ensure node text color from inline style takes precedence over theme foreground */
+        .mermaid .node[style*="color"] text,
+        .mermaid .node[style*="color"] tspan,
+        .mermaid .node[style*="color"] foreignObject *,
+        .mermaid g[style*="color"] text,
+        .mermaid g[style*="color"] tspan,
+        .mermaid g[style*="color"] foreignObject * {
+          fill: inherit !important;
+          color: inherit !important;
         }
 
         /* Highlight the actual SVG shapes */

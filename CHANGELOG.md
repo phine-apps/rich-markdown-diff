@@ -2,6 +2,12 @@
 
 All notable changes to **Rich Markdown Diff** will be documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- **Semantic Mermaid Diff**: Element-level diff highlighting for Mermaid flowcharts with dynamic color-coding and ghost outlines for deleted elements.
+
 ## [1.5.0] - 2026-08-11
 
 ### Added in 1.5.0
