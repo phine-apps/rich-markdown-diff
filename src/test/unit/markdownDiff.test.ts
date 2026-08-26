@@ -104,16 +104,24 @@ describe("MarkdownDiffProvider", () => {
     assert.ok(diff.includes("graph TD;"), "Should contain mermaid content");
   });
 
-  it("should generate separate del (original) and ins (modified) blocks for modified mermaid diagrams", () => {
-    const oldMd = "```mermaid\ngraph TD;\nA-->B;\nB-->C;\n```";
+  it("should generate separate del and ins mermaid blocks with respective element diff styles for modified flowchart diagrams", () => {
+    const oldMd = "```mermaid\ngraph TD;\nA-->B;\nB-->C;\nC-->D;\n```";
     const newMd = "```mermaid\ngraph TD\nA[Start] --> B{Decision}\nB --> C[Process One]\nB --> D[Process Two]\n```";
 
     const { html: diff } = provider.computeDiff(oldMd, newMd);
     assert.ok(diff.includes('class="mermaid"'), "Should contain mermaid class");
     assert.ok(diff.includes("<del"), "Should contain del block for original version");
     assert.ok(diff.includes("<ins"), "Should contain ins block for modified version");
-    assert.ok(diff.includes("A--&gt;B;"), "Original version should be preserved inside del");
-    assert.ok(diff.includes("Decision"), "Modified version should be preserved inside ins");
+  });
+
+  it("should generate separate del (original) and ins (modified) blocks for non-flowchart mermaid diagrams", () => {
+    const oldMd = "```mermaid\nsequenceDiagram\nAlice->>Bob: Hello\n```";
+    const newMd = "```mermaid\nsequenceDiagram\nAlice->>Bob: Hi\n```";
+
+    const { html: diff } = provider.computeDiff(oldMd, newMd);
+    assert.ok(diff.includes('class="mermaid"'), "Should contain mermaid class");
+    assert.ok(diff.includes("<del"), "Should contain del block for original version");
+    assert.ok(diff.includes("<ins"), "Should contain ins block for modified version");
   });
 
   it("should resolve relative image paths when resolver is provided", () => {

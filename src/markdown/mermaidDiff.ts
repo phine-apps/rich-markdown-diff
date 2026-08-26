@@ -153,72 +153,32 @@ export function parseMermaidNodes(code: string): Map<string, MermaidNode> {
   }
 
   return nodes;
+}export interface MermaidDiffPair {
+  oldMermaid: string;
+  newMermaid: string;
 }
 
 /**
- * Computes semantic diff between two Mermaid diagrams (flowcharts) and injects dynamic diff styles.
+ * Computes semantic diff between two Mermaid diagrams (flowcharts) and injects dynamic diff styles
+ * for both the original (v1) and modified (v2) versions.
  */
-export function computeMermaidDiff(
+export function computeMermaidDiffPair(
   oldCode: string,
   newCode: string,
   options: MermaidDiffOptions = {}
-): string {
-  // Base colors — defined early so empty-side paths can reuse them
-  const insFill = options.insertedColor || "#e6ffec";
-  const insStroke = "#22863a";
-  const delFill = options.deletedColor || "#ffeef0";
-  const delStroke = "#d73a49";
-  const modFill = "#fffdef";
-  const modStroke = "#b08800";
+): MermaidDiffPair {
+  const insFill = options.insertedColor || "#132a1c";
+  const insStroke = "#22c55e";
+  const insText = "#4ade80";
+  const delFill = options.deletedColor || "#2c1214";
+  const delStroke = "#ef4444";
+  const delText = "#f87171";
+  const modFill = "#2e2305";
+  const modStroke = "#f59e0b";
+  const modText = "#fbbf24";
 
-  // [MERMAID-02] When one side is empty, style ALL elements on the non-empty side
-  // (all-inserted green or all-deleted red) rather than returning the code unstyled.
-  if (!oldCode.trim()) {
-    if (!isFlowchartMermaid(newCode)) {
-      return newCode;
-    }
-    const newNodes = parseMermaidNodes(newCode);
-    const newEdges = parseMermaidEdges(newCode);
-    let result = newCode.trim();
-    const styleLines = ["\n%% Dynamic Diff Styles (all inserted)"];
-    for (const id of newNodes.keys()) {
-      styleLines.push(`    style ${id} fill:${insFill},stroke:${insStroke},stroke-width:2px;`);
-    }
-    newEdges.forEach((_edge, idx) => {
-      styleLines.push(`    linkStyle ${idx} stroke:${insStroke},stroke-width:2px;`);
-    });
-    if (styleLines.length > 1) { result += "\n" + styleLines.join("\n"); }
-    return result;
-  }
-  if (!newCode.trim()) {
-    if (!isFlowchartMermaid(oldCode)) {
-      return oldCode;
-    }
-    const oldNodes = parseMermaidNodes(oldCode);
-    const oldEdges = parseMermaidEdges(oldCode);
-    let result = oldCode.trim();
-    const ghostLines = ["\n%% Ghost definitions for deleted elements (all deleted)"];
-    const styleLines = ["\n%% Dynamic Diff Styles (all deleted)"];
-    for (const [id, node] of oldNodes) {
-      const labelStr = node.label ? `["${node.label}"]` : "";
-      ghostLines.push(`    ${id}${labelStr}`);
-      styleLines.push(
-        `    style ${id} fill:${delFill},stroke:${delStroke},stroke-width:1px,stroke-dasharray:5 5,opacity:0.75;`
-      );
-    }
-    oldEdges.forEach((_edge, idx) => {
-      styleLines.push(
-        `    linkStyle ${idx} stroke:${delStroke},stroke-width:1px,stroke-dasharray:3 3,opacity:0.75;`
-      );
-    });
-    if (ghostLines.length > 1) { result += "\n" + ghostLines.join("\n"); }
-    if (styleLines.length > 1) { result += "\n" + styleLines.join("\n"); }
-    return result;
-  }
-
-  // Guard: Only process flowcharts / graph diagrams
   if (!isFlowchartMermaid(newCode) && !isFlowchartMermaid(oldCode)) {
-    return newCode;
+    return { oldMermaid: oldCode, newMermaid: newCode };
   }
 
   const oldNodes = parseMermaidNodes(oldCode);
@@ -248,76 +208,78 @@ export function computeMermaidDiff(
     }
   }
 
-  // (Colors already defined above)
-
-  let resultMermaid = newCode.trim();
-
-  // 1. Append ghost definitions for deleted nodes & edges
-  const ghostLines: string[] = [];
-  if (removedNodeIds.length > 0) {
-    ghostLines.push("\n%% Ghost definitions for deleted elements");
-    for (const id of removedNodeIds) {
-      const oldNode = oldNodes.get(id)!;
-      const labelStr = oldNode.label ? `["${oldNode.label}"]` : "";
-      ghostLines.push(`    ${id}${labelStr}`);
-    }
-  }
-
-  // Check deleted edges
-  const removedEdges: MermaidEdge[] = [];
-  for (const oldEdge of oldEdges) {
-    const isPresentInNew = newEdges.some(
-      (e) => e.from === oldEdge.from && e.to === oldEdge.to
-    );
-    if (!isPresentInNew) {
-      removedEdges.push(oldEdge);
-      ghostLines.push(`    ${oldEdge.from} -.-> ${oldEdge.to}`);
-    }
-  }
-
-  if (ghostLines.length > 0) {
-    resultMermaid += "\n" + ghostLines.join("\n");
-  }
-
-  // 2. Inject Node Styles
-  const styleLines: string[] = ["\n%% Dynamic Diff Styles"];
-
-  for (const id of addedNodeIds) {
-    styleLines.push(
-      `    style ${id} fill:${insFill},stroke:${insStroke},stroke-width:2px;`
-    );
-  }
+  // 1. Build oldMermaid (Left Pane): highlight deleted (red) & modified (amber)
+  let oldMermaid = oldCode.trim();
+  const oldStyleLines: string[] = ["\n%% Dynamic Diff Styles (Original)"];
 
   for (const id of removedNodeIds) {
-    styleLines.push(
-      `    style ${id} fill:${delFill},stroke:${delStroke},stroke-width:1px,stroke-dasharray:5 5,opacity:0.75;`
+    oldStyleLines.push(
+      `    style ${id} fill:${delFill},stroke:${delStroke},stroke-width:2px,color:${delText};`
     );
   }
 
   for (const id of modifiedNodeIds) {
-    styleLines.push(
-      `    style ${id} fill:${modFill},stroke:${modStroke},stroke-width:2px;`
+    oldStyleLines.push(
+      `    style ${id} fill:${modFill},stroke:${modStroke},stroke-width:2.5px,color:${modText};`
     );
   }
 
-  // 3. Inject Link Styles (Edges)
-  newEdges.forEach((edge, idx) => {
-    const isAdded = !oldEdges.some((e) => e.from === edge.from && e.to === edge.to);
-    if (isAdded) {
-      styleLines.push(`    linkStyle ${idx} stroke:${insStroke},stroke-width:2px;`);
+  oldEdges.forEach((edge, idx) => {
+    const isRemoved = !newEdges.some(
+      (e) => e.from === edge.from && e.to === edge.to
+    );
+    if (isRemoved) {
+      oldStyleLines.push(
+        `    linkStyle ${idx} stroke:${delStroke},stroke-width:2px;`
+      );
     }
   });
 
-  removedEdges.forEach((edge, offsetIdx) => {
-    const totalIdx = newEdges.length + offsetIdx;
-    styleLines.push(
-      `    linkStyle ${totalIdx} stroke:${delStroke},stroke-width:1px,stroke-dasharray:3 3,opacity:0.75;`
-    );
-  });
-
-  if (styleLines.length > 1) {
-    resultMermaid += "\n" + styleLines.join("\n");
+  if (oldStyleLines.length > 1) {
+    oldMermaid += "\n" + oldStyleLines.join("\n");
   }
 
-  return resultMermaid;
+  // 2. Build newMermaid (Right Pane): highlight added (green) & modified (amber)
+  let newMermaid = newCode.trim();
+  const newStyleLines: string[] = ["\n%% Dynamic Diff Styles (Modified)"];
+
+  for (const id of addedNodeIds) {
+    newStyleLines.push(
+      `    style ${id} fill:${insFill},stroke:${insStroke},stroke-width:2.5px,color:${insText};`
+    );
+  }
+
+  for (const id of modifiedNodeIds) {
+    newStyleLines.push(
+      `    style ${id} fill:${modFill},stroke:${modStroke},stroke-width:2.5px,color:${modText};`
+    );
+  }
+
+  newEdges.forEach((edge, idx) => {
+    const isAdded = !oldEdges.some(
+      (e) => e.from === edge.from && e.to === edge.to
+    );
+    if (isAdded) {
+      newStyleLines.push(
+        `    linkStyle ${idx} stroke:${insStroke},stroke-width:2px;`
+      );
+    }
+  });
+
+  if (newStyleLines.length > 1) {
+    newMermaid += "\n" + newStyleLines.join("\n");
+  }
+
+  return { oldMermaid, newMermaid };
+}
+
+/**
+ * Computes semantic diff between two Mermaid diagrams (flowcharts) and returns the modified diagram.
+ */
+export function computeMermaidDiff(
+  oldCode: string,
+  newCode: string,
+  options: MermaidDiffOptions = {}
+): string {
+  return computeMermaidDiffPair(oldCode, newCode, options).newMermaid;
 }
