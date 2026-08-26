@@ -1,6 +1,7 @@
 import * as assert from "assert";
 import {
   computeMermaidDiff,
+  computeMermaidDiffPair,
   parseMermaidNodes,
   parseMermaidEdges,
 } from "../../markdown/mermaidDiff";
@@ -43,9 +44,9 @@ describe("Mermaid Semantic Diff", () => {
         A --> B
         B --> C["New Node"]
     `;
-    const diff = computeMermaidDiff(oldCode, newCode);
-    assert.ok(diff.includes("style C fill:#e6ffec"), "Should style node C as inserted");
-    assert.ok(diff.includes("linkStyle 1 stroke:#22863a"), "Should style edge 1 as inserted link");
+    const { newMermaid } = computeMermaidDiffPair(oldCode, newCode);
+    assert.ok(newMermaid.includes("style C fill:#132a1c"), "Should style node C as inserted");
+    assert.ok(newMermaid.includes("linkStyle 1 stroke:#22c55e"), "Should style edge 1 as inserted link");
   });
 
   it("should inject ghost definition and deleted node style when node is removed", () => {
@@ -58,10 +59,9 @@ describe("Mermaid Semantic Diff", () => {
       graph TD
         A --> B
     `;
-    const diff = computeMermaidDiff(oldCode, newCode);
-    assert.ok(diff.includes("C[\"Old Node\"]"), "Should include ghost node definition for C");
-    assert.ok(diff.includes("style C fill:#ffeef0"), "Should style node C as deleted");
-    assert.ok(diff.includes("linkStyle 1 stroke:#d73a49"), "Should style deleted link");
+    const { oldMermaid } = computeMermaidDiffPair(oldCode, newCode);
+    assert.ok(oldMermaid.includes("style C fill:#2c1214"), "Should style node C as deleted in oldMermaid");
+    assert.ok(oldMermaid.includes("linkStyle 1 stroke:#ef4444"), "Should style deleted link in oldMermaid");
   });
 
   it("should highlight modified node when node label changes", () => {
@@ -73,8 +73,9 @@ describe("Mermaid Semantic Diff", () => {
       graph TD
         A["Updated Step"] --> B
     `;
-    const diff = computeMermaidDiff(oldCode, newCode);
-    assert.ok(diff.includes("style A fill:#fffdef"), "Should style node A as modified");
+    const { oldMermaid, newMermaid } = computeMermaidDiffPair(oldCode, newCode);
+    assert.ok(oldMermaid.includes("style A fill:#2e2305"), "Should style node A as modified in oldMermaid");
+    assert.ok(newMermaid.includes("style A fill:#2e2305"), "Should style node A as modified in newMermaid");
   });
 
   it("should not treat edge labels as node identifiers", () => {
@@ -111,8 +112,6 @@ describe("Mermaid Semantic Diff", () => {
   // --- MERMAID-01 regression tests ---
 
   it("[MERMAID-01] should NOT register subgraph group name as a node", () => {
-    // 'myGroup' appears on the `subgraph myGroup[...]` line and must not be
-    // treated as a diagram node, even though it has an explicit bracket shape.
     const code = `
       graph TD
         subgraph myGroup[My Group]
@@ -126,9 +125,6 @@ describe("Mermaid Semantic Diff", () => {
   });
 
   it("[MERMAID-01] should parse all edges in chain notation (A --> B --> C)", () => {
-    // A single line `A --> B --> C` encodes two edges: A→B and B→C.
-    // The edge parser must rewind its index so the shared node B is captured
-    // as both the 'to' of the first edge and the 'from' of the second.
     const code = `
       graph LR
         A --> B --> C
@@ -148,35 +144,31 @@ describe("Mermaid Semantic Diff", () => {
   // --- MERMAID-02 regression tests ---
 
   it("[MERMAID-02] should style all nodes/edges as inserted when oldCode is empty", () => {
-    // When the Mermaid block is brand new (no previous version), all elements
-    // should be highlighted green rather than returned unstyled.
     const newCode = `
       graph TD
         A["Start"] --> B
         B --> C["End"]
     `;
-    const diff = computeMermaidDiff("", newCode);
-    assert.ok(diff.includes("style A fill:#e6ffec"), "Node A should be styled as inserted");
-    assert.ok(diff.includes("style B fill:#e6ffec"), "Node B should be styled as inserted");
-    assert.ok(diff.includes("style C fill:#e6ffec"), "Node C should be styled as inserted");
-    assert.ok(diff.includes("linkStyle 0 stroke:#22863a"), "Edge 0 should be styled as inserted");
-    assert.ok(diff.includes("linkStyle 1 stroke:#22863a"), "Edge 1 should be styled as inserted");
+    const { newMermaid } = computeMermaidDiffPair("", newCode);
+    assert.ok(newMermaid.includes("style A fill:#132a1c"), "Node A should be styled as inserted");
+    assert.ok(newMermaid.includes("style B fill:#132a1c"), "Node B should be styled as inserted");
+    assert.ok(newMermaid.includes("style C fill:#132a1c"), "Node C should be styled as inserted");
+    assert.ok(newMermaid.includes("linkStyle 0 stroke:#22c55e"), "Edge 0 should be styled as inserted");
+    assert.ok(newMermaid.includes("linkStyle 1 stroke:#22c55e"), "Edge 1 should be styled as inserted");
   });
 
   it("[MERMAID-02] should style all nodes/edges as deleted when newCode is empty", () => {
-    // When the Mermaid block is entirely removed, all elements from the old
-    // diagram should be highlighted red with ghost definitions.
     const oldCode = `
       graph TD
         A["Start"] --> B
         B --> C["End"]
     `;
-    const diff = computeMermaidDiff(oldCode, "");
-    assert.ok(diff.includes("style A fill:#ffeef0"), "Node A should be styled as deleted");
-    assert.ok(diff.includes("style B fill:#ffeef0"), "Node B should be styled as deleted");
-    assert.ok(diff.includes("style C fill:#ffeef0"), "Node C should be styled as deleted");
-    assert.ok(diff.includes("linkStyle 0 stroke:#d73a49"), "Edge 0 should be styled as deleted");
-    assert.ok(diff.includes("linkStyle 1 stroke:#d73a49"), "Edge 1 should be styled as deleted");
+    const { oldMermaid } = computeMermaidDiffPair(oldCode, "");
+    assert.ok(oldMermaid.includes("style A fill:#2c1214"), "Node A should be styled as deleted");
+    assert.ok(oldMermaid.includes("style B fill:#2c1214"), "Node B should be styled as deleted");
+    assert.ok(oldMermaid.includes("style C fill:#2c1214"), "Node C should be styled as deleted");
+    assert.ok(oldMermaid.includes("linkStyle 0 stroke:#ef4444"), "Edge 0 should be styled as deleted");
+    assert.ok(oldMermaid.includes("linkStyle 1 stroke:#ef4444"), "Edge 1 should be styled as deleted");
   });
 
   // --- MERMAID-03 regression tests ---
@@ -217,10 +209,10 @@ describe("Mermaid Semantic Diff", () => {
         F --> H
         G --> H
     `;
-    const diff = computeMermaidDiff(oldCode, newCode);
-    assert.ok(!diff.includes("A--"), "Should not include bogus A-- node");
-    assert.ok(diff.includes("style E fill:#e6ffec"), "Should style added node E as inserted");
-    assert.ok(diff.includes("style A fill:#fffdef"), "Should style modified node A as modified");
-    assert.ok(diff.includes("C -.-> D"), "Should include ghost edge for removed C-->D");
+    const { oldMermaid, newMermaid } = computeMermaidDiffPair(oldCode, newCode);
+    assert.ok(!newMermaid.includes("A--"), "Should not include bogus A-- node");
+    assert.ok(newMermaid.includes("style E fill:#132a1c"), "Should style added node E as inserted");
+    assert.ok(newMermaid.includes("style A fill:#2e2305"), "Should style modified node A as modified in newMermaid");
+    assert.ok(oldMermaid.includes("style A fill:#2e2305"), "Should style modified node A as modified in oldMermaid");
   });
 });
