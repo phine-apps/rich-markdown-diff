@@ -71,10 +71,10 @@ $$
 ## Mermaid Diagrams
 
 ```mermaid
-graph TD;
-    A-->B;
-    B-->C;
-    C-->D;
+graph TD
+    Start[User Login] --> B[Review Request]
+    B --> LegacyStep[Manual Approval]
+    B --> End[Complete]
 ```
 
 ## GitHub Alerts
