@@ -45,21 +45,22 @@ export async function loadMarp() {
  */
 export function cleanMarpHtml(html: string): { cleaned: string; scripts: string[] } {
   const scripts: string[] = [];
-  const cleaned = html.replace(
-    /<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi,
-    (match) => {
-      const content = match.replace(/^<script.*?>/i, "").replace(/<\/script>$/i, "");
-      if (content.trim()) {
-        scripts.push(content);
-      }
-      return "";
-    },
-  );
+  const scriptRegex = /<\s*script\b[^>]*>([\s\S]*?)<\/\s*script\b[^>]*>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = scriptRegex.exec(html)) !== null) {
+    const content = m[1].trim();
+    if (content) {
+      scripts.push(content);
+    }
+  }
 
-  let fullyCleaned = cleaned.replace(
-    /<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi,
-    "",
-  );
+  let fullyCleaned = html;
+  let prevCleaned: string;
+  const tagRemoveRegex = /<\s*(?:script|style)\b[^>]*>[\s\S]*?<\/\s*(?:script|style)\b[^>]*>/gi;
+  do {
+    prevCleaned = fullyCleaned;
+    fullyCleaned = fullyCleaned.replace(tagRemoveRegex, "");
+  } while (fullyCleaned !== prevCleaned);
 
   // Strip data-line from SVGs and Sections to fix Marp slide offsets and Quick Edit targeting
   fullyCleaned = fullyCleaned.replace(/<(svg|section)\b[^>]*\sdata-line="[^"]*"[^>]*>/gi, (match) => {
