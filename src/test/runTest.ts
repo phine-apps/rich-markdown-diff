@@ -77,6 +77,9 @@ async function main() {
     await fs.mkdir(userDataDir, { recursive: true });
     await fs.mkdir(extensionsDir, { recursive: true });
 
+    // Prevent Electron from running as Node CLI when running inside VS Code / sub-shells
+    delete process.env.ELECTRON_RUN_AS_NODE;
+
     // Download VS Code, unzip it and run the integration test
     await runTests({
       extensionDevelopmentPath,
