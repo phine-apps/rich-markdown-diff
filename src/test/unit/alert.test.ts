@@ -23,6 +23,7 @@
  */
 
 import { MarkdownDiffProvider } from "../../markdownDiff";
+import { stripHtmlTags } from "../../markdown/domUtils";
 import * as assert from "assert";
 
 describe("GitHub Alert Tests", () => {
@@ -145,7 +146,7 @@ describe("GitHub Alert Tests", () => {
     const { html: diffHtml } = provider.computeDiff(oldMd, newMd);
     
     // Ensure the updated text is present in the final HTML output
-    const cleanText = diffHtml.replace(/<[^>]+>/g, "").replace(/&nbsp;/g, " ");
+    const cleanText = stripHtmlTags(diffHtml).replace(/&nbsp;/g, " ");
     assert.ok(cleanText.includes("This is a note alert with updated content."), "HTML should include the updated text");
     
     // Ensure there are no duplicate/nested alert divs

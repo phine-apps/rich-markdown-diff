@@ -24,6 +24,7 @@
 
 import * as assert from "assert";
 import { MarkdownDiffProvider } from "../../markdownDiff";
+import { stripHtmlTags } from "../../markdown/domUtils";
 
 describe("MarkdownDiffProvider", () => {
   let provider: MarkdownDiffProvider;
@@ -1339,9 +1340,10 @@ describe("MarkdownDiffProvider", () => {
     // The old heading text must appear as one contiguous string inside a
     // single <h3>, not split across multiple heading elements.
     const h3s = diff.match(/<h3[^>]*>[\s\S]*?<\/h3>/g) || [];
-    const leftVisible = h3s.map((h) =>
-      h.replace(/<ins[^>]*>[\s\S]*?<\/ins>/g, "").replace(/<[^>]+>/g, ""),
-    );
+    const leftVisible = h3s.map((h) => {
+      const withoutIns = h.replace(/<ins[^>]*>[\s\S]*?<\/ins>/g, "");
+      return stripHtmlTags(withoutIns);
+    });
 
     // The old heading text must appear mostly intact inside a heading
     const combined = leftVisible.join(" ");
@@ -1689,11 +1691,9 @@ describe("MarkdownDiffProvider", () => {
       const hasHeading = /<h[1-6][\s>]/i.test(b);
       // Check for a <p> tag or substantial plain text alongside the heading
       const hasPara = /<p[\s>]/i.test(b);
-      const textOnly = b.replace(/<[^>]+>/g, "").replace(/\s/g, "");
-      const headingText = (b.match(/<h[1-6][^>]*>[\s\S]*?<\/h[1-6]>/gi) || [])
-        .join("")
-        .replace(/<[^>]+>/g, "")
-        .replace(/\s/g, "");
+      const textOnly = stripHtmlTags(b).replace(/\s/g, "");
+      const headingHtml = (b.match(/<h[1-6][^>]*>[\s\S]*?<\/h[1-6]>/gi) || []).join("");
+      const headingText = stripHtmlTags(headingHtml).replace(/\s/g, "");
       const nonHeadingText = textOnly.length - headingText.length;
       return hasHeading && (hasPara || nonHeadingText > 0);
     });
