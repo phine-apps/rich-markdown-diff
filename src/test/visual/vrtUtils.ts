@@ -181,10 +181,13 @@ export async function generateVRTHtml(
   html = html.replace(/nonce=["'][^"']*["']/g, "");
 
   // We don't inject mermaid.min.js in VRT since it's mocked by CSS and executing it can cause hangs.
-  html = html.replace(
-    /<script[^>]*src="[^"]*mock-mermaid.min.js"[^>]*><\/script>/,
-    "",
-  );
+  const mermaidScriptRegex =
+    /<\s*script\b[^>]*src="[^"]*mock-mermaid\.min\.js"[^>]*>[\s\S]*?<\/\s*script\b[^>]*>/gi;
+  let prevVrtHtml: string;
+  do {
+    prevVrtHtml = html;
+    html = html.replace(mermaidScriptRegex, "");
+  } while (html !== prevVrtHtml);
 
   // Mock Mermaid for VRT. Headless browsers often fail to render Mermaid SVGs securely (sandbox errors),
   // which causes flaky text-only snapshots or timeouts. We replace `.mermaid` with a static visual block.

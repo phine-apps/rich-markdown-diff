@@ -22,7 +22,7 @@
  * SOFTWARE.
  */
 
-import { findClosing } from "./domUtils";
+import { findClosing, stripHtmlTags } from "./domUtils";
 
 /**
  * Performs a structural diff between two HTML tables.
@@ -244,13 +244,13 @@ export function alignColumns(
   const usedNew = new Set<number>();
 
   oldHeaders.forEach((oldH, oldIdx) => {
-    const oldText = oldH.html.replace(/<[^>]+>/g, "").trim().toLowerCase();
+    const oldText = stripHtmlTags(oldH.html).trim().toLowerCase();
     let matchedIdx = -1;
     if (oldText) {
       matchedIdx = newHeaders.findIndex(
         (newH, newIdx) =>
           !usedNew.has(newIdx) &&
-          newH.html.replace(/<[^>]+>/g, "").trim().toLowerCase() === oldText,
+          stripHtmlTags(newH.html).trim().toLowerCase() === oldText,
       );
     }
 
@@ -287,13 +287,13 @@ export function alignRows(
 
   oldRows.forEach((oldR, oldIdx) => {
     // 1. Try exact identity match on first column (strongest signal)
-    const oldId = oldR.cells[0]?.html.replace(/<[^>]+>/g, "").trim();
+    const oldId = oldR.cells[0]?.html ? stripHtmlTags(oldR.cells[0].html).trim() : "";
     let matchedIdx = -1;
     if (oldId) {
       matchedIdx = newRows.findIndex(
         (newR, newIdx) =>
           !usedNew.has(newIdx) &&
-          newR.cells[0]?.html.replace(/<[^>]+>/g, "").trim() === oldId,
+          (newR.cells[0]?.html ? stripHtmlTags(newR.cells[0].html).trim() : "") === oldId,
       );
     }
 
@@ -307,8 +307,8 @@ export function alignRows(
         let score = 0;
         const numCells = Math.min(oldR.cells.length, newR.cells.length);
         for (let i = 0; i < numCells; i++) {
-          const oText = oldR.cells[i].html.replace(/<[^>]+>/g, "").trim();
-          const nText = newR.cells[i].html.replace(/<[^>]+>/g, "").trim();
+          const oText = stripHtmlTags(oldR.cells[i].html).trim();
+          const nText = stripHtmlTags(newR.cells[i].html).trim();
           if (oText && oText === nText) {
             score++;
           }
