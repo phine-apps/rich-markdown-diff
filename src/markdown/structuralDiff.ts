@@ -1373,7 +1373,7 @@ export function refineBlockDiffs(
   );
 
   const footnoteBundleRegex =
-    /<del[^>]*>\s*((?:<li[^>]*>[\s\S]*?<\/li>\s*)+)<\/del>\s*<ins[^>]*>\s*((?:<li[^>]*>[\s\S]*?<\/li>\s*)+)<\/ins>/gi;
+    /<del\b([^>]*)>\s*([\s\S]*?)\s*<\/del>\s*<ins\b([^>]*)>\s*([\s\S]*?)\s*<\/ins>/gi;
   const footnoteItemRegex = /<li[^>]*>[\s\S]*?<\/li>/gi;
   const getFootnoteId = (itemHtml: string) => {
     const id = itemHtml.match(/\bid=["']([^"']+)["']/i)?.[1] ?? null;
@@ -1382,7 +1382,27 @@ export function refineBlockDiffs(
 
   resultHtml = resultHtml.replace(
     footnoteBundleRegex,
-    (match, oldBundle, newBundle) => {
+    (match, delAttrs, oldBundle, insAttrs, newBundle) => {
+      // Must not match list container change diffs or non-li bundles
+      if (
+        delAttrs.includes("diff-list-container-change") ||
+        insAttrs.includes("diff-list-container-change")
+      ) {
+        return match;
+      }
+      const trimmedOld = oldBundle.trim();
+      const trimmedNew = newBundle.trim();
+      if (
+        !trimmedOld.startsWith("<li") ||
+        !trimmedOld.endsWith("</li>") ||
+        !trimmedNew.startsWith("<li") ||
+        !trimmedNew.endsWith("</li>") ||
+        /<(?:ul|ol|dl|table|pre|h[1-6])\b/i.test(oldBundle) ||
+        /<(?:ul|ol|dl|table|pre|h[1-6])\b/i.test(newBundle)
+      ) {
+        return match;
+      }
+
       const oldFootnotes = oldBundle.match(footnoteItemRegex) || [];
       const newFootnotes = newBundle.match(footnoteItemRegex) || [];
 
@@ -1967,19 +1987,27 @@ export function stripDataLineAttributes(html: string): string {
 
 export function wrapHeadingPrefixes(html: string): string {
   return html.replace(
-    /(<h[1-6][^>]*>)((?:\s*(?:<(?:del|ins)[^>]*>)?\s*[\d\.\[\]]+\s*(?:<\/(?:del|ins)>)?\s*)+(?:\]\s*)?(?=\S))/gi,
-    (match, tag, prefix) => {
-      if (!/<(ins|del)\b/.test(prefix)) {
+    /(<h[1-6][^>]*>)([\s\S]*?)(<\/h[1-6]>)/gi,
+    (match, openTag, innerContent, closeTag) => {
+      const prefixMatch = innerContent.match(
+        /^((?:(?:<(?:del|ins)[^>]*>)?[\d.\[\] ]+(?:<\/(?:del|ins)>)?)+)(?=\S)/i,
+      );
+      if (!prefixMatch) {
         return match;
       }
-      const openIns = (prefix.match(/<ins\b/g) || []).length;
-      const closeIns = (prefix.match(/<\/ins>/g) || []).length;
-      const openDel = (prefix.match(/<del\b/g) || []).length;
-      const closeDel = (prefix.match(/<\/del>/g) || []).length;
+      const prefix = prefixMatch[1];
+      if (!/<(?:ins|del)\b/i.test(prefix)) {
+        return match;
+      }
+      const openIns = (prefix.match(/<ins\b/gi) || []).length;
+      const closeIns = (prefix.match(/<\/ins>/gi) || []).length;
+      const openDel = (prefix.match(/<del\b/gi) || []).length;
+      const closeDel = (prefix.match(/<\/del>/gi) || []).length;
       if (openIns !== closeIns || openDel !== closeDel) {
         return match;
       }
-      return tag + '<span class="heading-prefix">' + prefix + "</span>";
+      const rest = innerContent.slice(prefix.length);
+      return `${openTag}<span class="heading-prefix">${prefix}</span>${rest}${closeTag}`;
     },
   );
 }
