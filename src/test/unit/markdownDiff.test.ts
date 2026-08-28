@@ -519,7 +519,7 @@ describe("MarkdownDiffProvider", () => {
 
     const scriptBlocks = Array.from(
       webviewContent.matchAll(
-        /<\s*script\b[^>]*>([\s\S]*?)<\/\s*script\s*>/gi,
+        /<\s*script\b[^>]*>([\s\S]*?)<\/\s*script\b[^>]*>/gi,
       ),
       (match) => match[1],
     );

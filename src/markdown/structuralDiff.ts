@@ -1990,7 +1990,7 @@ export function wrapHeadingPrefixes(html: string): string {
     /(<h[1-6][^>]*>)([\s\S]*?)(<\/h[1-6]>)/gi,
     (match, openTag, innerContent, closeTag) => {
       const prefixMatch = innerContent.match(
-        /^((?:(?:<(?:del|ins)[^>]*>)?[\d.\[\] ]+(?:<\/(?:del|ins)>)?)+)(?=\S)/i,
+        /^((?:[0-9.\[\]\s]|<(?:del|ins)\b[^>]*>[0-9.\[\]\s]*<\/(?:del|ins)\b[^>]*>)+)(?=\S)/i,
       );
       if (!prefixMatch) {
         return match;
