@@ -27,6 +27,7 @@ import MarkdownIt = require("markdown-it");
 import * as htmldiff from "htmldiff-js";
 import matter from "gray-matter";
 import { sanitizeHtml, escapeHtml } from "./markdown/sanitizer";
+import { stripHtmlTags } from "./markdown/domUtils";
 import { getWebviewContent } from "./markdown/webviewTemplate";
 import {
   cleanMarpHtml,
@@ -215,8 +216,8 @@ export class MarkdownDiffProvider {
           }
 
           // Fuzzy match: compare stripped text content
-          const textA = hA.replace(/<[^>]*>/g, "").trim();
-          const textB = hB.replace(/<[^>]*>/g, "").trim();
+          const textA = stripHtmlTags(hA).trim();
+          const textB = stripHtmlTags(hB).trim();
 
           if (textA.length >= 5 && textB.length >= 5) {
             // Match if one contains the other or they share a 10-char prefix

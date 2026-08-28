@@ -24,7 +24,7 @@
 
 import * as crypto from "crypto";
 import { diffTables } from "./tableDiff";
-import { findClosing } from "./domUtils";
+import { findClosing, stripHtmlTags } from "./domUtils";
 import {
   computeMermaidDiff,
   computeMermaidDiffPair,
@@ -233,7 +233,7 @@ export function splitBySections(
     full: string;
   }[] = [];
 
-  const getHeaderText = (h: string) => h.replace(/<[^>]+>/g, "").trim();
+  const getHeaderText = (h: string) => stripHtmlTags(h).trim();
 
   let i = 0;
   let lastIndex = 0;
@@ -1414,11 +1414,13 @@ export function refineBlockDiffs(
       const usedNewFootnotes = new Set<number>();
       const matches = new Map<number, number>();
 
-      const stripFootnote = (html: string) =>
-        html
-          .replace(/<a\b[^>]*class="footnote-backref"[\s\S]*?<\/a>/gi, "")
-          .replace(/<[^>]+>/g, "")
-          .trim();
+      const stripFootnote = (html: string) => {
+        const withoutBackref = html.replace(
+          /<a\b[^>]*class="footnote-backref"[\s\S]*?<\/a>/gi,
+          "",
+        );
+        return stripHtmlTags(withoutBackref).trim();
+      };
 
       // Pass 1: Exact content match (ignoring backref)
       oldFootnotes.forEach((oldF: string, oldIdx: number) => {
@@ -1686,8 +1688,7 @@ export function refineBlockDiffs(
       ) {
         if (/class=["'][^"']*mermaid[^"']*["']/i.test(attributes)) {
           const unescapeHtml = (str: string) =>
-            str
-              .replace(/<[^>]+>/g, "")
+            stripHtmlTags(str)
               .replace(/&lt;/g, "<")
               .replace(/&gt;/g, ">")
               .replace(/&quot;/g, '"')
@@ -1742,8 +1743,8 @@ export function refineBlockDiffs(
   resultHtml = resultHtml.replace(
     boldToHeadingRe,
     (match, delInner, newTag, newAttrs, insInner) => {
-      const delText = delInner.replace(/<[^>]+>/g, "").trim();
-      const insText = insInner.replace(/<[^>]+>/g, "").trim();
+      const delText = stripHtmlTags(delInner).trim();
+      const insText = stripHtmlTags(insInner).trim();
       if (delText !== insText) {
         return match;
       }
@@ -1757,8 +1758,8 @@ export function refineBlockDiffs(
   resultHtml = resultHtml.replace(
     headingToBoldRe,
     (match, _oldTag, _oldAttrs, delInner, insInner) => {
-      const delText = delInner.replace(/<[^>]+>/g, "").trim();
-      const insText = insInner.replace(/<[^>]+>/g, "").trim();
+      const delText = stripHtmlTags(delInner).trim();
+      const insText = stripHtmlTags(insInner).trim();
       if (delText !== insText) {
         return match;
       }
@@ -2071,15 +2072,20 @@ export function markGhostListItems(html: string): string {
       if (/<li\b/i.test(content)) {
         return match;
       }
-      const stripInsignificant = (s: string) =>
-        s
-          .replace(
-            /<\/?(strong|em|b|i|concept|code|s|span|a|p|div|br|section)\b[^>]*>/gi,
-            "",
-          )
+      const stripInsignificant = (s: string) => {
+        let current = s;
+        let previous: string;
+        const tagRegex =
+          /<\/?(strong|em|b|i|concept|code|s|span|a|p|div|br|section)\b[^>]*>/gi;
+        do {
+          previous = current;
+          current = current.replace(tagRegex, "");
+        } while (current !== previous);
+        return current
           .replace(/[.\s]+/g, "")
           .replace(/\u21a9[\ufe0e\ufe0f]?/g, "") // Strip backref emoji variants (↩︎)
           .trim();
+      };
 
       const withoutIns = content.replace(/<ins\b[^>]*>[\s\S]*?<\/ins>/gi, "");
       const withoutDel = content.replace(/<del\b[^>]*>[\s\S]*?<\/del>/gi, "");
@@ -2343,7 +2349,7 @@ export function checkIfAllContentIsWrapped(
   html: string,
   type: "ins" | "del",
 ): boolean {
-  const totalText = html.replace(/<[^>]+>/g, "").replace(/\s/g, "");
+  const totalText = stripHtmlTags(html).replace(/\s/g, "");
   const stripped = html.replace(
     new RegExp(`<${type}[^>]*?>[\\s\\S]*?<\\/${type}>`, "gi"),
     "",
@@ -2353,9 +2359,14 @@ export function checkIfAllContentIsWrapped(
 }
 
 export function cleanInnerDiffTags(html: string, type: "ins" | "del"): string {
-  const reOpen = new RegExp(`<${type}[^>]*?>`, "gi");
-  const reClose = new RegExp(`<\\/${type}>`, "gi");
-  return html.replace(reOpen, "").replace(reClose, "");
+  const diffTagRegex = new RegExp(`<\\/?${type}\\b[^>]*>`, "gi");
+  let current = html;
+  let previous: string;
+  do {
+    previous = current;
+    current = current.replace(diffTagRegex, "");
+  } while (current !== previous);
+  return current;
 }
 
 /**
