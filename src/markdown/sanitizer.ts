@@ -276,8 +276,11 @@ export function sanitizeHtml(html: string): string {
       "tel",
       "vscode-webview-resource",
       "vscode-resource",
-      "data",
     ],
+    allowedSchemesAppliedToAttributes: ["href", "action", "cite"],
+    allowedSchemesByTag: {
+      img: ["http", "https", "data"],
+    },
     allowedIframeHostnames: [],
     allowProtocolRelative: false,
   });

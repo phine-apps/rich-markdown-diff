@@ -223,10 +223,26 @@ export function injectLineNumbers(md: MarkdownIt) {
       // If the original renderer didn't include the data attributes (common with plugins),
       // try to inject them into the first tag of the output.
       if (adjustedStart !== undefined && html && !/data-line="/i.test(html)) {
-        html = html.replace(
-          /^(<[a-zA-Z0-9-]+(?:\s+[^"'>=\s]+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'>\s]+))?)*\s*)(\/?>)/i,
-          `$1 data-line="${adjustedStart}" data-line-end="${adjustedEnd}"$2`,
-        );
+        // Find the end of the first opening tag, skipping '>' inside quoted attribute values.
+        // This avoids the nested quantifiers of the previous pattern which were ReDoS-vulnerable.
+        let tagEndIdx = -1;
+        let inQuote: string | null = null;
+        for (let ci = 1; ci < html.length; ci++) {
+          const ch = html[ci];
+          if (inQuote) {
+            if (ch === inQuote) { inQuote = null; }
+          } else if (ch === '"' || ch === "'") {
+            inQuote = ch;
+          } else if (ch === '>') {
+            tagEndIdx = ci;
+            break;
+          }
+        }
+        if (tagEndIdx > 0 && html[0] === '<') {
+          const isVoid = html[tagEndIdx - 1] === '/';
+          const insertPos = isVoid ? tagEndIdx - 1 : tagEndIdx;
+          html = html.slice(0, insertPos) + ` data-line="${adjustedStart}" data-line-end="${adjustedEnd}"` + html.slice(insertPos);
+        }
       }
       return html;
     };
