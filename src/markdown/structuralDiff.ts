@@ -316,7 +316,26 @@ export function lcsAlignment<T>(
     return [];
   }
 
+  // Safety guard: prevent OOM when both sequences are very large.
+  // Int32Array element = 4 bytes; limit to ~64M elements (~256MB).
+  const MAX_DP_ELEMENTS = 64_000_000;
   const stride = m + 1;
+  if ((n + 1) * stride > MAX_DP_ELEMENTS) {
+    // Fallback to a simple greedy alignment (O(N*M) worst-case but no large alloc)
+    const result: { oldIdx: number; newIdx: number }[] = [];
+    let j = 0;
+    for (let i = 0; i < n && j < m; i++) {
+      for (let k = j; k < m; k++) {
+        if (isEqual(oldSeq[i], newSeq[k])) {
+          result.push({ oldIdx: i, newIdx: k });
+          j = k + 1;
+          break;
+        }
+      }
+    }
+    return result;
+  }
+
   const dp = new Int32Array((n + 1) * stride);
 
   for (let i = 1; i <= n; i++) {
@@ -1089,7 +1108,13 @@ export function replaceBalancedTags(
       }
     }
 
-    // Math (KaTeX)
+    // Math (KaTeX) – guard with '<' check to avoid O(N²) substring on every char
+    if (html[i] !== "<") {
+      result += html[i];
+      i++;
+      continue;
+    }
+
     const mathBlockMatch = html
       .substring(i)
       .match(/^<(p|div)\s[^>]*class=['"][^"']*\bkatex-(?:block|display)\b[^"']*['"][^>]*>/i);
@@ -1767,19 +1792,36 @@ export function refineBlockDiffs(
     },
   );
 
-  const imageRegex =
-    /(?:<p([^>]*)>\s*)?(<del[^>]*>\s*(<img[^>]*>)\s*<\/del>)\s*(<ins[^>]*>\s*(<img[^>]*>)\s*<\/ins>)(?:\s*<\/p>)?/gi;
+  // Image diff: match with coupled <p>...</p> wrapping to avoid orphaned tags.
+  // First pass: images wrapped in <p>
+  const imageInPRegex =
+    /<p([^>]*)>\s*(<del[^>]*>\s*(<img[^>]*>)\s*<\/del>)\s*(<ins[^>]*>\s*(<img[^>]*>)\s*<\/ins>)\s*<\/p>/gi;
 
   resultHtml = resultHtml.replace(
-    imageRegex,
+    imageInPRegex,
     (match, pAttrs, delBlock, oldImg, insBlock, newImg) => {
-      // Extract line number from the new image if possible (more reliable than wrapping <p>)
       const newImgLineMatch = newImg.match(/data-line="([^"]*)"/i);
       const attrs = newImgLineMatch ? ` data-line="${newImgLineMatch[1]}"` : (pAttrs || "");
 
-      // Wrap the changed image pair in a consolidated container
-      // Note: We intentionally discard the wrapping <p> if it was matched to prevent <div> inside <p>
-      // BUT we preserve its attributes (like data-line) for mapping.
+      return `<div class="image-diff-block" data-image-diff="true"${attrs}>
+        <div class="image-diff-wrapper">
+          <div class="diff-image-old">${oldImg}</div>
+          <div class="diff-image-new">${newImg}</div>
+        </div>
+      </div>`;
+    },
+  );
+
+  // Second pass: bare image diffs (not wrapped in <p>)
+  const bareImageRegex =
+    /(<del[^>]*>\s*(<img[^>]*>)\s*<\/del>)\s*(<ins[^>]*>\s*(<img[^>]*>)\s*<\/ins>)/gi;
+
+  resultHtml = resultHtml.replace(
+    bareImageRegex,
+    (match, delBlock, oldImg, insBlock, newImg) => {
+      const newImgLineMatch = newImg.match(/data-line="([^"]*)"/i);
+      const attrs = newImgLineMatch ? ` data-line="${newImgLineMatch[1]}"` : "";
+
       return `<div class="image-diff-block" data-image-diff="true"${attrs}>
         <div class="image-diff-wrapper">
           <div class="diff-image-old">${oldImg}</div>
@@ -2236,7 +2278,7 @@ export function fixInvalidNesting(html: string): string {
   const inlineTags = "strong|em|b|i|u|s|code|span|a|mark|sub|sup";
   const blockTags =
     "p|div|section|blockquote|pre|h[1-6]|li|ul|ol|table|tr|td|th";
-  const noBlockOrDiff = `((?:(?!<\\/?(?:${blockTags}|ins|del)).)*?)`;
+  const noBlockOrDiff = `((?:(?!<\\/?(?:${blockTags}|ins|del))[\\s\\S])*?)`;
 
   const pattern = new RegExp(
     `<(ins|del)\\b([^>]*?)>${noBlockOrDiff}<\\/(${inlineTags})>${noBlockOrDiff}<\\/\\1>`,

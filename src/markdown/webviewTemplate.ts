@@ -112,7 +112,7 @@ export function getWebviewContent(
                 if (info) {
                     clearTimeout(tooltipTimeout);
                     const date = new Date(info.authorTime * 1000).toLocaleDateString();
-                    tooltip.innerHTML = \`<span class="blame-author">\${info.author}</span><span class="blame-date">\${date}</span><span class="blame-msg">\${info.summary}</span>\`;
+                    tooltip.innerHTML = \`<span class="blame-author">\${escapeHtmlInline(info.author)}</span><span class="blame-date">\${date}</span><span class="blame-msg">\${escapeHtmlInline(info.summary)}</span>\`;
                     tooltip.style.display = 'block';
                     
                     const x = Math.min(window.innerWidth - 300, e.clientX + 15);
@@ -2263,9 +2263,10 @@ export function getWebviewContent(
         window.vscode = vscode;
     </script>
     <script nonce="${nonce}">
-        const blameInfo = ${JSON.stringify(blameInfo || {})};
+        const escapeHtmlInline = (s) => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+        const blameInfo = ${JSON.stringify(blameInfo || {}).replace(/<\//g, '<\\/')};
         const lineHoverDelay = ${lineHoverDelay};
-        const translations = ${JSON.stringify(translations)};
+        const translations = ${JSON.stringify(translations).replace(/<\//g, '<\\/')};
         const t = (key, ...args) => {
             let text = translations[key] || key;
             args.forEach((arg, i) => {
