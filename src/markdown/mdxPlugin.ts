@@ -87,7 +87,7 @@ export default function mdxPlugin(md: MarkdownIt) {
     const closeTag = `</${tagName}>`;
     const escapedTagName = tagName.replace(/[-\/\\^$*+?.()|[\]{}]/g, "\\$&");
     const openTagRegex = new RegExp(`^<${escapedTagName}(?:[\\s/>]|$)`, "i");
-    const closeTagRegex = new RegExp(`^</${escapedTagName}(?:[\\s>]|$)`, "i");
+    const closeTagRegex = new RegExp(`^\\s*</${escapedTagName}(?:[\\s>]|$)`, "i");
 
     while (nextLine < endLine) {
       const nextPos = state.bMarks[nextLine] + state.tShift[nextLine];

@@ -62,8 +62,12 @@ function wikilinksPlugin(md: MarkdownIt, options: WikilinkOptions = {}) {
     }
 
     if (!silent) {
+      const href = createHref(pageName, uriSuffix);
+      if (!md.validateLink(href)) {
+        return false;
+      }
       const linkOpen = state.push("link_open", "a", 1);
-      linkOpen.attrSet("href", createHref(pageName, uriSuffix));
+      linkOpen.attrSet("href", md.normalizeLink(href));
       linkOpen.attrSet("class", "wikilink");
       linkOpen.attrSet("data-page", pageName);
 
