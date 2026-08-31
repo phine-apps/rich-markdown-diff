@@ -215,4 +215,17 @@ describe("Mermaid Semantic Diff", () => {
     assert.ok(newMermaid.includes("style A fill:#2e2305"), "Should style modified node A as modified in newMermaid");
     assert.ok(oldMermaid.includes("style A fill:#2e2305"), "Should style modified node A as modified in oldMermaid");
   });
+
+  it("should not hang on adversarial unclosed shapes with many quotes (ReDoS defense)", () => {
+    // This input previously caused exponential backtracking because the
+    // character class [^)\]}>] also matched ", overlapping with "[^"]*".
+    const adversarial = `graph TD\n  A((${"\"".repeat(50)}`;
+    const start = Date.now();
+    const edges = parseMermaidEdges(adversarial);
+    const elapsed = Date.now() - start;
+    // Must complete in under 1 second; without the fix this hangs for minutes
+    assert.ok(elapsed < 1000, `Took ${elapsed}ms — possible ReDoS`);
+    // No valid edges should be parsed from malformed input
+    assert.strictEqual(edges.length, 0);
+  });
 });

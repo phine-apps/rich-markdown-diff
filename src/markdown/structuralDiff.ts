@@ -241,7 +241,9 @@ export function splitBySections(
   while (i < html.length) {
     if (html[i] === "<") {
       // Look for a section-splitting header (h1-h3) at the CURRENT level
-      const hMatch = html.substring(i).match(/^<(h[1-3])\b[^>]*>/i);
+      const hMatchRegex = /\<(h[1-3])\b[^>]*>/iy;
+      hMatchRegex.lastIndex = i;
+      const hMatch = hMatchRegex.exec(html);
       if (hMatch) {
         const tagName = hMatch[1];
         const closingPos = findClosing(html, i, tagName);
@@ -409,7 +411,9 @@ export function splitByBlocks(
           continue;
         }
       } else if (html[i + 1] !== "!" && html[i + 1] !== "?") {
-        const match = html.substring(i).match(/^<([a-z0-9]+)\b/i);
+        const tagMatchRegex = /<([a-z0-9]+)\b/iy;
+        tagMatchRegex.lastIndex = i;
+        const match = tagMatchRegex.exec(html);
         if (match) {
           const tagName = match[1].toLowerCase();
           const isVoid = ["img", "br", "hr", "meta", "link", "input"].includes(tagName);
