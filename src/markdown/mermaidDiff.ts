@@ -50,7 +50,7 @@ export function parseMermaidEdges(code: string): MermaidEdge[] {
   // 3. A --> B or A --- B or A ==> B or A -.- B
   // The optional shape group (?:[(\[{](?:[^)\]}>]|"[^"]*")*[)\]}>])? after the node ID
   // allows shaped nodes like A["Start"] --> B to be captured correctly.
-  const SHAPE_GROUP = `(?:(?:\\(\\(|\\[\\[|[([{>])(?:[^)\\]}>]|"[^"]*")*(?:\\)\\)|\\]\\]|[)\\]}>]))?`;
+  const SHAPE_GROUP = `(?:(?:\\(\\(|\\[\\[|[([{>])(?:[^)"\\]}>]|"[^"]*")*(?:\\)\\)|\\]\\]|[)\\]}>]))?`;
   const edgeRegex = new RegExp(
     `\\b([a-zA-Z0-9_-]+)${SHAPE_GROUP}\\s*` +
     `(?:(?:---|-->|==>|-\\.-)\\s*(?:\\|([^|]+)\\|)?\\s*` +

@@ -82,30 +82,26 @@ export function parseTable(html: string) {
     const theadEnd = findClosing(html, theadStart, "thead");
     if (theadEnd !== -1) {
       const theadFull = html.substring(theadStart, theadEnd);
-      let trPos = 0;
       let trStartMatch;
-      while ((trStartMatch = theadFull.substring(trPos).match(/<tr\b[^>]*>/i)) !== null) {
-        if (!trStartMatch) {
-          break;
-        }
-
-        const absoluteTrStart = trPos + trStartMatch.index!;
+      const trRegex = /<tr\b[^>]*>/gi;
+      trRegex.lastIndex = 0;
+      while ((trStartMatch = trRegex.exec(theadFull)) !== null) {
+        const absoluteTrStart = trStartMatch.index;
         const trEnd = findClosing(theadFull, absoluteTrStart, "tr");
         if (trEnd === -1) {
-          trPos = absoluteTrStart + 4;
+          trRegex.lastIndex = absoluteTrStart + 4;
           continue;
         }
 
         const trFull = theadFull.substring(absoluteTrStart, trEnd);
-        let cellPos = 0;
-        while (true) {
-          const thStartMatch = trFull.substring(cellPos).match(/<th\b[^>]*>/i);
-          if (!thStartMatch) {break;}
-
-          const absoluteThStart = cellPos + thStartMatch.index!;
+        const thRegex = /<th\b[^>]*>/gi;
+        thRegex.lastIndex = 0;
+        let thStartMatch;
+        while ((thStartMatch = thRegex.exec(trFull)) !== null) {
+          const absoluteThStart = thStartMatch.index;
           const thEnd = findClosing(trFull, absoluteThStart, "th");
           if (thEnd === -1) {
-            cellPos = absoluteThStart + 4;
+            thRegex.lastIndex = absoluteThStart + 4;
             continue;
           }
 
@@ -114,40 +110,34 @@ export function parseTable(html: string) {
           if (info) {
             headers.push({ html: info.content, attrs: info.attrs });
           }
-          cellPos = thEnd;
+          thRegex.lastIndex = thEnd;
         }
-        trPos = trEnd;
+        trRegex.lastIndex = trEnd;
       }
     }
   }
 
   // Extract tbody (support multiple tbodies)
-  let searchStart = 0;
-  while (true) {
-    const tbodyStart = html.substring(searchStart).search(/<tbody/i);
-    if (tbodyStart === -1) {
-      break;
-    }
-
-    const absoluteTbodyStart = searchStart + tbodyStart;
+  const tbodySearchRegex = /<tbody/gi;
+  tbodySearchRegex.lastIndex = 0;
+  let tbodySearchMatch;
+  while ((tbodySearchMatch = tbodySearchRegex.exec(html)) !== null) {
+    const absoluteTbodyStart = tbodySearchMatch.index;
     const tbodyEnd = findClosing(html, absoluteTbodyStart, "tbody");
     if (tbodyEnd === -1) {
-      searchStart = absoluteTbodyStart + 6;
+      tbodySearchRegex.lastIndex = absoluteTbodyStart + 6;
       continue;
     }
 
     const tbodyFull = html.substring(absoluteTbodyStart, tbodyEnd);
-    let trPos = 0;
-    while (true) {
-      const trStartMatch = tbodyFull.substring(trPos).match(/<tr\b[^>]*>/i);
-      if (!trStartMatch) {
-        break;
-      }
-
-      const absoluteTrStart = trPos + trStartMatch.index!;
+    const trRegex2 = /<tr\b[^>]*>/gi;
+    trRegex2.lastIndex = 0;
+    let trStartMatch;
+    while ((trStartMatch = trRegex2.exec(tbodyFull)) !== null) {
+      const absoluteTrStart = trStartMatch.index;
       const trEnd = findClosing(tbodyFull, absoluteTrStart, "tr");
       if (trEnd === -1) {
-        trPos = absoluteTrStart + 4;
+        trRegex2.lastIndex = absoluteTrStart + 4;
         continue;
       }
 
@@ -156,16 +146,15 @@ export function parseTable(html: string) {
       const cells: { html: string; attrs: string; tag: string }[] = [];
 
       // Extract cells (td/th) inside this tr
-      let cellPos = 0;
-      while (true) {
-        const cellStartMatch = trFull.substring(cellPos).match(/<(td|th)\b[^>]*>/i);
-        if (!cellStartMatch) {break;}
-
+      const cellRegex = /<(td|th)\b[^>]*>/gi;
+      cellRegex.lastIndex = 0;
+      let cellStartMatch;
+      while ((cellStartMatch = cellRegex.exec(trFull)) !== null) {
         const tag = cellStartMatch[1].toLowerCase();
-        const absoluteCellStart = cellPos + cellStartMatch.index!;
+        const absoluteCellStart = cellStartMatch.index;
         const cellEnd = findClosing(trFull, absoluteCellStart, tag);
         if (cellEnd === -1) {
-          cellPos = absoluteCellStart + 4;
+          cellRegex.lastIndex = absoluteCellStart + 4;
           continue;
         }
 
@@ -174,28 +163,25 @@ export function parseTable(html: string) {
         if (info) {
           cells.push({ html: info.content, attrs: info.attrs, tag });
         }
-        cellPos = cellEnd;
+        cellRegex.lastIndex = cellEnd;
       }
 
       rows.push({ cells, attrs: trAttrs });
-      trPos = trEnd;
+      trRegex2.lastIndex = trEnd;
     }
-    searchStart = tbodyEnd;
+    tbodySearchRegex.lastIndex = tbodyEnd;
   }
 
   // Fallback: If no tbody/thead found, try to extract tr directly from table
   if (rows.length === 0 && headers.length === 0) {
-    let trPos = 0;
-    while (true) {
-      const trStartMatch = html.substring(trPos).match(/<tr\b[^>]*>/i);
-      if (!trStartMatch) {
-        break;
-      }
-
-      const absoluteTrStart = trPos + trStartMatch.index!;
+    const fallbackTrRegex = /<tr\b[^>]*>/gi;
+    fallbackTrRegex.lastIndex = 0;
+    let trStartMatch;
+    while ((trStartMatch = fallbackTrRegex.exec(html)) !== null) {
+      const absoluteTrStart = trStartMatch.index;
       const trEnd = findClosing(html, absoluteTrStart, "tr");
       if (trEnd === -1) {
-        trPos = absoluteTrStart + 4;
+        fallbackTrRegex.lastIndex = absoluteTrStart + 4;
         continue;
       }
 
@@ -203,16 +189,15 @@ export function parseTable(html: string) {
       const trAttrs = trStartMatch[0].match(/<tr([^>]*)>/i)?.[1] || "";
       const cells: { html: string; attrs: string; tag: string }[] = [];
 
-      let cellPos = 0;
-      while (true) {
-        const cellStartMatch = trFull.substring(cellPos).match(/<(td|th)\b[^>]*>/i);
-        if (!cellStartMatch) {break;}
-
+      const fallbackCellRegex = /<(td|th)\b[^>]*>/gi;
+      fallbackCellRegex.lastIndex = 0;
+      let cellStartMatch;
+      while ((cellStartMatch = fallbackCellRegex.exec(trFull)) !== null) {
         const tag = cellStartMatch[1].toLowerCase();
-        const absoluteCellStart = cellPos + cellStartMatch.index!;
+        const absoluteCellStart = cellStartMatch.index;
         const cellEnd = findClosing(trFull, absoluteCellStart, tag);
         if (cellEnd === -1) {
-          cellPos = absoluteCellStart + 4;
+          fallbackCellRegex.lastIndex = absoluteCellStart + 4;
           continue;
         }
 
@@ -221,11 +206,11 @@ export function parseTable(html: string) {
         if (info) {
           cells.push({ html: info.content, attrs: info.attrs, tag });
         }
-        cellPos = cellEnd;
+        fallbackCellRegex.lastIndex = cellEnd;
       }
 
       rows.push({ cells, attrs: trAttrs });
-      trPos = trEnd;
+      fallbackTrRegex.lastIndex = trEnd;
     }
   }
 
