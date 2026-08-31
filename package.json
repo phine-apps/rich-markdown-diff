@@ -355,13 +355,13 @@
     "@types/node": "^26.2.0",
     "@types/sanitize-html": "^2.16.1",
     "@types/vscode": "1.80.0",
-    "@typescript-eslint/eslint-plugin": "^8.67.0",
-    "@typescript-eslint/parser": "^8.67.0",
+    "@typescript-eslint/eslint-plugin": "^8.68.0",
+    "@typescript-eslint/parser": "^8.68.0",
     "@vscode/l10n-dev": "^0.0.35",
     "@vscode/test-electron": "^3.1.0",
     "@vscode/vsce": "^3.9.2",
     "esbuild": "^0.28.2",
-    "eslint": "^10.8.1",
+    "eslint": "^10.9.1",
     "eslint-plugin-jsdoc": "^64.2.1",
     "glob": "^13.0.6",
     "globals": "^17.11.0",
@@ -370,7 +370,7 @@
     "playwright": "1.62.1",
     "ts-node": "^10.9.2",
     "typescript": "~6.0.3",
-    "typescript-eslint": "^8.67.0"
+    "typescript-eslint": "^8.68.0"
   },
   "dependencies": {
     "@iktakahiro/markdown-it-katex": "^4.0.1",
