@@ -2472,9 +2472,13 @@ export function verifyDiffIntegrity(
   const diffText = strip(diffNewSideHtml);
 
   // We check for all alphanumeric words to ensure total integrity.
+  // CJK characters (Han, Hiragana, Katakana, Hangul) are matched individually
+  // because CJK text does not use whitespace delimiters and tag stripping
+  // inserts spaces between previously contiguous CJK characters.
   const getWords = (text: string) => {
-    // Match letters and numbers across any language (using Unicode property escapes)
-    return text.toLowerCase().match(/[\p{L}\p{N}]+/gu) || [];
+    const cjk = "\\p{Script=Han}\\p{Script=Hiragana}\\p{Script=Katakana}\\p{Script=Hangul}";
+    const regex = new RegExp(`[${cjk}]|[^\\s\\p{P}\\p{S}${cjk}]+`, "gu");
+    return text.toLowerCase().match(regex) || [];
   };
 
   const newWords = getWords(newText);

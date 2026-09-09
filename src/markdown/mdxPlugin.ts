@@ -40,6 +40,48 @@ function parseAttributes(attrsText: string): [string, string][] {
   return attrs;
 }
 
+interface MdxTagInfo {
+  tagName: string;
+  attrsText: string;
+  isSelfClosing: boolean;
+  fullTag: string;
+}
+
+/**
+ * Robustly parses an opening XML/JSX tag, respecting quotes (' and ") so that
+ * attribute values containing `>` do not prematurely terminate tag matching.
+ */
+function parseMdxTag(text: string): MdxTagInfo | null {
+  const nameMatch = text.match(/^<([A-Z][a-zA-Z0-9]*|Tabs|TabItem|Steps|Card|Badge)\b/);
+  if (!nameMatch) {
+    return null;
+  }
+  const tagName = nameMatch[1];
+  let inQuote: string | null = null;
+  let tagEndIdx = -1;
+  for (let i = nameMatch[0].length; i < text.length; i++) {
+    const ch = text[i];
+    if (inQuote) {
+      if (ch === inQuote) {
+        inQuote = null;
+      }
+    } else if (ch === '"' || ch === "'") {
+      inQuote = ch;
+    } else if (ch === ">") {
+      tagEndIdx = i;
+      break;
+    }
+  }
+  if (tagEndIdx === -1) {
+    return null;
+  }
+  const fullTag = text.slice(0, tagEndIdx + 1);
+  const inside = text.slice(nameMatch[0].length, tagEndIdx).trimEnd();
+  const isSelfClosing = inside.endsWith("/") || fullTag.endsWith("/>");
+  const attrsText = inside.replace(/\/$/, "");
+  return { tagName, attrsText, isSelfClosing, fullTag };
+}
+
 /**
  * Custom Markdown-It plugin that adds support for MDX elements (like Tabs, Badges, Cards, Steps)
  * and Docusaurus Admonitions (:::note etc.).
@@ -52,9 +94,8 @@ export default function mdxPlugin(md: MarkdownIt) {
     const max = state.eMarks[startLine];
     const lineText = state.src.slice(pos, max).trim();
 
-    // Match tags starting with < followed by an uppercase letter or specific common documentation components
-    const match = lineText.match(/^<([A-Z][a-zA-Z0-9]*|Tabs|TabItem|Steps|Card|Badge)\b([^>]*?)(\/?)>/);
-    if (!match) {
+    const tagInfo = parseMdxTag(lineText);
+    if (!tagInfo) {
       return false;
     }
 
@@ -62,14 +103,12 @@ export default function mdxPlugin(md: MarkdownIt) {
       return true;
     }
 
-    const tagName = match[1];
-    const attrsText = match[2];
-    const isSelfClosing = !!match[3] || lineText.endsWith("/>");
+    const { tagName, attrsText, isSelfClosing } = tagInfo;
     const attrs = parseAttributes(attrsText);
 
     if (isSelfClosing) {
       const token = state.push("mdx_self_closing", "div", 0);
-      token.markup = lineText;
+      token.markup = tagInfo.fullTag;
       token.map = [startLine, startLine + 1];
       token.meta = { tagName, attrs };
       state.line = startLine + 1;
@@ -78,7 +117,7 @@ export default function mdxPlugin(md: MarkdownIt) {
 
     // Parse block tags containing nested content (requires searching for matching closing tag </Tag>)
     const tokenOpen = state.push("mdx_open", "div", 1);
-    tokenOpen.markup = lineText;
+    tokenOpen.markup = tagInfo.fullTag;
     tokenOpen.map = [startLine, startLine + 1];
     tokenOpen.meta = { tagName, attrs };
 
@@ -100,7 +139,13 @@ export default function mdxPlugin(md: MarkdownIt) {
           break;
         }
       } else if (openTagRegex.test(nextLineText)) {
-        depth++;
+        // Only increment depth if the child tag is NOT self-closing
+        const childTag = parseMdxTag(nextLineText);
+        if (childTag && childTag.tagName.toLowerCase() === tagName.toLowerCase()) {
+          if (!childTag.isSelfClosing) {
+            depth++;
+          }
+        }
       }
       nextLine++;
     }
@@ -179,24 +224,21 @@ export default function mdxPlugin(md: MarkdownIt) {
     }
 
     const tail = src.slice(state.pos, max);
-    // Inline elements are typically self-closing Badge, Card tags, or simple XML wrappers
-    const match = tail.match(/^<([A-Z][a-zA-Z0-9]*|Badge|Card)\b([^>]*?)(\/?)>/);
-    if (!match) {
+    const tagInfo = parseMdxTag(tail);
+    if (!tagInfo) {
       return false;
     }
 
     if (!silent) {
-      const tagName = match[1];
-      const attrsText = match[2];
-      const isSelfClosing = !!match[3] || tail.startsWith("/>", match[0].length - 2);
+      const { tagName, attrsText, isSelfClosing, fullTag } = tagInfo;
       const attrs = parseAttributes(attrsText);
 
       const token = state.push("mdx_inline", "span", 0);
-      token.markup = match[0];
+      token.markup = fullTag;
       token.meta = { tagName, attrs, isSelfClosing };
     }
 
-    state.pos += match[0].length;
+    state.pos += tagInfo.fullTag.length;
     return true;
   });
 

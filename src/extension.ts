@@ -1756,10 +1756,39 @@ class DiffEditorProvider implements vscode.CustomReadonlyEditorProvider {
   }
 }
 
-async function resolveWikilinkUri(
+/**
+ * Verifies that a target URI resolves to a filesystem path strictly within
+ * the allowed workspace folders (or the base file directory if no workspace folder is open).
+ * Prevents path traversal vulnerabilities (CWE-22) when navigating Wikilinks.
+ */
+export function isPathInsideRoot(targetUri: vscode.Uri, baseUri: vscode.Uri): boolean {
+  try {
+    const targetPath = path.resolve(targetUri.fsPath);
+    if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
+      return vscode.workspace.workspaceFolders.some((folder) => {
+        const folderPath = path.resolve(folder.uri.fsPath);
+        const rel = path.relative(folderPath, targetPath);
+        return !rel.startsWith("..") && !path.isAbsolute(rel);
+      });
+    }
+
+    const baseDir = path.dirname(path.resolve(baseUri.fsPath));
+    const rel = path.relative(baseDir, targetPath);
+    return !rel.startsWith("..") && !path.isAbsolute(rel);
+  } catch {
+    return false;
+  }
+}
+
+export async function resolveWikilinkUri(
   page: string,
   baseUri: vscode.Uri,
 ): Promise<vscode.Uri | undefined> {
+  // Reject empty, null-byte, or absolute path strings to prevent path traversal
+  if (!page || page.includes("\0") || path.isAbsolute(page) || /^[a-zA-Z]:[\\/]/.test(page)) {
+    return undefined;
+  }
+
   const cleanBase = toFileBackedUri(baseUri);
   // 1. Try relative to the base file directory
   let targetUri = vscode.Uri.joinPath(cleanBase, "..", page);
@@ -1767,11 +1796,13 @@ async function resolveWikilinkUri(
     targetUri = targetUri.with({ path: targetUri.path + ".md" });
   }
 
-  try {
-    await vscode.workspace.fs.stat(targetUri);
-    return targetUri;
-  } catch {
-    // Ignore error, file does not exist at relative path
+  if (isPathInsideRoot(targetUri, cleanBase)) {
+    try {
+      await vscode.workspace.fs.stat(targetUri);
+      return targetUri;
+    } catch {
+      // Ignore error, file does not exist at relative path
+    }
   }
 
   // 2. Try relative to workspace folders
@@ -1781,30 +1812,35 @@ async function resolveWikilinkUri(
       if (!path.extname(page)) {
         rootTargetUri = rootTargetUri.with({ path: rootTargetUri.path + ".md" });
       }
-      try {
-        await vscode.workspace.fs.stat(rootTargetUri);
-        return rootTargetUri;
-      } catch {
-        // Ignore error, file does not exist at workspace root
+      if (isPathInsideRoot(rootTargetUri, cleanBase)) {
+        try {
+          await vscode.workspace.fs.stat(rootTargetUri);
+          return rootTargetUri;
+        } catch {
+          // Ignore error, file does not exist at workspace root
+        }
       }
     }
   }
 
   // 3. Search globally in the workspace for shortest path matching
+  // Only allow basename searching without path traversal segments
   const basename = path.basename(page);
-  const ext = path.extname(page) ? "" : ".md";
-  const globPattern = `**/${basename}${ext}`;
-  try {
-    const files = await vscode.workspace.findFiles(
-      globPattern,
-      "**/node_modules/**",
-      5,
-    );
-    if (files.length > 0) {
-      return files[0];
+  if (basename && !page.includes("..") && !page.includes("/") && !page.includes("\\")) {
+    const ext = path.extname(page) ? "" : ".md";
+    const globPattern = `**/${basename}${ext}`;
+    try {
+      const files = await vscode.workspace.findFiles(
+        globPattern,
+        "**/node_modules/**",
+        5,
+      );
+      if (files.length > 0 && isPathInsideRoot(files[0], cleanBase)) {
+        return files[0];
+      }
+    } catch (err) {
+      console.error("findFiles failed:", err);
     }
-  } catch (err) {
-    console.error("findFiles failed:", err);
   }
 
   return undefined;

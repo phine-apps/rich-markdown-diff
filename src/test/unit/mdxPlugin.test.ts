@@ -168,4 +168,38 @@ Paragraph outside tabs.`;
     assert.ok(result.html.includes("Paragraph outside tabs"));
     assert.ok(result.html.indexOf("Paragraph outside tabs") > 0);
   });
+
+  it("should not swallow subsequent blocks when nested self-closing component is present", () => {
+    const doc = `<Card title="Parent">
+  <Card title="Nested Self-Closing" />
+</Card>
+
+Paragraph between cards.
+
+<Card title="Second Parent">
+  Second card content.
+</Card>`;
+
+    const result = provider.computeDiff(doc, doc);
+    assert.ok(result.html.includes("Paragraph between cards"), "Paragraph outside must not be swallowed");
+    assert.ok(result.html.includes("Second Parent"), "Second card must be rendered");
+    // Ensure the paragraph is outside the first card
+    const firstCardEnd = result.html.indexOf("Nested Self-Closing");
+    const paragraphPos = result.html.indexOf("Paragraph between cards");
+    const secondCardPos = result.html.indexOf("Second Parent");
+    assert.ok(firstCardEnd < paragraphPos, "Paragraph must appear after first card");
+    assert.ok(paragraphPos < secondCardPos, "Second card must appear after paragraph");
+  });
+
+  it("should parse component opening tags whose attribute values contain > inside quotes", () => {
+    const doc = `<Card title="Comparison: A > B" icon="star">
+  Content inside card.
+</Card>`;
+
+    const result = provider.computeDiff(doc, doc);
+    assert.ok(result.html.includes('class="mdx-card"'), "Should render card");
+    assert.ok(result.html.includes("Comparison: A &gt; B") || result.html.includes("Comparison: A > B"), "Should preserve full title with >");
+    assert.ok(result.html.includes("Content inside card."), "Should render card body");
+  });
 });
+

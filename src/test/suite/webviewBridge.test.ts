@@ -87,4 +87,24 @@ describe("Webview Bridge Integration Tests", () => {
         // Since tmpFile is in /tmp, it's not in git.
         assert.strictEqual(blame, undefined, "Blame should be undefined for non-git file");
     });
+
+    it("should prevent wikilink path traversal outside root", async () => {
+        const { isPathInsideRoot, resolveWikilinkUri } = require("../../extension");
+        const safeUri = vscode.Uri.file(path.join(path.dirname(tmpFile.fsPath), "safe.md"));
+        const outsideUri = vscode.Uri.file(path.resolve("/etc/passwd"));
+
+        assert.strictEqual(isPathInsideRoot(safeUri, tmpFile), true, "Same directory should be inside root");
+        assert.strictEqual(isPathInsideRoot(outsideUri, tmpFile), false, "Traversing outside directory should be rejected");
+
+        // Test resolveWikilinkUri with path traversal inputs
+        const traversalResolved = await resolveWikilinkUri("../../../../../../../../etc/passwd", tmpFile);
+        assert.strictEqual(traversalResolved, undefined, "Path traversal wikilink must resolve to undefined");
+
+        const nullByteResolved = await resolveWikilinkUri("file.md\0.txt", tmpFile);
+        assert.strictEqual(nullByteResolved, undefined, "Null byte wikilink must resolve to undefined");
+
+        const absoluteResolved = await resolveWikilinkUri("/etc/passwd", tmpFile);
+        assert.strictEqual(absoluteResolved, undefined, "Absolute path wikilink must resolve to undefined");
+    });
 });
+
