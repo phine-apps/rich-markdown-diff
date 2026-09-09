@@ -24,7 +24,7 @@
 
 import * as crypto from "crypto";
 import { diffTables } from "./tableDiff";
-import { findClosing, stripHtmlTags } from "./domUtils";
+import { areHtmlTagsBalanced, findClosing, stripHtmlTags } from "./domUtils";
 import {
   computeMermaidDiff,
   computeMermaidDiffPair,
@@ -237,49 +237,88 @@ export function splitBySections(
 
   let i = 0;
   let lastIndex = 0;
+  let nesting = 0;
 
   while (i < html.length) {
     if (html[i] === "<") {
-      // Look for a section-splitting header (h1-h3) at the CURRENT level
-      const hMatchRegex = /\<(h[1-3])\b[^>]*>/iy;
-      hMatchRegex.lastIndex = i;
-      const hMatch = hMatchRegex.exec(html);
-      if (hMatch) {
-        const tagName = hMatch[1];
-        const closingPos = findClosing(html, i, tagName);
-
-        if (closingPos !== -1) {
-          // 1. Content BEFORE this header belongs to the PREVIOUS section
-          if (i > lastIndex) {
-            const prevContent = html.substring(lastIndex, i);
-            if (sections.length === 0) {
-              sections.push({
-                header: "",
-                headerText: "",
-                content: prevContent,
-                full: prevContent,
-              });
-            } else {
-              sections[sections.length - 1].content += prevContent;
-              sections[sections.length - 1].full += prevContent;
-            }
-          }
-
-          // 2. Start a new section with this header
-          const headerFull = html.substring(i, closingPos);
-          sections.push({
-            header: headerFull,
-            headerText: getHeaderText(headerFull),
-            content: "",
-            full: headerFull,
-          });
-
-          i = closingPos;
-          lastIndex = i;
+      // 1. Skip comments
+      if (html.startsWith("<!--", i)) {
+        const endComment = html.indexOf("-->", i + 4);
+        if (endComment !== -1) {
+          i = endComment + 3;
           continue;
         }
       }
 
+      // 2. Closing tag: decrement nesting
+      if (html[i + 1] === "/") {
+        nesting = Math.max(0, nesting - 1);
+        const endTag = html.indexOf(">", i);
+        if (endTag !== -1) {
+          i = endTag + 1;
+          continue;
+        }
+      } else if (html[i + 1] !== "!" && html[i + 1] !== "?") {
+        // 3. Top-level section header (h1-h3) at the CURRENT (top) level only
+        if (nesting === 0) {
+          const hMatchRegex = /<(h[1-3])\b[^>]*>/iy;
+          hMatchRegex.lastIndex = i;
+          const hMatch = hMatchRegex.exec(html);
+          if (hMatch) {
+            const tagName = hMatch[1];
+            const closingPos = findClosing(html, i, tagName);
+
+            if (closingPos !== -1) {
+              // Content BEFORE this header belongs to the PREVIOUS section
+              if (i > lastIndex) {
+                const prevContent = html.substring(lastIndex, i);
+                if (sections.length === 0) {
+                  sections.push({
+                    header: "",
+                    headerText: "",
+                    content: prevContent,
+                    full: prevContent,
+                  });
+                } else {
+                  sections[sections.length - 1].content += prevContent;
+                  sections[sections.length - 1].full += prevContent;
+                }
+              }
+
+              // Start a new section with this header
+              const headerFull = html.substring(i, closingPos);
+              sections.push({
+                header: headerFull,
+                headerText: getHeaderText(headerFull),
+                content: "",
+                full: headerFull,
+              });
+
+              i = closingPos;
+              lastIndex = i;
+              continue;
+            }
+          }
+        }
+
+        // 4. Other opening tags: track nesting (skip void and self-closing)
+        const tagMatchRegex = /<([a-z0-9]+)\b/iy;
+        tagMatchRegex.lastIndex = i;
+        const match = tagMatchRegex.exec(html);
+        if (match) {
+          const tagName = match[1].toLowerCase();
+          const isVoid = ["img", "br", "hr", "meta", "link", "input", "source", "wbr"].includes(tagName);
+          const endOfTag = html.indexOf(">", i);
+          const isSelfClosing = endOfTag !== -1 && html[endOfTag - 1] === "/";
+          if (!isVoid && !isSelfClosing) {
+            nesting++;
+          }
+          if (endOfTag !== -1) {
+            i = endOfTag + 1;
+            continue;
+          }
+        }
+      }
     }
     i++;
   }
@@ -2395,12 +2434,15 @@ export function checkIfAllContentIsWrapped(
   html: string,
   type: "ins" | "del",
 ): boolean {
+  if (!areHtmlTagsBalanced(html)) {
+    return false;
+  }
   const totalText = stripHtmlTags(html).replace(/\s/g, "");
   const stripped = html.replace(
     new RegExp(`<${type}[^>]*?>[\\s\\S]*?<\\/${type}>`, "gi"),
     "",
   );
-  const remaining = stripped.trim();
+  const remaining = stripHtmlTags(stripped).replace(/\s/g, "");
   return remaining.length === 0 && totalText.length > 0;
 }
 

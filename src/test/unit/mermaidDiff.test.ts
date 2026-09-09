@@ -228,4 +228,15 @@ describe("Mermaid Semantic Diff", () => {
     // No valid edges should be parsed from malformed input
     assert.strictEqual(edges.length, 0);
   });
+
+  it("should parse asymmetric flag shape nodes correctly without node explosion", () => {
+    const code = "graph TD\n  A>Flag 1] --> B>Flag 2]";
+    const nodes = parseMermaidNodes(code);
+    assert.strictEqual(nodes.size, 2, "Should identify exactly 2 nodes");
+    assert.ok(nodes.has("A"), "Should have node A");
+    assert.ok(nodes.has("B"), "Should have node B");
+    assert.strictEqual(nodes.get("A")?.label, "Flag 1");
+    assert.strictEqual(nodes.get("B")?.label, "Flag 2");
+  });
 });
+

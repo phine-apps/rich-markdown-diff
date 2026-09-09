@@ -24,7 +24,11 @@
 
 import * as assert from "assert";
 import { MarkdownDiffProvider } from "../../markdownDiff";
-import { stripHtmlTags } from "../../markdown/domUtils";
+import { areHtmlTagsBalanced, stripHtmlTags } from "../../markdown/domUtils";
+import {
+  splitBySections,
+  checkIfAllContentIsWrapped,
+} from "../../markdown/structuralDiff";
 
 describe("MarkdownDiffProvider", () => {
   let provider: MarkdownDiffProvider;
@@ -1978,4 +1982,33 @@ title: "Doc 1"
 
     assert.ok(html.includes("toggleFold();"));
   });
+
+  it("should not slice through container elements like blockquote in splitBySections", () => {
+    const html = "<blockquote><h1>Heading inside quote</h1><p>Text</p></blockquote>";
+    const sections = splitBySections(html);
+    assert.strictEqual(sections.length, 1, "Should keep blockquote with nested heading as single section");
+    assert.ok(sections[0].full.includes("<blockquote>") && sections[0].full.includes("</blockquote>"));
+  });
+
+  it("should return true in checkIfAllContentIsWrapped for wholly wrapped blocks", () => {
+    const html = "<p><ins>This is whole new paragraph</ins></p>";
+    assert.strictEqual(checkIfAllContentIsWrapped(html, "ins"), true);
+    const partial = "<p><ins>This is whole</ins> but this is not</p>";
+    assert.strictEqual(checkIfAllContentIsWrapped(partial, "ins"), false);
+  });
+
+  it("should accurately validate HTML tag balance with areHtmlTagsBalanced", () => {
+    assert.strictEqual(areHtmlTagsBalanced("<div><p><span>text</span></p></div>"), true);
+    assert.strictEqual(areHtmlTagsBalanced("<div><!-- comment --><img><br><hr/></div>"), true);
+    assert.strictEqual(areHtmlTagsBalanced("<div title=\"a > b\"><p>text</p></div>"), true);
+    assert.strictEqual(areHtmlTagsBalanced("<div><div><span>text</span></div>"), false, "Unclosed div should fail");
+    assert.strictEqual(areHtmlTagsBalanced("<div></span></div>"), false, "Mismatched close tag should fail");
+    assert.strictEqual(areHtmlTagsBalanced("</div>"), false, "Orphan close tag should fail");
+  });
+
+  it("should not wrap unbalanced HTML fragments in checkIfAllContentIsWrapped", () => {
+    const slicedAdmonition = '<div class="outer"><div class="inner"><ins>Warning</ins></div>';
+    assert.strictEqual(checkIfAllContentIsWrapped(slicedAdmonition, "ins"), false);
+  });
 });
+

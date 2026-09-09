@@ -130,7 +130,7 @@ export function parseMermaidNodes(code: string): Map<string, MermaidNode> {
       continue;
     }
 
-    const nodeRegex = /\b([a-zA-Z0-9_]+(?:-[a-zA-Z0-9_]+)*)(?:\(\((?:["']([^"']+)["']|([^\)]+))\)\)|\[\[(?:["']([^"']+)["']|([^\]]+))\]\]|\[(?:["']([^"']+)["']|([^\]]+))\]|\((?:["']([^"']+)["']|([^\)]+))\)|\{(?:["']([^"']+)["']|([^\}]+))\}|>([^\\]]+)\])?/g;
+    const nodeRegex = /\b([a-zA-Z0-9_]+(?:-[a-zA-Z0-9_]+)*)(?:\(\((?:["']([^"']+)["']|([^\)]+))\)\)|\[\[(?:["']([^"']+)["']|([^\]]+))\]\]|\[(?:["']([^"']+)["']|([^\]]+))\]|\((?:["']([^"']+)["']|([^\)]+))\)|\{(?:["']([^"']+)["']|([^\}]+))\}|>(?:["']([^"']+)["']|([^\]]+))\])?/g;
     
     let match: RegExpExecArray | null;
     while ((match = nodeRegex.exec(trimmed)) !== null) {
@@ -139,13 +139,13 @@ export function parseMermaidNodes(code: string): Map<string, MermaidNode> {
         continue;
       }
       
-      const hasExplicitShape = Boolean(match[2] || match[3] || match[4] || match[5] || match[6] || match[7] || match[8] || match[9] || match[10] || match[11] || match[12]);
+      const hasExplicitShape = Boolean(match[2] || match[3] || match[4] || match[5] || match[6] || match[7] || match[8] || match[9] || match[10] || match[11] || match[12] || match[13]);
 
       if (!hasExplicitShape && edgeLabelWords.has(id)) {
         continue;
       }
 
-      const label = match[2] || match[3] || match[4] || match[5] || match[6] || match[7] || match[8] || match[9] || match[10] || match[11] || match[12] || id;
+      const label = match[2] || match[3] || match[4] || match[5] || match[6] || match[7] || match[8] || match[9] || match[10] || match[11] || match[12] || match[13] || id;
       if (!nodes.has(id)) {
         nodes.set(id, { id, label, raw: match[0] });
       }
