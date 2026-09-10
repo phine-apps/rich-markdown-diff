@@ -63,17 +63,33 @@ export function parseTable(html: string) {
   const headers: { html: string; attrs: string }[] = [];
 
   const getInner = (h: string, tag: string) => {
-    const startRegex = new RegExp(`<${tag}([^>]*)>`, "i");
-    const endRegex = new RegExp(`</${tag}>`, "i");
-    const startMatch = h.match(startRegex);
-    const endMatch = h.match(endRegex);
-    if (startMatch && endMatch) {
-      return {
-        attrs: startMatch[1],
-        content: h.substring(startMatch.index! + startMatch[0].length, endMatch.index)
-      };
+    let openTagEnd = -1;
+    let inQuote: string | null = null;
+    const prefixLen = tag.length + 1; // "<" + tag
+    for (let i = prefixLen; i < h.length; i++) {
+      const ch = h[i];
+      if (inQuote) {
+        if (ch === inQuote) {
+          inQuote = null;
+        }
+      } else if (ch === '"' || ch === "'") {
+        inQuote = ch;
+      } else if (ch === ">") {
+        openTagEnd = i;
+        break;
+      }
     }
-    return null;
+    if (openTagEnd === -1) {
+      return null;
+    }
+    const closeTagStart = h.lastIndexOf("<");
+    if (closeTagStart <= openTagEnd) {
+      return null;
+    }
+    return {
+      attrs: h.substring(prefixLen, openTagEnd),
+      content: h.substring(openTagEnd + 1, closeTagStart),
+    };
   };
 
   // Extract thead

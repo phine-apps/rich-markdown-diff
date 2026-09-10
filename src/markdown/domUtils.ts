@@ -135,3 +135,114 @@ export function stripHtmlTags(input: string): string {
   } while (current !== previous);
   return current;
 }
+
+/**
+ * Checks whether all HTML tags in an HTML fragment are properly balanced (all non-void
+ * opening tags have matching closing tags in correct LIFO order, and no unexpected closing tags).
+ */
+export function areHtmlTagsBalanced(html: string): boolean {
+  const stack: string[] = [];
+  const voidTags = new Set([
+    "area",
+    "base",
+    "br",
+    "col",
+    "embed",
+    "hr",
+    "img",
+    "input",
+    "link",
+    "meta",
+    "param",
+    "source",
+    "track",
+    "wbr",
+  ]);
+
+  let i = 0;
+  const len = html.length;
+
+  while (i < len) {
+    if (html[i] === "<") {
+      // 1. Skip comments: <!-- ... -->
+      if (html.startsWith("<!--", i)) {
+        const endComment = html.indexOf("-->", i + 4);
+        if (endComment === -1) {
+          return false;
+        }
+        i = endComment + 3;
+        continue;
+      }
+
+      // 2. Closing tag: </tag ... >
+      if (html[i + 1] === "/") {
+        let j = i + 2;
+        while (j < len && html[j] !== ">") {
+          if (html[j] === '"' || html[j] === "'") {
+            const quote = html[j];
+            j++;
+            while (j < len && html[j] !== quote) {
+              j++;
+            }
+          }
+          j++;
+        }
+        if (j >= len) {
+          return false;
+        }
+        const tagText = html.substring(i + 2, j).trim();
+        const closeTagNameMatch = /^([a-z0-9]+)\b/i.exec(tagText);
+        if (!closeTagNameMatch) {
+          return false;
+        }
+        const tagName = closeTagNameMatch[1].toLowerCase();
+        if (stack.length === 0 || stack[stack.length - 1] !== tagName) {
+          return false;
+        }
+        stack.pop();
+        i = j + 1;
+        continue;
+      }
+
+      // 3. Opening or self-closing tag: <tag ... > or <tag ... />
+      if (html[i + 1] !== "!" && html[i + 1] !== "?") {
+        let j = i + 1;
+        let isSelfClosing = false;
+        while (j < len) {
+          const c = html[j];
+          if (c === ">") {
+            if (j > i && html[j - 1] === "/") {
+              isSelfClosing = true;
+            }
+            break;
+          }
+          if (c === '"' || c === "'") {
+            const quote = c;
+            j++;
+            while (j < len && html[j] !== quote) {
+              j++;
+            }
+          }
+          j++;
+        }
+        if (j >= len) {
+          return false;
+        }
+        const tagText = html.substring(i + 1, j);
+        const openTagNameMatch = /^([a-z0-9]+)\b/i.exec(tagText);
+        if (openTagNameMatch) {
+          const tagName = openTagNameMatch[1].toLowerCase();
+          if (!isSelfClosing && !voidTags.has(tagName)) {
+            stack.push(tagName);
+          }
+          i = j + 1;
+          continue;
+        }
+      }
+    }
+    i++;
+  }
+
+  return stack.length === 0;
+}
+

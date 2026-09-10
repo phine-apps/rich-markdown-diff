@@ -96,4 +96,22 @@ describe("parseTable", () => {
     const result = parseTable(html);
     assert.ok(result.tableAttrs.includes("my-table"));
   });
+
+  it("should not truncate cells containing nested tables", () => {
+    const html = "<table><tbody><tr><td>Before <table><tr><td>Nested</td></tr></table> After</td></tr></tbody></table>";
+    const result = parseTable(html);
+    assert.strictEqual(result.rows.length, 1);
+    assert.strictEqual(result.rows[0].cells.length, 1);
+    assert.strictEqual(result.rows[0].cells[0].html, "Before <table><tr><td>Nested</td></tr></table> After");
+  });
+
+  it("should handle fake closing tags in attribute values", () => {
+    const html = `<table><thead><tr><th title="</th>">Real Header</th></tr></thead><tbody><tr><td data-info="</td>">Real Data</td></tr></tbody></table>`;
+    const result = parseTable(html);
+    assert.strictEqual(result.headers.length, 1);
+    assert.strictEqual(result.headers[0].html, "Real Header");
+    assert.strictEqual(result.rows.length, 1);
+    assert.strictEqual(result.rows[0].cells[0].html, "Real Data");
+  });
 });
+
