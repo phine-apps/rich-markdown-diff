@@ -2030,5 +2030,38 @@ title: "Doc 1"
     assert.strictEqual(areHtmlTagsBalanced("<custom-element>content</custom-element>"), true);
     assert.strictEqual(areHtmlTagsBalanced("<custom-element>content</different-element>"), false, "Mismatched hyphenated tags must fail");
   });
+
+  it("should handle text comparisons with < without falsely parsing tags in areHtmlTagsBalanced", () => {
+    assert.strictEqual(areHtmlTagsBalanced("a < b"), true, "Simple comparison without tag");
+    assert.strictEqual(areHtmlTagsBalanced("5 < 10"), true, "Numeric comparison");
+    assert.strictEqual(areHtmlTagsBalanced("x <= 10 && y >= 20"), true, "Less than equal");
+    assert.strictEqual(areHtmlTagsBalanced("<p>5 < 10 and a < b</p>"), true, "Comparisons inside paragraph");
+    assert.strictEqual(areHtmlTagsBalanced("<p>if (x <div_val) { return 0; }</p>"), true, "Non-tag identifier after <");
+    assert.strictEqual(areHtmlTagsBalanced("<div>x <> y</div>"), true, "Diamond operator without tag");
+  });
+
+  it("should accurately detect unclosed quotes inside tags in areHtmlTagsBalanced", () => {
+    assert.strictEqual(areHtmlTagsBalanced('<div title="unclosed quote>'), false, "Unclosed double quote in open tag");
+    assert.strictEqual(areHtmlTagsBalanced("<div title='unclosed quote>"), false, "Unclosed single quote in open tag");
+    assert.strictEqual(areHtmlTagsBalanced('<div title="unclosed quote>hello</div>'), false, "Unclosed quote with following closing tag");
+    assert.strictEqual(areHtmlTagsBalanced('</div title="unclosed quote>'), false, "Unclosed quote in close tag");
+    assert.strictEqual(areHtmlTagsBalanced('<div title="a > b">content</div>'), true, "Valid closed quote with greater-than sign");
+  });
+
+  it("should tolerate whitespace in self-closing tags and closing tags in areHtmlTagsBalanced", () => {
+    assert.strictEqual(areHtmlTagsBalanced("<custom-element  />"), true, "Whitespace before slash");
+    assert.strictEqual(areHtmlTagsBalanced("<custom-element / >"), true, "Whitespace between slash and bracket");
+    assert.strictEqual(areHtmlTagsBalanced("<custom-element key=\"val\"   /   >"), true, "Whitespace around slash with attribute");
+    assert.strictEqual(areHtmlTagsBalanced("<div></div >"), true, "Closing tag with trailing whitespace");
+    assert.strictEqual(areHtmlTagsBalanced('<div></div data-extra="1">'), true, "Closing tag with trailing attribute");
+    assert.strictEqual(areHtmlTagsBalanced("<div></custom-element ></div>"), false, "Mismatched closing tag even with whitespace");
+  });
+
+  it("should reject malformed closing tags in areHtmlTagsBalanced", () => {
+    assert.strictEqual(areHtmlTagsBalanced("<div></ div></div>"), false, "Whitespace after </ is invalid HTML");
+    assert.strictEqual(areHtmlTagsBalanced("<div></123></div>"), false, "Numeric tag name in closing tag is invalid");
+    assert.strictEqual(areHtmlTagsBalanced("<div></></div>"), false, "Empty closing tag is invalid");
+    assert.strictEqual(areHtmlTagsBalanced("<div></div_invalid></div>"), false, "Invalid identifier in closing tag");
+  });
 });
 
