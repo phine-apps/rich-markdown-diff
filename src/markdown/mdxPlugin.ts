@@ -83,6 +83,72 @@ function parseMdxTag(text: string): MdxTagInfo | null {
 }
 
 /**
+ * Finds the matching closing tag </tagName> on the same line, respecting
+ * nested child tags of the same name and HTML comments.
+ * Returns null if no matching closing tag exists on the same line.
+ */
+function findSameLineClosing(
+  text: string,
+  startIndex: number,
+  tagName: string,
+): { closeStart: number; closeEnd: number; innerContent: string } | null {
+  const escapedTagName = tagName.replace(/[-\/\\^$*+?.()|[\]{}]/g, "\\$&");
+  const closeTagRegex = new RegExp(`^<\\/\\s*${escapedTagName}(?:[\\s>]|$)`, "i");
+
+  let i = startIndex;
+  let depth = 1;
+
+  while (i < text.length) {
+    if (text[i] === "\n" || text[i] === "\r") {
+      return null;
+    }
+    if (text[i] === "<") {
+      // 1. Skip HTML comments: <!-- ... -->
+      if (text.startsWith("<!--", i)) {
+        const endComment = text.indexOf("-->", i + 4);
+        if (endComment === -1) {
+          return null;
+        }
+        i = endComment + 3;
+        continue;
+      }
+
+      const rest = text.slice(i);
+
+      // 2. Check for matching closing tag: </tagName ...>
+      const closeMatch = rest.match(closeTagRegex);
+      if (closeMatch) {
+        depth--;
+        const endIdx = rest.indexOf(">");
+        const closeEnd = i + (endIdx !== -1 ? endIdx + 1 : closeMatch[0].length);
+        if (depth === 0) {
+          return {
+            closeStart: i,
+            closeEnd,
+            innerContent: text.slice(startIndex, i),
+          };
+        }
+        i = closeEnd;
+        continue;
+      }
+
+      // 3. Check for nested opening tag of the same name
+      const child = parseMdxTag(rest);
+      if (child && child.tagName.toLowerCase() === tagName.toLowerCase()) {
+        if (!child.isSelfClosing) {
+          depth++;
+        }
+        i += child.fullTag.length;
+        continue;
+      }
+    }
+    i++;
+  }
+
+  return null;
+}
+
+/**
  * Custom Markdown-It plugin that adds support for MDX elements (like Tabs, Badges, Cards, Steps)
  * and Docusaurus Admonitions (:::note etc.).
  */
@@ -99,25 +165,81 @@ export default function mdxPlugin(md: MarkdownIt) {
       return false;
     }
 
-    if (silent) {
-      return true;
-    }
-
-    const { tagName, attrsText, isSelfClosing } = tagInfo;
+    const { tagName, attrsText, isSelfClosing, fullTag } = tagInfo;
     const attrs = parseAttributes(attrsText);
+    const isBadge = tagName.toLowerCase() === "badge";
 
     if (isSelfClosing) {
-      const token = state.push("mdx_self_closing", "div", 0);
-      token.markup = tagInfo.fullTag;
-      token.map = [startLine, startLine + 1];
-      token.meta = { tagName, attrs };
+      const restOfLine = lineText.slice(fullTag.length).trim();
+      if (restOfLine.length === 0) {
+        if (silent) {
+          return true;
+        }
+        const token = state.push("mdx_self_closing", "div", 0);
+        token.markup = fullTag;
+        token.map = [startLine, startLine + 1];
+        token.meta = { tagName, attrs };
+        state.line = startLine + 1;
+        return true;
+      }
+      // Followed by inline content on the same line; delegate to paragraph/inline parser
+      return false;
+    }
+
+    // Check if the tag is closed on the SAME line
+    const sameLineClose = findSameLineClosing(lineText, fullTag.length, tagName);
+    if (sameLineClose) {
+      const afterClose = lineText.slice(sameLineClose.closeEnd).trim();
+      if (afterClose.length > 0) {
+        // Tag is followed by other content on the same line; delegate to inline parser
+        return false;
+      }
+
+      if (silent) {
+        return true;
+      }
+
+      if (isBadge) {
+        const hasText = attrs.some(([k]) => k.toLowerCase() === "text");
+        if (!hasText) {
+          attrs.push(["text", sameLineClose.innerContent.trim()]);
+        }
+        const token = state.push("mdx_self_closing", "div", 0);
+        token.markup = lineText;
+        token.map = [startLine, startLine + 1];
+        token.meta = { tagName, attrs };
+        state.line = startLine + 1;
+        return true;
+      }
+
+      const tokenOpen = state.push("mdx_open", "div", 1);
+      tokenOpen.markup = fullTag;
+      tokenOpen.map = [startLine, startLine + 1];
+      tokenOpen.meta = { tagName, attrs };
+
+      if (sameLineClose.innerContent.trim().length > 0) {
+        const tokenInline = state.push("inline", "", 0);
+        tokenInline.content = sameLineClose.innerContent.trim();
+        tokenInline.children = [];
+        tokenInline.map = [startLine, startLine + 1];
+      }
+
+      const tokenClose = state.push("mdx_close", "div", -1);
+      tokenClose.markup = `</${tagName}>`;
+      tokenClose.map = [startLine, startLine + 1];
+      tokenClose.meta = { tagName };
+
       state.line = startLine + 1;
       return true;
     }
 
-    // Parse block tags containing nested content (requires searching for matching closing tag </Tag>)
+    if (silent) {
+      return true;
+    }
+
+    // Multi-line block tags containing nested content (requires searching for matching closing tag </Tag>)
     const tokenOpen = state.push("mdx_open", "div", 1);
-    tokenOpen.markup = tagInfo.fullTag;
+    tokenOpen.markup = fullTag;
     tokenOpen.map = [startLine, startLine + 1];
     tokenOpen.meta = { tagName, attrs };
 
@@ -139,11 +261,14 @@ export default function mdxPlugin(md: MarkdownIt) {
           break;
         }
       } else if (openTagRegex.test(nextLineText)) {
-        // Only increment depth if the child tag is NOT self-closing
+        // Only increment depth if child tag is NOT self-closing AND not closed on the same line
         const childTag = parseMdxTag(nextLineText);
         if (childTag && childTag.tagName.toLowerCase() === tagName.toLowerCase()) {
           if (!childTag.isSelfClosing) {
-            depth++;
+            const childSameLine = findSameLineClosing(nextLineText, childTag.fullTag.length, childTag.tagName);
+            if (!childSameLine) {
+              depth++;
+            }
           }
         }
       }
@@ -161,7 +286,7 @@ export default function mdxPlugin(md: MarkdownIt) {
     tokenClose.map = [nextLine, nextLine + 1];
     tokenClose.meta = { tagName };
 
-    state.line = nextLine + 1;
+    state.line = Math.min(nextLine + 1, endLine);
     return true;
   });
 
@@ -229,16 +354,53 @@ export default function mdxPlugin(md: MarkdownIt) {
       return false;
     }
 
-    if (!silent) {
-      const { tagName, attrsText, isSelfClosing, fullTag } = tagInfo;
-      const attrs = parseAttributes(attrsText);
+    const { tagName, attrsText, isSelfClosing, fullTag } = tagInfo;
+    const attrs = parseAttributes(attrsText);
+    const isBadge = tagName.toLowerCase() === "badge";
 
-      const token = state.push("mdx_inline", "span", 0);
-      token.markup = fullTag;
-      token.meta = { tagName, attrs, isSelfClosing };
+    if (isSelfClosing) {
+      if (!silent) {
+        const token = state.push("mdx_inline", "span", 0);
+        token.markup = fullTag;
+        token.meta = { tagName, attrs, isSelfClosing: true };
+      }
+      state.pos += fullTag.length;
+      return true;
     }
 
-    state.pos += tagInfo.fullTag.length;
+    const sameLineClose = findSameLineClosing(tail, fullTag.length, tagName);
+    if (!sameLineClose) {
+      if (isBadge) {
+        return false;
+      }
+      // Fallback for unclosed non-badge custom components in an inline paragraph
+      if (!silent) {
+        const token = state.push("mdx_inline", "span", 0);
+        token.markup = fullTag;
+        token.meta = { tagName, attrs, isSelfClosing: true };
+      }
+      state.pos += fullTag.length;
+      return true;
+    }
+
+    if (!silent) {
+      if (isBadge) {
+        const hasText = attrs.some(([k]) => k.toLowerCase() === "text");
+        if (!hasText) {
+          attrs.push(["text", sameLineClose.innerContent.trim()]);
+        }
+      }
+      const token = state.push("mdx_inline", "span", 0);
+      token.markup = tail.slice(0, sameLineClose.closeEnd);
+      token.meta = {
+        tagName,
+        attrs,
+        isSelfClosing: false,
+        content: sameLineClose.innerContent,
+      };
+    }
+
+    state.pos += sameLineClose.closeEnd;
     return true;
   });
 
@@ -344,6 +506,9 @@ export default function mdxPlugin(md: MarkdownIt) {
 
     // Generic inline placeholder
     const attrSnippet = attrs.map(([k, v]) => `${escapeHtml(k)}="${escapeHtml(v)}"`).join(" ");
+    if (token.meta.content !== undefined && !token.meta.isSelfClosing) {
+      return `<span class="mdx-inline-fallback">&lt;${escapeHtml(tagName)}${attrSnippet ? " " + attrSnippet : ""}&gt;${escapeHtml(token.meta.content)}&lt;/${escapeHtml(tagName)}&gt;</span>`;
+    }
     return `<span class="mdx-inline-fallback">&lt;${escapeHtml(tagName)}${attrSnippet ? " " + attrSnippet : ""} /&gt;</span>`;
   };
 
