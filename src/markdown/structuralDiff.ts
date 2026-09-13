@@ -21,10 +21,14 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
  */
-
 import * as crypto from "crypto";
 import { diffTables } from "./tableDiff";
-import { areHtmlTagsBalanced, findClosing, stripHtmlTags } from "./domUtils";
+import {
+  areHtmlTagsBalanced,
+  findClosing,
+  HTML_VOID_TAGS,
+  stripHtmlTags,
+} from "./domUtils";
 import {
   computeMermaidDiff,
   computeMermaidDiffPair,
@@ -239,9 +243,11 @@ export function splitBySections(
   let lastIndex = 0;
   let nesting = 0;
 
-  while (i < html.length) {
+  const len = html.length;
+
+  while (i < len) {
     if (html[i] === "<") {
-      // 1. Skip comments
+      // 1. Skip comments: <!-- ... -->
       if (html.startsWith("<!--", i)) {
         const endComment = html.indexOf("-->", i + 4);
         if (endComment !== -1) {
@@ -250,22 +256,31 @@ export function splitBySections(
         }
       }
 
-      // 2. Closing tag: decrement nesting
+      // 2. Closing tag: </tag ... > (safely skipping quotes)
       if (html[i + 1] === "/") {
-        nesting = Math.max(0, nesting - 1);
-        const endTag = html.indexOf(">", i);
-        if (endTag !== -1) {
-          i = endTag + 1;
+        let j = i + 2;
+        while (j < len && html[j] !== ">") {
+          if (html[j] === '"' || html[j] === "'") {
+            const quote = html[j];
+            j++;
+            while (j < len && html[j] !== quote) {
+              j++;
+            }
+          }
+          j++;
+        }
+        if (j < len) {
+          nesting = Math.max(0, nesting - 1);
+          i = j + 1;
           continue;
         }
       } else if (html[i + 1] !== "!" && html[i + 1] !== "?") {
-        // 3. Top-level section header (h1-h3) at the CURRENT (top) level only
-        if (nesting === 0) {
-          const hMatchRegex = /<(h[1-3])\b[^>]*>/iy;
-          hMatchRegex.lastIndex = i;
-          const hMatch = hMatchRegex.exec(html);
-          if (hMatch) {
-            const tagName = hMatch[1];
+        const tagMatch = /^<([a-z0-9-]+)\b/i.exec(html.slice(i));
+        if (tagMatch) {
+          const tagName = tagMatch[1].toLowerCase();
+
+          // 3. Top-level section header (h1-h3) at the CURRENT (top) level only
+          if (nesting === 0 && (tagName === "h1" || tagName === "h2" || tagName === "h3")) {
             const closingPos = findClosing(html, i, tagName);
 
             if (closingPos !== -1) {
@@ -299,22 +314,33 @@ export function splitBySections(
               continue;
             }
           }
-        }
 
-        // 4. Other opening tags: track nesting (skip void and self-closing)
-        const tagMatchRegex = /<([a-z0-9]+)\b/iy;
-        tagMatchRegex.lastIndex = i;
-        const match = tagMatchRegex.exec(html);
-        if (match) {
-          const tagName = match[1].toLowerCase();
-          const isVoid = ["img", "br", "hr", "meta", "link", "input", "source", "wbr"].includes(tagName);
-          const endOfTag = html.indexOf(">", i);
-          const isSelfClosing = endOfTag !== -1 && html[endOfTag - 1] === "/";
-          if (!isVoid && !isSelfClosing) {
-            nesting++;
+          // 4. Other opening tags: scan to closing > skipping quotes to accurately check self-closing and void tags
+          let j = i + 1;
+          let isSelfClosing = false;
+          while (j < len) {
+            const c = html[j];
+            if (c === ">") {
+              if (j > i && html[j - 1] === "/") {
+                isSelfClosing = true;
+              }
+              break;
+            }
+            if (c === '"' || c === "'") {
+              const quote = c;
+              j++;
+              while (j < len && html[j] !== quote) {
+                j++;
+              }
+            }
+            j++;
           }
-          if (endOfTag !== -1) {
-            i = endOfTag + 1;
+          if (j < len) {
+            const isVoid = HTML_VOID_TAGS.has(tagName);
+            if (!isVoid && !isSelfClosing) {
+              nesting++;
+            }
+            i = j + 1;
             continue;
           }
         }
