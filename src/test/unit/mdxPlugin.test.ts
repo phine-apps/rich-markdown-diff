@@ -201,5 +201,61 @@ Paragraph between cards.
     assert.ok(result.html.includes("Comparison: A &gt; B") || result.html.includes("Comparison: A > B"), "Should preserve full title with >");
     assert.ok(result.html.includes("Content inside card."), "Should render card body");
   });
+
+  it("should not swallow subsequent blocks or discard text for single-line Badges", () => {
+    const doc = `<Badge>Active</Badge>\nParagraph after badge.`;
+    const result = provider.computeDiff(doc, doc);
+    assert.ok(result.html.includes("Active"), "Should preserve badge text");
+    assert.ok(result.html.includes("Paragraph after badge."), "Subsequent paragraph must not be swallowed");
+    const badgePos = result.html.indexOf("Active");
+    const paragraphPos = result.html.indexOf("Paragraph after badge.");
+    assert.ok(badgePos < paragraphPos, "Paragraph must appear after badge");
+    assert.ok(!result.html.includes("mdx-fallback-card"), "Badge must render as badge, not fallback card");
+  });
+
+  it("should not erase trailing text when self-closing tag is followed by text on same line", () => {
+    const doc = `<Badge text="v1.0" /> is the latest version.\n\nSecond line.`;
+    const result = provider.computeDiff(doc, doc);
+    assert.ok(result.html.includes("v1.0"), "Should render badge text");
+    assert.ok(result.html.includes("is the latest version."), "Trailing text on the same line must not be erased");
+    assert.ok(result.html.includes("Second line."), "Second line must be preserved");
+  });
+
+  it("should render single-line closed Card without discarding content or swallowing next block", () => {
+    const doc = `<Card title="Quick Note">Important single line note.</Card>\n\nOutside paragraph.`;
+    const result = provider.computeDiff(doc, doc);
+    assert.ok(result.html.includes('class="mdx-card"'), "Should render card");
+    assert.ok(result.html.includes("Quick Note"), "Should render title");
+    assert.ok(result.html.includes("Important single line note."), "Inner content must not be discarded");
+    assert.ok(result.html.includes("Outside paragraph."), "Outside paragraph must not be swallowed");
+    const cardEnd = result.html.indexOf("Important single line note.");
+    const paragraphPos = result.html.indexOf("Outside paragraph.");
+    assert.ok(cardEnd < paragraphPos, "Outside paragraph must follow the card");
+  });
+
+  it("should handle nested single-line Card inside multi-line Card without swallowing following text", () => {
+    const doc = `<Card title="Outer">
+  <Card title="Inner">Nested inner content</Card>
+</Card>
+
+Paragraph after cards.`;
+    const result = provider.computeDiff(doc, doc);
+    assert.ok(result.html.includes("Outer"), "Should render Outer card");
+    assert.ok(result.html.includes("Inner"), "Should render Inner card");
+    assert.ok(result.html.includes("Nested inner content"), "Should render nested inner content");
+    assert.ok(result.html.includes("Paragraph after cards."), "Paragraph after cards must not be swallowed");
+    const innerPos = result.html.indexOf("Nested inner content");
+    const paragraphPos = result.html.indexOf("Paragraph after cards.");
+    assert.ok(innerPos < paragraphPos, "Paragraph after cards must follow the outer card");
+  });
+
+  it("should support inline Badge with children inside sentence text", () => {
+    const doc = `Here is <Badge variant="tip">Tip text</Badge> in a sentence.`;
+    const result = provider.computeDiff(doc, doc);
+    assert.ok(result.html.includes('class="mdx-badge mdx-badge-tip"'), "Should render tip badge");
+    assert.ok(result.html.includes("Tip text"), "Should render tip text");
+    assert.ok(result.html.includes("in a sentence."), "Should preserve trailing sentence text");
+    assert.ok(!result.html.includes("&lt;/Badge&gt;"), "Closing tag must not leak into HTML");
+  });
 });
 
