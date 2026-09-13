@@ -2010,5 +2010,25 @@ title: "Doc 1"
     const slicedAdmonition = '<div class="outer"><div class="inner"><ins>Warning</ins></div>';
     assert.strictEqual(checkIfAllContentIsWrapped(slicedAdmonition, "ins"), false);
   });
+
+  it("should not corrupt nesting in splitBySections when tables have col or other void tags", () => {
+    const html = "<table><colgroup><col><col></colgroup><tbody><tr><td>A</td><td>B</td></tr></tbody></table><h1>Section 2</h1><p>Content</p>";
+    const sections = splitBySections(html);
+    assert.strictEqual(sections.length, 2, "Should detect 2 sections");
+    assert.strictEqual(sections[1].header, "<h1>Section 2</h1>", "Second section must start with h1");
+  });
+
+  it("should not falsely treat tags with /> inside attributes as self-closing in splitBySections", () => {
+    const html = '<div title="path /> extra"><h1>Nested Header</h1></div><h1>Top Header</h1>';
+    const sections = splitBySections(html);
+    assert.strictEqual(sections.length, 2, "Should not slice through div");
+    assert.strictEqual(sections[1].header, "<h1>Top Header</h1>", "Only top-level h1 should start new section");
+    assert.ok(sections[0].full.includes("<h1>Nested Header</h1>"), "Nested header must stay in first section");
+  });
+
+  it("should accurately validate hyphenated custom tags in areHtmlTagsBalanced", () => {
+    assert.strictEqual(areHtmlTagsBalanced("<custom-element>content</custom-element>"), true);
+    assert.strictEqual(areHtmlTagsBalanced("<custom-element>content</different-element>"), false, "Mismatched hyphenated tags must fail");
+  });
 });
 

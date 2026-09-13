@@ -137,27 +137,32 @@ export function stripHtmlTags(input: string): string {
 }
 
 /**
+ * Set of HTML void tags that cannot have child nodes and must not have closing tags.
+ */
+export const HTML_VOID_TAGS = new Set([
+  "area",
+  "base",
+  "br",
+  "col",
+  "embed",
+  "hr",
+  "img",
+  "input",
+  "link",
+  "meta",
+  "param",
+  "source",
+  "track",
+  "wbr",
+]);
+
+/**
  * Checks whether all HTML tags in an HTML fragment are properly balanced (all non-void
  * opening tags have matching closing tags in correct LIFO order, and no unexpected closing tags).
  */
 export function areHtmlTagsBalanced(html: string): boolean {
   const stack: string[] = [];
-  const voidTags = new Set([
-    "area",
-    "base",
-    "br",
-    "col",
-    "embed",
-    "hr",
-    "img",
-    "input",
-    "link",
-    "meta",
-    "param",
-    "source",
-    "track",
-    "wbr",
-  ]);
+  const voidTags = HTML_VOID_TAGS;
 
   let i = 0;
   const len = html.length;
@@ -191,7 +196,7 @@ export function areHtmlTagsBalanced(html: string): boolean {
           return false;
         }
         const tagText = html.substring(i + 2, j).trim();
-        const closeTagNameMatch = /^([a-z0-9]+)\b/i.exec(tagText);
+        const closeTagNameMatch = /^([a-z][a-z0-9-]*)/i.exec(tagText);
         if (!closeTagNameMatch) {
           return false;
         }
@@ -229,7 +234,7 @@ export function areHtmlTagsBalanced(html: string): boolean {
           return false;
         }
         const tagText = html.substring(i + 1, j);
-        const openTagNameMatch = /^([a-z0-9]+)\b/i.exec(tagText);
+        const openTagNameMatch = /^([a-z][a-z0-9-]*)/i.exec(tagText);
         if (openTagNameMatch) {
           const tagName = openTagNameMatch[1].toLowerCase();
           if (!isSelfClosing && !voidTags.has(tagName)) {
