@@ -30,7 +30,6 @@ import {
   stripHtmlTags,
 } from "./domUtils";
 import {
-  computeMermaidDiff,
   computeMermaidDiffPair,
   isFlowchartMermaid,
 } from "./mermaidDiff";

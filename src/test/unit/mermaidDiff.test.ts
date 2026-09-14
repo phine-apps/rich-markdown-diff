@@ -4,6 +4,7 @@ import {
   computeMermaidDiffPair,
   parseMermaidNodes,
   parseMermaidEdges,
+  isFlowchartMermaid,
 } from "../../markdown/mermaidDiff";
 
 describe("Mermaid Semantic Diff", () => {
@@ -237,6 +238,116 @@ describe("Mermaid Semantic Diff", () => {
     assert.ok(nodes.has("B"), "Should have node B");
     assert.strictEqual(nodes.get("A")?.label, "Flag 1");
     assert.strictEqual(nodes.get("B")?.label, "Flag 2");
+  });
+
+  // --- Mermaid Comment & Node Explosion Defense Tests ---
+
+  it("should not explode into phantom nodes from inline comments", () => {
+    const code = `
+      graph TD
+        A[Start] --> B[Process] %% This is an inline comment with words like C[Fake] --> D
+        B --> E[End] %% Another comment explaining downstream synchronization
+    `;
+    const nodes = parseMermaidNodes(code);
+    assert.strictEqual(nodes.size, 3, "Should detect only A, B, E (no comment words)");
+    assert.ok(nodes.has("A"), "Node A should exist");
+    assert.ok(nodes.has("B"), "Node B should exist");
+    assert.ok(nodes.has("E"), "Node E should exist");
+    assert.ok(!nodes.has("This"), "Comment word 'This' must not be a node");
+    assert.ok(!nodes.has("Fake"), "Comment word 'Fake' must not be a node");
+    assert.ok(!nodes.has("C"), "Comment ID 'C' must not be a node");
+    assert.ok(!nodes.has("D"), "Comment ID 'D' must not be a node");
+    assert.ok(!nodes.has("downstream"), "Comment word 'downstream' must not be a node");
+
+    const edges = parseMermaidEdges(code);
+    assert.strictEqual(edges.length, 2, "Should only detect real edges A->B and B->E");
+    assert.ok(!edges.some((e) => e.from === "C" || e.to === "D"), "Fake edge C->D in comment must not exist");
+  });
+
+  it("should preserve %% inside quoted labels without false comment stripping", () => {
+    const code = `
+      graph TD
+        A["Discount 50%% off"] --> B["100%% complete"] %% Real comment here
+    `;
+    const nodes = parseMermaidNodes(code);
+    assert.strictEqual(nodes.size, 2, "Should detect exactly 2 nodes");
+    assert.strictEqual(nodes.get("A")?.label, "Discount 50%% off");
+    assert.strictEqual(nodes.get("B")?.label, "100%% complete");
+    assert.ok(!nodes.has("Real"), "Comment word 'Real' must not be a node");
+  });
+
+  it("should ignore directives and comments after end or subgraph keywords", () => {
+    const code = `
+      graph TD
+        direction TB %% comment after direction
+        subgraph myGroup [My Group Title] %% comment after subgraph
+          direction LR
+          A --> B
+        end %% comment after end
+        click A "https://example.com" %% comment after click
+    `;
+    const nodes = parseMermaidNodes(code);
+    assert.strictEqual(nodes.size, 2, "Should only detect nodes A and B");
+    assert.ok(nodes.has("A"));
+    assert.ok(nodes.has("B"));
+    assert.ok(!nodes.has("direction"), "'direction' must not be a node");
+    assert.ok(!nodes.has("click"), "'click' must not be a node");
+    assert.ok(!nodes.has("end"), "'end' must not be a node");
+    assert.ok(!nodes.has("after"), "'after' must not be a node");
+  });
+
+  it("should not treat words in complex edge labels or class annotations as nodes", () => {
+    const code = `
+      graph TD
+        A:::myClass -->|"Step 1: Check, verify & confirm!"| B:::otherClass
+        B -- "Important, critical step!" --> C
+        C -.-> D
+    `;
+    const nodes = parseMermaidNodes(code);
+    assert.strictEqual(nodes.size, 4, "Should detect exactly A, B, C, D");
+    assert.ok(nodes.has("A"));
+    assert.ok(nodes.has("B"));
+    assert.ok(nodes.has("C"));
+    assert.ok(nodes.has("D"));
+    assert.ok(!nodes.has("myClass"), "Class 'myClass' must not be a node");
+    assert.ok(!nodes.has("otherClass"), "Class 'otherClass' must not be a node");
+    assert.ok(!nodes.has("Step"), "Label word 'Step' must not be a node");
+    assert.ok(!nodes.has("Check"), "Label word 'Check' must not be a node");
+    assert.ok(!nodes.has("Important"), "Label word 'Important' must not be a node");
+
+    const edges = parseMermaidEdges(code);
+    assert.strictEqual(edges.length, 3, "Should detect 3 edges including dotted arrow");
+    assert.strictEqual(edges[0].from, "A");
+    assert.strictEqual(edges[0].to, "B");
+    assert.strictEqual(edges[2].from, "C");
+    assert.strictEqual(edges[2].to, "D");
+  });
+
+  it("should accurately compute diff without injecting styles for comment words", () => {
+    const oldCode = `
+      graph TD
+        A[Start] --> B[Process] %% old comment with Foo and Bar
+    `;
+    const newCode = `
+      graph TD
+        A[Start] --> B[Process] %% updated comment with Baz and Qux
+    `;
+    const { oldMermaid, newMermaid } = computeMermaidDiffPair(oldCode, newCode);
+    assert.ok(!oldMermaid.includes("style Foo"), "Must not style comment word Foo");
+    assert.ok(!oldMermaid.includes("style Bar"), "Must not style comment word Bar");
+    assert.ok(!newMermaid.includes("style Baz"), "Must not style comment word Baz");
+    assert.ok(!newMermaid.includes("style Qux"), "Must not style comment word Qux");
+  });
+
+  it("should recognize flowchart diagram even when preceded by YAML frontmatter", () => {
+    const code = `
+---
+title: System Architecture
+---
+graph TD
+  A --> B
+    `;
+    assert.strictEqual(isFlowchartMermaid(code), true, "Flowchart with frontmatter must be recognized");
   });
 });
 
