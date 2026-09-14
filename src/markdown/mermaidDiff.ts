@@ -23,13 +23,94 @@ export interface MermaidEdge {
 }
 
 /**
+ * Strips comments (%% ...) from a Mermaid code line while preserving %% inside quoted strings.
+ */
+export function stripMermaidComment(line: string): string {
+  let inDoubleQuote = false;
+  let inSingleQuote = false;
+  const len = line.length;
+
+  for (let i = 0; i < len; i++) {
+    const c = line[i];
+    if (c === '"' && !inSingleQuote) {
+      inDoubleQuote = !inDoubleQuote;
+    } else if (c === "'" && !inDoubleQuote) {
+      inSingleQuote = !inSingleQuote;
+    } else if (
+      !inDoubleQuote &&
+      !inSingleQuote &&
+      c === "%" &&
+      line[i + 1] === "%"
+    ) {
+      return line.substring(0, i);
+    }
+  }
+
+  return line;
+}
+
+/**
+ * Checks if a trimmed Mermaid line is a directive or structural keyword that should not be parsed for nodes or edges.
+ */
+export function isMermaidDirectiveOrSkipLine(trimmed: string): boolean {
+  if (!trimmed) {
+    return true;
+  }
+  if (/^end\b/i.test(trimmed)) {
+    return true;
+  }
+  if (/^(?:graph|flowchart|subgraph)\b/i.test(trimmed)) {
+    return true;
+  }
+  if (
+    /^(?:style|linkStyle|classDef|class|direction|click|accTitle|accDescr|title)(?:\s|:|$)/i.test(
+      trimmed,
+    )
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Removes edge labels and class annotations from a Mermaid line to prevent words inside labels from being parsed as nodes.
+ */
+export function stripMermaidEdgeLabels(line: string): string {
+  // 1. Remove pipe labels: -->|label text| -> -->
+  let cleaned = line.replace(
+    /((?:---|-->|==>|===|-\.-|-\.->|<-->|<--|--o|--x|o--o|x--x)\s*)\|[^|]*\|/g,
+    "$1",
+  );
+  // 2. Remove inline labels: -- label --> -> -->, == label ==> -> ==>
+  cleaned = cleaned.replace(
+    /--\s*(?:["'][^"']*["']|[^\s->\n]+(?:\s+[^\s->\n]+)*)\s*(-->|---)/g,
+    "$1",
+  );
+  cleaned = cleaned.replace(
+    /==\s*(?:["'][^"']*["']|[^\s=>\n]+(?:\s+[^\s=>\n]+)*)\s*(==>|===)/g,
+    "$1",
+  );
+  // 3. Remove class annotations attached to nodes: A:::myClass -> A
+  cleaned = cleaned.replace(/:::[a-zA-Z0-9_-]+/g, "");
+  return cleaned;
+}
+
+/**
  * Checks if the given Mermaid code is a Flowchart / Graph diagram.
  */
 export function isFlowchartMermaid(code: string): boolean {
   const lines = code.split(/\r?\n/);
+  let inFrontmatter = false;
   for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("%%")) {
+    const trimmed = stripMermaidComment(line).trim();
+    if (!trimmed) {
+      continue;
+    }
+    if (trimmed === "---") {
+      inFrontmatter = !inFrontmatter;
+      continue;
+    }
+    if (inFrontmatter) {
       continue;
     }
     return /^(?:graph|flowchart)\b/i.test(trimmed);
@@ -47,35 +128,24 @@ export function parseMermaidEdges(code: string): MermaidEdge[] {
   // Match arrows:
   // 1. A -->|label| B
   // 2. A -- label --> B or A -- "label" --> B
-  // 3. A --> B or A --- B or A ==> B or A -.- B
-  // The optional shape group (?:[(\[{](?:[^)\]}>]|"[^"]*")*[)\]}>])? after the node ID
-  // allows shaped nodes like A["Start"] --> B to be captured correctly.
+  // 3. A --> B or A --- B or A ==> B or A -.- B or A -.-> B
   const SHAPE_GROUP = `(?:(?:\\(\\(|\\[\\[|[([{>])(?:[^)"\\]}>]|"[^"]*")*(?:\\)\\)|\\]\\]|[)\\]}>]))?`;
+  const CLASS_ATTACHMENT = `(?::::[a-zA-Z0-9_-]+)?`;
   const edgeRegex = new RegExp(
-    `\\b([a-zA-Z0-9_-]+)${SHAPE_GROUP}\\s*` +
-    `(?:(?:---|-->|==>|-\\.-)\\s*(?:\\|([^|]+)\\|)?\\s*` +
-    `|--\\s*(?:["']([^"']+)["']|([a-zA-Z0-9_\\s]+))\\s*-->\\s*)` +
-    `([a-zA-Z0-9_-]+)`,
-    "g"
+    `\\b([a-zA-Z0-9_-]+)${SHAPE_GROUP}${CLASS_ATTACHMENT}\\s*` +
+      `(?:(?:---|-->|==>|===|-\\.->|-\\.-|<-->|<--|--o|--x|o--o|x--x)\\s*(?:\\|([^|]+)\\|)?\\s*` +
+      `|--\\s*(?:["']([^"']+)["']|([a-zA-Z0-9_\\s]+))\\s*-->\\s*)` +
+      `([a-zA-Z0-9_-]+)${CLASS_ATTACHMENT}`,
+    "g",
   );
 
   for (const line of lines) {
-    const trimmed = line.trim();
-    // [MERMAID-01] Skip directive lines and subgraph/end keywords to avoid false edge matches
-    if (
-      !trimmed ||
-      trimmed.startsWith("%%") ||
-      trimmed.startsWith("style") ||
-      trimmed.startsWith("linkStyle") ||
-      trimmed.startsWith("subgraph") ||
-      trimmed === "end"
-    ) {
+    const cleanLine = stripMermaidComment(line);
+    const trimmed = cleanLine.trim();
+    if (isMermaidDirectiveOrSkipLine(trimmed)) {
       continue;
     }
 
-    // Reset lastIndex explicitly at the start of each line.
-    // The chain-notation rewind (below) adjusts lastIndex mid-line intentionally,
-    // but it must not bleed into the next line's processing.
     edgeRegex.lastIndex = 0;
 
     let match: RegExpExecArray | null;
@@ -83,11 +153,18 @@ export function parseMermaidEdges(code: string): MermaidEdge[] {
       const from = match[1];
       const label = match[2] || match[3] || match[4];
       const to = match[5];
-      if (from && to && !["graph", "flowchart", "subgraph", "end"].includes(from)) {
-        edges.push({ from, to, label: label ? label.trim() : undefined, raw: match[0] });
-        // [MERMAID-01] Rewind lastIndex to allow the 'to' node to serve as the 'from' of the
-        // next edge in chain notation (e.g. A --> B --> C produces both A→B and B→C).
-        // This is safe because the rewound position is always ahead of match.index.
+      if (
+        from &&
+        to &&
+        !["graph", "flowchart", "subgraph", "end"].includes(from)
+      ) {
+        edges.push({
+          from,
+          to,
+          label: label ? label.trim() : undefined,
+          raw: match[0],
+        });
+        // Rewind lastIndex to allow chain notation (A --> B --> C)
         edgeRegex.lastIndex = match.index + match[0].length - to.length;
       }
     }
@@ -102,50 +179,62 @@ export function parseMermaidEdges(code: string): MermaidEdge[] {
 export function parseMermaidNodes(code: string): Map<string, MermaidNode> {
   const nodes = new Map<string, MermaidNode>();
   const lines = code.split(/\r?\n/);
-  
-  const edges = parseMermaidEdges(code);
-  const edgeLabelWords = new Set<string>();
-  for (const edge of edges) {
-    if (edge.label) {
-      edge.label.split(/\s+/).forEach((w) => edgeLabelWords.add(w));
-    }
-  }
 
   for (const line of lines) {
-    const trimmed = line.trim();
-    // [MERMAID-01] Skip directive lines. Crucially, skip `subgraph myGroup[Label]` lines
-    // to prevent the group name from being mistaken for a node definition.
-    if (
-      !trimmed ||
-      trimmed.startsWith("%%") ||
-      trimmed.startsWith("graph") ||
-      trimmed.startsWith("flowchart") ||
-      trimmed.startsWith("style") ||
-      trimmed.startsWith("linkStyle") ||
-      trimmed.startsWith("classDef") ||
-      trimmed.startsWith("class ") ||
-      trimmed.startsWith("subgraph") ||
-      trimmed === "end"
-    ) {
+    const cleanLine = stripMermaidComment(line);
+    const trimmed = cleanLine.trim();
+
+    if (isMermaidDirectiveOrSkipLine(trimmed)) {
       continue;
     }
 
-    const nodeRegex = /\b([a-zA-Z0-9_]+(?:-[a-zA-Z0-9_]+)*)(?:\(\((?:["']([^"']+)["']|([^\)]+))\)\)|\[\[(?:["']([^"']+)["']|([^\]]+))\]\]|\[(?:["']([^"']+)["']|([^\]]+))\]|\((?:["']([^"']+)["']|([^\)]+))\)|\{(?:["']([^"']+)["']|([^\}]+))\}|>(?:["']([^"']+)["']|([^\]]+))\])?/g;
-    
+    const lineForNodes = stripMermaidEdgeLabels(cleanLine);
+
+    const nodeRegex =
+      /\b([a-zA-Z0-9_]+(?:-[a-zA-Z0-9_]+)*)(?:\(\((?:["']([^"']+)["']|([^\)]+))\)\)|\[\[(?:["']([^"']+)["']|([^\]]+))\]\]|\[(?:["']([^"']+)["']|([^\]]+))\]|\((?:["']([^"']+)["']|([^\)]+))\)|\{(?:["']([^"']+)["']|([^\}]+))\}|>(?:["']([^"']+)["']|([^\]]+))\])?/g;
+
     let match: RegExpExecArray | null;
-    while ((match = nodeRegex.exec(trimmed)) !== null) {
+    while ((match = nodeRegex.exec(lineForNodes)) !== null) {
       const id = match[1];
-      if (["graph", "flowchart", "subgraph", "end", "style", "linkStyle", "classDef", "class", "TD", "LR", "BT", "RL", "TB"].includes(id)) {
+      if (
+        [
+          "graph",
+          "flowchart",
+          "subgraph",
+          "end",
+          "style",
+          "linkStyle",
+          "classDef",
+          "class",
+          "direction",
+          "click",
+          "accTitle",
+          "accDescr",
+          "title",
+          "TD",
+          "LR",
+          "BT",
+          "RL",
+          "TB",
+        ].includes(id)
+      ) {
         continue;
       }
-      
-      const hasExplicitShape = Boolean(match[2] || match[3] || match[4] || match[5] || match[6] || match[7] || match[8] || match[9] || match[10] || match[11] || match[12] || match[13]);
 
-      if (!hasExplicitShape && edgeLabelWords.has(id)) {
-        continue;
-      }
-
-      const label = match[2] || match[3] || match[4] || match[5] || match[6] || match[7] || match[8] || match[9] || match[10] || match[11] || match[12] || match[13] || id;
+      const label =
+        match[2] ||
+        match[3] ||
+        match[4] ||
+        match[5] ||
+        match[6] ||
+        match[7] ||
+        match[8] ||
+        match[9] ||
+        match[10] ||
+        match[11] ||
+        match[12] ||
+        match[13] ||
+        id;
       if (!nodes.has(id)) {
         nodes.set(id, { id, label, raw: match[0] });
       }
@@ -153,7 +242,9 @@ export function parseMermaidNodes(code: string): Map<string, MermaidNode> {
   }
 
   return nodes;
-}export interface MermaidDiffPair {
+}
+
+export interface MermaidDiffPair {
   oldMermaid: string;
   newMermaid: string;
 }
