@@ -275,7 +275,7 @@ export function splitBySections(
           continue;
         }
       } else if (html[i + 1] !== "!" && html[i + 1] !== "?") {
-        const tagMatch = /^<([a-z0-9-]+)\b/i.exec(html.slice(i));
+        const tagMatch = /^<([a-z0-9-]+)\b/i.exec(html.slice(i, i + 100));
         if (tagMatch) {
           const tagName = tagMatch[1].toLowerCase();
 
@@ -321,7 +321,17 @@ export function splitBySections(
           while (j < len) {
             const c = html[j];
             if (c === ">") {
-              if (j > i && html[j - 1] === "/") {
+              let k = j - 1;
+              while (
+                k > i &&
+                (html[k] === " " ||
+                  html[k] === "\t" ||
+                  html[k] === "\n" ||
+                  html[k] === "\r")
+              ) {
+                k--;
+              }
+              if (k > i && html[k] === "/") {
                 isSelfClosing = true;
               }
               break;
@@ -331,6 +341,9 @@ export function splitBySections(
               j++;
               while (j < len && html[j] !== quote) {
                 j++;
+              }
+              if (j >= len) {
+                break;
               }
             }
             j++;

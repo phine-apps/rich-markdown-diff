@@ -61,7 +61,17 @@ export function findClosing(
         while (j < len) {
           const c = html[j];
           if (c === ">") {
-            if (j > i && html[j - 1] === "/") {
+            let k = j - 1;
+            while (
+              k > i &&
+              (html[k] === " " ||
+                html[k] === "\t" ||
+                html[k] === "\n" ||
+                html[k] === "\r")
+            ) {
+              k--;
+            }
+            if (k > i && html[k] === "/") {
               isSelfClosing = true;
             }
             break;
@@ -71,6 +81,9 @@ export function findClosing(
             j++;
             while (j < len && html[j] !== quote) {
               j++;
+            }
+            if (j >= len) {
+              return -1;
             }
           }
           j++;
@@ -181,6 +194,11 @@ export function areHtmlTagsBalanced(html: string): boolean {
 
       // 2. Closing tag: </tag ... >
       if (html[i + 1] === "/") {
+        // End tag must start with an ASCII letter immediately after </ (no whitespace or numbers)
+        if (!/[a-zA-Z]/.test(html[i + 2] || "")) {
+          return false;
+        }
+
         let j = i + 2;
         while (j < len && html[j] !== ">") {
           if (html[j] === '"' || html[j] === "'") {
@@ -189,14 +207,17 @@ export function areHtmlTagsBalanced(html: string): boolean {
             while (j < len && html[j] !== quote) {
               j++;
             }
+            if (j >= len) {
+              return false; // Unclosed quote inside closing tag
+            }
           }
           j++;
         }
         if (j >= len) {
           return false;
         }
-        const tagText = html.substring(i + 2, j).trim();
-        const closeTagNameMatch = /^([a-z][a-z0-9-]*)/i.exec(tagText);
+        const tagText = html.substring(i + 2, j);
+        const closeTagNameMatch = /^([a-z][a-z0-9-]*)(?=[\s]|$)/i.exec(tagText);
         if (!closeTagNameMatch) {
           return false;
         }
@@ -210,33 +231,47 @@ export function areHtmlTagsBalanced(html: string): boolean {
       }
 
       // 3. Opening or self-closing tag: <tag ... > or <tag ... />
-      if (html[i + 1] !== "!" && html[i + 1] !== "?") {
-        let j = i + 1;
-        let isSelfClosing = false;
-        while (j < len) {
-          const c = html[j];
-          if (c === ">") {
-            if (j > i && html[j - 1] === "/") {
-              isSelfClosing = true;
+      if (/[a-zA-Z]/.test(html[i + 1] || "")) {
+        const tagMatch = /^<([a-z][a-z0-9-]*)(?=[\s/>]|$)/i.exec(
+          html.slice(i, i + 100),
+        );
+        if (tagMatch) {
+          const tagName = tagMatch[1].toLowerCase();
+          let j = i + 1 + tagMatch[1].length;
+          let isSelfClosing = false;
+          while (j < len) {
+            const c = html[j];
+            if (c === ">") {
+              let k = j - 1;
+              while (
+                k > i &&
+                (html[k] === " " ||
+                  html[k] === "\t" ||
+                  html[k] === "\n" ||
+                  html[k] === "\r")
+              ) {
+                k--;
+              }
+              if (k > i && html[k] === "/") {
+                isSelfClosing = true;
+              }
+              break;
             }
-            break;
-          }
-          if (c === '"' || c === "'") {
-            const quote = c;
-            j++;
-            while (j < len && html[j] !== quote) {
+            if (c === '"' || c === "'") {
+              const quote = c;
               j++;
+              while (j < len && html[j] !== quote) {
+                j++;
+              }
+              if (j >= len) {
+                return false; // Unclosed quote inside opening tag
+              }
             }
+            j++;
           }
-          j++;
-        }
-        if (j >= len) {
-          return false;
-        }
-        const tagText = html.substring(i + 1, j);
-        const openTagNameMatch = /^([a-z][a-z0-9-]*)/i.exec(tagText);
-        if (openTagNameMatch) {
-          const tagName = openTagNameMatch[1].toLowerCase();
+          if (j >= len) {
+            return false;
+          }
           if (!isSelfClosing && !voidTags.has(tagName)) {
             stack.push(tagName);
           }
