@@ -78,17 +78,22 @@ export function isMermaidDirectiveOrSkipLine(trimmed: string): boolean {
 export function stripMermaidEdgeLabels(line: string): string {
   // 1. Remove pipe labels: -->|label text| -> -->
   let cleaned = line.replace(
-    /((?:---|-->|==>|===|-\.-|-\.->|<-->|<--|--o|--x|o--o|x--x)\s*)\|[^|]*\|/g,
+    /((?:--+>|---+|==+>|===+|-\.->|-\.-|<-->|<--|--o|--x|o--o|x--x)\s*)\|[^|]*\|/g,
     "$1",
   );
-  // 2. Remove inline labels: -- label --> -> -->, == label ==> -> ==>
+  // 2. Remove inline labels:
+  // -- label --> -> -->, == label ==> -> ==>, -. label .-> -> -.->
   cleaned = cleaned.replace(
-    /--\s*(?:["'][^"']*["']|[^\s->\n]+(?:\s+[^\s->\n]+)*)\s*(-->|---)/g,
+    /--\s*(?:["'][^"']*["']|[^\s->\n]+(?:\s+[^\s->\n]+)*)\s*(--+>|---+)/g,
     "$1",
   );
   cleaned = cleaned.replace(
-    /==\s*(?:["'][^"']*["']|[^\s=>\n]+(?:\s+[^\s=>\n]+)*)\s*(==>|===)/g,
+    /==\s*(?:["'][^"']*["']|[^\s=>\n]+(?:\s+[^\s=>\n]+)*)\s*(==+>|===+)/g,
     "$1",
+  );
+  cleaned = cleaned.replace(
+    /-\.\s*(?:["'][^"']*["']|[^\s\.->\n]+(?:\s+[^\s\.->\n]+)*)\s*\.(->|-)/g,
+    "-.$1",
   );
   // 3. Remove class annotations attached to nodes: A:::myClass -> A
   cleaned = cleaned.replace(/:::[a-zA-Z0-9_-]+/g, "");
@@ -128,15 +133,33 @@ export function parseMermaidEdges(code: string): MermaidEdge[] {
   // Match arrows:
   // 1. A -->|label| B
   // 2. A -- label --> B or A -- "label" --> B
-  // 3. A --> B or A --- B or A ==> B or A -.- B or A -.-> B
-  const SHAPE_GROUP = `(?:(?:\\(\\(|\\[\\[|[([{>])(?:[^)"\\]}>]|"[^"]*")*(?:\\)\\)|\\]\\]|[)\\]}>]))?`;
+  // 3. A -. label .-> B
+  // 4. A --> B or A --- B or A ==> B or A -.- B or A -.-> B
+  const SHAPE_GROUP = `(?:` +
+    `\\{\\{(?:[^"}]|"[^"]*")*\\}\\}|` +
+    `\\[\\((?:[^")]|"[^"]*")*\\)\\]|` +
+    `\\(\\[(?:[^"\\]]|"[^"]*")*\\]\\)|` +
+    `\\[\\[(?:[^"\\]]|"[^"]*")*\\]\\]|` +
+    `\\(\\((?:[^")]|"[^"]*")*\\)\\)|` +
+    `\\[(?:[^"\\]]|"[^"]*")*\\]|` +
+    `\\((?:[^")]|"[^"]*")*\\)|` +
+    `\\{(?:[^"}]|"[^"]*")*\\}|` +
+    `>(?:[^"\\]]|"[^"]*")*\\]` +
+  `)?`;
   const CLASS_ATTACHMENT = `(?::::[a-zA-Z0-9_-]+)?`;
+  const ARROWS = `(?:--+>|---+|==+>|===+|-\\.->|-\\.-|<-->|<--|--o|--x|o--o|x--x)`;
+  const ID = `([\\p{L}\\p{N}_]+(?:-[\\p{L}\\p{N}_]+)*)`;
+
   const edgeRegex = new RegExp(
-    `\\b([a-zA-Z0-9_-]+)${SHAPE_GROUP}${CLASS_ATTACHMENT}\\s*` +
-      `(?:(?:---|-->|==>|===|-\\.->|-\\.-|<-->|<--|--o|--x|o--o|x--x)\\s*(?:\\|([^|]+)\\|)?\\s*` +
-      `|--\\s*(?:["']([^"']+)["']|([a-zA-Z0-9_\\s]+))\\s*-->\\s*)` +
-      `([a-zA-Z0-9_-]+)${CLASS_ATTACHMENT}`,
-    "g",
+    `(?<![\\p{L}\\p{N}_-])${ID}${SHAPE_GROUP}${CLASS_ATTACHMENT}\\s*` +
+      `(?:` +
+        `${ARROWS}\\s*(?:\\|([^|]+)\\|)?\\s*` +
+        `|--\\s*(?:["']([^"']+)["']|([\\p{L}\\p{N}_\\s]+))\\s*(?:--+>|---+)\\s*` +
+        `|==\\s*(?:["']([^"']+)["']|([\\p{L}\\p{N}_\\s]+))\\s*(?:==+>|===+)\\s*` +
+        `|-\\.\\s*(?:["']([^"']+)["']|([\\p{L}\\p{N}_\\s]+))\\s*\\.(?:->|-)\\s*` +
+      `)` +
+      `${ID}${CLASS_ATTACHMENT}`,
+    "gu",
   );
 
   for (const line of lines) {
@@ -151,8 +174,8 @@ export function parseMermaidEdges(code: string): MermaidEdge[] {
     let match: RegExpExecArray | null;
     while ((match = edgeRegex.exec(trimmed)) !== null) {
       const from = match[1];
-      const label = match[2] || match[3] || match[4];
-      const to = match[5];
+      const label = match[2] || match[3] || match[4] || match[5] || match[6] || match[7] || match[8];
+      const to = match[9];
       if (
         from &&
         to &&
@@ -190,8 +213,22 @@ export function parseMermaidNodes(code: string): Map<string, MermaidNode> {
 
     const lineForNodes = stripMermaidEdgeLabels(cleanLine);
 
-    const nodeRegex =
-      /\b([a-zA-Z0-9_]+(?:-[a-zA-Z0-9_]+)*)(?:\(\((?:["']([^"']+)["']|([^\)]+))\)\)|\[\[(?:["']([^"']+)["']|([^\]]+))\]\]|\[(?:["']([^"']+)["']|([^\]]+))\]|\((?:["']([^"']+)["']|([^\)]+))\)|\{(?:["']([^"']+)["']|([^\}]+))\}|>(?:["']([^"']+)["']|([^\]]+))\])?/g;
+    const NODE_SHAPES = [
+      "\\{\\{(?:[\"']([^\"']+)[\"']|([^}]+))\\}\\}",
+      "\\[\\((?:[\"']([^\"']+)[\"']|([^)]+))\\)\\]",
+      "\\(\\[(?:[\"']([^\"']+)[\"']|([^\\]]+))\\]\\)",
+      "\\[\\[(?:[\"']([^\"']+)[\"']|([^\\]]+))\\]\\]",
+      "\\(\\((?:[\"']([^\"']+)[\"']|([^)]+))\\)\\)",
+      "\\[(?:[\"']([^\"']+)[\"']|([^\\]]+))\\]",
+      "\\((?:[\"']([^\"']+)[\"']|([^)]+))\\)",
+      "\\{(?:[\"']([^\"']+)[\"']|([^}]+))\\}",
+      ">(?:[\"']([^\"']+)[\"']|([^\\]]+))\\]",
+    ].join("|");
+
+    const nodeRegex = new RegExp(
+      `(?<![\\p{L}\\p{N}_-])([\\p{L}\\p{N}_]+(?:-[\\p{L}\\p{N}_]+)*)(?:${NODE_SHAPES})?`,
+      "gu",
+    );
 
     let match: RegExpExecArray | null;
     while ((match = nodeRegex.exec(lineForNodes)) !== null) {
@@ -221,20 +258,7 @@ export function parseMermaidNodes(code: string): Map<string, MermaidNode> {
         continue;
       }
 
-      const label =
-        match[2] ||
-        match[3] ||
-        match[4] ||
-        match[5] ||
-        match[6] ||
-        match[7] ||
-        match[8] ||
-        match[9] ||
-        match[10] ||
-        match[11] ||
-        match[12] ||
-        match[13] ||
-        id;
+      const label = match.slice(2).find(Boolean) || id;
       if (!nodes.has(id)) {
         nodes.set(id, { id, label, raw: match[0] });
       }

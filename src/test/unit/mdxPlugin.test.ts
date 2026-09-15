@@ -257,5 +257,15 @@ Paragraph after cards.`;
     assert.ok(result.html.includes("in a sentence."), "Should preserve trailing sentence text");
     assert.ok(!result.html.includes("&lt;/Badge&gt;"), "Closing tag must not leak into HTML");
   });
+
+  it("should parse component opening tags with comparison operators > inside curly braces", () => {
+    const doc = `<Card title={x > y ? "Active" : "Inactive"}>\nCard body.\n</Card>`;
+    const result = provider.computeDiff(doc, doc);
+    assert.ok(result.html.includes('class="mdx-card"'), "Should render card");
+    assert.ok(result.html.includes('class="mdx-card-title">x &gt; y ?'), "Title should contain full expression");
+    assert.ok(result.html.includes("Card body."), "Should render card body");
+    const bodyContent = result.html.split('class="mdx-card-body"')[1] || "";
+    assert.ok(!bodyContent.includes('&gt; y ?'), "Expression must not spill into body as raw text");
+  });
 });
 

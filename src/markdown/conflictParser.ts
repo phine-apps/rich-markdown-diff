@@ -23,6 +23,9 @@ export interface ConflictBlock {
   startLine: number;
   endLine: number;
   choice?: "mine" | "theirs" | "both";
+  mineLineCount?: number;
+  theirsLineCount?: number;
+  baseLineCount?: number;
 }
 
 export type DocBlock = CommonBlock | ConflictBlock;
@@ -306,6 +309,9 @@ export function parseConflictBlocks(content: string): DocBlock[] {
         theirsLabel,
         startLine: conflictStartLine,
         endLine: i,
+        mineLineCount: conflictMineLines.length,
+        theirsLineCount: conflictTheirsLines.length,
+        baseLineCount: conflictBaseLines.length,
       });
       inConflict = false;
       continue;
@@ -362,34 +368,34 @@ export function reconstructDocument(blocks: DocBlock[]): string {
       resultLines.push(block.text);
     } else {
       if (block.choice === "mine") {
-        if (block.mine.length > 0) {
+        if ((block.mineLineCount ?? (block.mine.length > 0 ? 1 : 0)) > 0) {
           resultLines.push(block.mine);
         }
       } else if (block.choice === "theirs") {
-        if (block.theirs.length > 0) {
+        if ((block.theirsLineCount ?? (block.theirs.length > 0 ? 1 : 0)) > 0) {
           resultLines.push(block.theirs);
         }
       } else if (block.choice === "both") {
-        if (block.mine.length > 0) {
+        if ((block.mineLineCount ?? (block.mine.length > 0 ? 1 : 0)) > 0) {
           resultLines.push(block.mine);
         }
-        if (block.theirs.length > 0) {
+        if ((block.theirsLineCount ?? (block.theirs.length > 0 ? 1 : 0)) > 0) {
           resultLines.push(block.theirs);
         }
       } else {
         // Unresolved: keep conflict markers intact
         resultLines.push(`<<<<<<< ${block.mineLabel || "HEAD"}`);
-        if (block.mine.length > 0) {
+        if ((block.mineLineCount ?? (block.mine.length > 0 ? 1 : 0)) > 0) {
           resultLines.push(block.mine);
         }
         if (block.base !== undefined) {
           resultLines.push("|||||||");
-          if (block.base.length > 0) {
+          if ((block.baseLineCount ?? (block.base.length > 0 ? 1 : 0)) > 0) {
             resultLines.push(block.base);
           }
         }
         resultLines.push("=======");
-        if (block.theirs.length > 0) {
+        if ((block.theirsLineCount ?? (block.theirs.length > 0 ? 1 : 0)) > 0) {
           resultLines.push(block.theirs);
         }
         resultLines.push(`>>>>>>> ${block.theirsLabel || "Incoming"}`);

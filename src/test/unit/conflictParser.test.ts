@@ -220,4 +220,15 @@ Theirs line 2
     assert.ok(shellHtml.includes(".btn-resolve"), "Shell HTML script should delegate clicks on .btn-resolve");
     assert.ok(shellHtml.includes("resolveConflict"), "Shell HTML should define resolveConflict function");
   });
+
+  it("should preserve intentional blank lines when choosing conflict side", () => {
+    const text = `before\n<<<<<<< HEAD\n\n=======\nfoo\n>>>>>>> incoming\nafter`;
+    const blocks = parseConflictBlocks(text);
+    assert.strictEqual(blocks.length, 3);
+    if (blocks[1].type === "conflict") {
+      blocks[1].choice = "mine";
+    }
+    const reconstructed = reconstructDocument(blocks);
+    assert.strictEqual(reconstructed, "before\n\nafter");
+  });
 });

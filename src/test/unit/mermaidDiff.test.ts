@@ -349,5 +349,83 @@ graph TD
     `;
     assert.strictEqual(isFlowchartMermaid(code), true, "Flowchart with frontmatter must be recognized");
   });
+
+  it("should parse edges and clean labels for complex node shapes (database, stadium, hexagon)", () => {
+    const code = `
+      graph TD
+        A[(Database Storage)] --> B([Stadium Pill])
+        B --> C{{Hexagon Condition}}
+    `;
+    const nodes = parseMermaidNodes(code);
+    assert.strictEqual(nodes.size, 3);
+    assert.strictEqual(nodes.get("A")?.label, "Database Storage");
+    assert.strictEqual(nodes.get("B")?.label, "Stadium Pill");
+    assert.strictEqual(nodes.get("C")?.label, "Hexagon Condition");
+
+    const edges = parseMermaidEdges(code);
+    assert.strictEqual(edges.length, 2);
+    assert.strictEqual(edges[0].from, "A");
+    assert.strictEqual(edges[0].to, "B");
+    assert.strictEqual(edges[1].from, "B");
+    assert.strictEqual(edges[1].to, "C");
+  });
+
+  it("should parse dotted inline arrows without creating false node explosion", () => {
+    const code = `
+      graph TD
+        A -. "Step label" .-> B
+        B -. simple .-> C
+    `;
+    const nodes = parseMermaidNodes(code);
+    assert.strictEqual(nodes.size, 3, "Only A, B, C should be nodes");
+    assert.ok(nodes.has("A"));
+    assert.ok(nodes.has("B"));
+    assert.ok(nodes.has("C"));
+    assert.ok(!nodes.has("simple"), "'simple' must not be a node");
+    assert.ok(!nodes.has("Step"), "'Step' must not be a node");
+
+    const edges = parseMermaidEdges(code);
+    assert.strictEqual(edges.length, 2);
+    assert.strictEqual(edges[0].from, "A");
+    assert.strictEqual(edges[0].to, "B");
+    assert.strictEqual(edges[1].from, "B");
+    assert.strictEqual(edges[1].to, "C");
+  });
+
+  it("should parse lengthened multi-dash and multi-equal arrows without creating hyphen nodes", () => {
+    const code = `
+      graph TD
+        A ---> B
+        C ----> D
+        E ====> F
+    `;
+    const edges = parseMermaidEdges(code);
+    assert.strictEqual(edges.length, 3);
+    assert.strictEqual(edges[0].from, "A");
+    assert.strictEqual(edges[0].to, "B");
+    assert.strictEqual(edges[1].from, "C");
+    assert.strictEqual(edges[1].to, "D");
+    assert.strictEqual(edges[2].from, "E");
+    assert.strictEqual(edges[2].to, "F");
+  });
+
+  it("should support Unicode and CJK node identifiers and compute diff styles correctly", () => {
+    const oldCode = `
+      graph TD
+        開始 --> 処理
+    `;
+    const newCode = `
+      graph TD
+        開始 --> 処理
+        処理 --> 終了
+    `;
+    const oldNodes = parseMermaidNodes(oldCode);
+    assert.strictEqual(oldNodes.size, 2);
+    assert.ok(oldNodes.has("開始"));
+    assert.ok(oldNodes.has("処理"));
+
+    const { newMermaid } = computeMermaidDiffPair(oldCode, newCode);
+    assert.ok(newMermaid.includes("style 終了 fill:#132a1c"), "Inserted node 終了 should have insert style");
+  });
 });
 
