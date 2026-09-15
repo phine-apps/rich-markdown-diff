@@ -30,12 +30,74 @@ import MarkdownIt = require("markdown-it");
  */
 function parseAttributes(attrsText: string): [string, string][] {
   const attrs: [string, string][] = [];
-  const attrRegex = /([a-zA-Z0-9-]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|{([^}]*)}))?/g;
-  let match;
-  while ((match = attrRegex.exec(attrsText)) !== null) {
-    const name = match[1];
-    const val = match[2] || match[3] || match[4] || "";
-    attrs.push([name, val]);
+  let i = 0;
+  const len = attrsText.length;
+  while (i < len) {
+    while (i < len && /\s/.test(attrsText[i])) {
+      i++;
+    }
+    if (i >= len) {
+      break;
+    }
+    const nameMatch = /^[a-zA-Z0-9-]+/.exec(attrsText.slice(i));
+    if (!nameMatch) {
+      i++;
+      continue;
+    }
+    const name = nameMatch[0];
+    i += name.length;
+    while (i < len && /\s/.test(attrsText[i])) {
+      i++;
+    }
+    if (i < len && attrsText[i] === "=") {
+      i++;
+      while (i < len && /\s/.test(attrsText[i])) {
+        i++;
+      }
+      if (i < len) {
+        if (attrsText[i] === '"' || attrsText[i] === "'") {
+          const quote = attrsText[i];
+          const startVal = ++i;
+          while (i < len && attrsText[i] !== quote) {
+            i++;
+          }
+          const val = attrsText.slice(startVal, i);
+          if (i < len) {
+            i++;
+          }
+          attrs.push([name, val]);
+          continue;
+        } else if (attrsText[i] === "{") {
+          let depth = 1;
+          const startVal = ++i;
+          let inQ: string | null = null;
+          while (i < len && depth > 0) {
+            const c = attrsText[i];
+            if (inQ) {
+              if (c === inQ) {
+                inQ = null;
+              }
+            } else if (c === '"' || c === "'") {
+              inQ = c;
+            } else if (c === "{") {
+              depth++;
+            } else if (c === "}") {
+              depth--;
+            }
+            if (depth > 0) {
+              i++;
+            }
+          }
+          const val = attrsText.slice(startVal, i);
+          if (i < len) {
+            i++;
+          }
+          attrs.push([name, val]);
+          continue;
+        }
+      }
+    }
+    attrs.push([name, ""]);
   }
   return attrs;
 }
@@ -48,8 +110,8 @@ interface MdxTagInfo {
 }
 
 /**
- * Robustly parses an opening XML/JSX tag, respecting quotes (' and ") so that
- * attribute values containing `>` do not prematurely terminate tag matching.
+ * Robustly parses an opening XML/JSX tag, respecting quotes (' and ") and curly braces ({ }) so that
+ * attribute values or expressions containing `>` do not prematurely terminate tag matching.
  */
 function parseMdxTag(text: string): MdxTagInfo | null {
   const nameMatch = text.match(/^<([A-Z][a-zA-Z0-9]*|Tabs|TabItem|Steps|Card|Badge)\b/);
@@ -58,6 +120,7 @@ function parseMdxTag(text: string): MdxTagInfo | null {
   }
   const tagName = nameMatch[1];
   let inQuote: string | null = null;
+  let braceDepth = 0;
   let tagEndIdx = -1;
   for (let i = nameMatch[0].length; i < text.length; i++) {
     const ch = text[i];
@@ -67,7 +130,11 @@ function parseMdxTag(text: string): MdxTagInfo | null {
       }
     } else if (ch === '"' || ch === "'") {
       inQuote = ch;
-    } else if (ch === ">") {
+    } else if (ch === "{") {
+      braceDepth++;
+    } else if (ch === "}") {
+      braceDepth = Math.max(0, braceDepth - 1);
+    } else if (ch === ">" && braceDepth === 0) {
       tagEndIdx = i;
       break;
     }
