@@ -854,6 +854,9 @@ async function bindDiffPanel(
     }
 
     if (message.command === "searchTag") {
+      if (typeof message.tag !== "string") {
+        return;
+      }
       vscode.commands.executeCommand("workbench.action.findInFiles", {
         query: message.tag,
         triggerSearch: true,
@@ -866,10 +869,18 @@ async function bindDiffPanel(
     if (message.command === "requestBlockSource" && currentState) {
       const uri = currentState.modifiedUri ?? currentState.fallbackSourceUri;
       if (uri) {
+        const start = message.lineStart;
+        const end = message.lineEnd;
+        if (
+          typeof start !== "number" ||
+          typeof end !== "number" ||
+          start < 0 ||
+          end < start
+        ) {
+          return;
+        }
         try {
           const document = await vscode.workspace.openTextDocument(uri);
-          const start = message.lineStart;
-          const end = message.lineEnd;
           let content = "";
           for (let i = start; i < end && i < document.lineCount; i++) {
             content += document.lineAt(i).text + (i < end - 1 ? "\n" : "");
