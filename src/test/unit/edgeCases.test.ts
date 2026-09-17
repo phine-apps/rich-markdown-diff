@@ -324,4 +324,99 @@ describe("MarkdownDiffProvider - Edge Cases", () => {
       assert.ok(elapsed < 200, `Expected linear time execution, took ${elapsed}ms`);
     });
   });
+
+  describe("Empty document handling", () => {
+    it("should handle two empty documents gracefully without error and report hasDiff=false", () => {
+      const { html, hasDiff } = provider.computeDiff("", "");
+      assert.strictEqual(hasDiff, false, "Should report hasDiff=false for identical empty documents");
+      assert.ok(typeof html === "string", "Should return string HTML representation");
+      assert.strictEqual(html.includes("<ins"), false, "Should not contain insertions");
+      assert.strictEqual(html.includes("<del"), false, "Should not contain deletions");
+    });
+
+    it("should report all-inserted when comparing empty old doc against non-empty new doc", () => {
+      const { html, hasDiff } = provider.computeDiff("", "# New Content\nHello world");
+      assert.strictEqual(hasDiff, true, "Should report hasDiff=true when content added to empty doc");
+      assert.ok(html.includes("<ins"), "Should wrap new content in ins tag");
+      assert.strictEqual(html.includes("<del"), false, "Should not contain deletion tags");
+      assert.ok(html.includes("New Content"), "Should contain the inserted heading");
+    });
+
+    it("should report all-deleted when comparing non-empty old doc against empty new doc", () => {
+      const { html, hasDiff } = provider.computeDiff("# Old Content\nGoodbye world", "");
+      assert.strictEqual(hasDiff, true, "Should report hasDiff=true when all content deleted");
+      assert.ok(html.includes("<del"), "Should wrap old content in del tag");
+      assert.strictEqual(html.includes("<ins"), false, "Should not contain insertion tags");
+      assert.ok(html.includes("Old Content"), "Should contain the deleted heading");
+    });
+  });
+
+  describe("Performance benchmark for large documents", () => {
+    it("should compute diff for a large markdown document (2,000+ lines) within a few seconds without freezing", function () {
+      this.timeout(10000); // 10s timeout for safety
+
+      // Generate a ~2,000-line realistic markdown document with math, tables, and code
+      const sectionsCount = 120;
+      const oldLines: string[] = [];
+      const newLines: string[] = [];
+
+      for (let i = 0; i < sectionsCount; i++) {
+        oldLines.push(`## Section ${i}: Architecture Analysis`);
+        oldLines.push(`Paragraph describing component ${i} with *emphasis* and **bold text**.`);
+        oldLines.push(`- Item A in section ${i}`);
+        oldLines.push(`- Item B in section ${i} (original)`);
+        oldLines.push(`- Item C in section ${i}`);
+        oldLines.push("```javascript");
+        oldLines.push(`function handler${i}() { return ${i} * 2; }`);
+        oldLines.push("```");
+        oldLines.push("| Col 1 | Col 2 | Col 3 |");
+        oldLines.push("| --- | --- | --- |");
+        oldLines.push(`| Val ${i}A | Val ${i}B | Val ${i}C |`);
+        oldLines.push(`Math formula: $E = mc^${i % 5}$ and block:`);
+        oldLines.push("$$");
+        oldLines.push(`\\sum_{k=1}^{${i + 1}} k = \\frac{${i + 1}(${i + 2})}{2}`);
+        oldLines.push("$$");
+        oldLines.push("> [!NOTE]");
+        oldLines.push(`> Note for section ${i}`);
+        oldLines.push("");
+
+        newLines.push(`## Section ${i}: Architecture Analysis`);
+        newLines.push(`Paragraph describing component ${i} with *emphasis* and **bold text (updated)**.`);
+        newLines.push(`- Item A in section ${i}`);
+        newLines.push(`- Item B in section ${i} (modified version)`);
+        newLines.push(`- Item C in section ${i}`);
+        newLines.push(`- Item D in section ${i} (new item)`);
+        newLines.push("```javascript");
+        newLines.push(`function handler${i}() { return ${i} * 4; }`);
+        newLines.push("```");
+        newLines.push("| Col 1 | Col 2 | Col 3 |");
+        newLines.push("| --- | --- | --- |");
+        newLines.push(`| Val ${i}A | Val ${i}B-modified | Val ${i}C |`);
+        newLines.push(`Math formula: $E = mc^${i % 5}$ and block:`);
+        newLines.push("$$");
+        newLines.push(`\\sum_{k=1}^{${i + 1}} k = \\frac{${i + 1}(${i + 2})}{2}`);
+        newLines.push("$$");
+        newLines.push("> [!NOTE]");
+        newLines.push(`> Note for section ${i} with updated guidelines`);
+        newLines.push("");
+      }
+
+      const oldMd = oldLines.join("\n");
+      const newMd = newLines.join("\n");
+
+      assert.ok(oldLines.length >= 2000, `Expected at least 2000 lines, got ${oldLines.length}`);
+
+      const start = Date.now();
+      const { html, hasDiff } = provider.computeDiff(oldMd, newMd);
+      const elapsed = Date.now() - start;
+
+      assert.strictEqual(hasDiff, true, "Should detect differences in large file");
+      assert.ok(html.includes("<ins"), "Should contain insertion markers");
+      assert.ok(html.includes("<del"), "Should contain deletion markers");
+      assert.ok(
+        elapsed < 5000,
+        `computeDiff took ${elapsed}ms, expected under 5,000ms for ~2,000 lines (possible O(N²) or ReDoS regression)`,
+      );
+    });
+  });
 });
