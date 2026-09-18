@@ -27,7 +27,7 @@ import MarkdownIt = require("markdown-it");
 import * as htmldiff from "htmldiff-js";
 import matter from "gray-matter";
 import { sanitizeHtml, escapeHtml } from "./markdown/sanitizer";
-import { stripHtmlTags } from "./markdown/domUtils";
+import { findClosing, stripHtmlTags } from "./markdown/domUtils";
 import { getWebviewContent } from "./markdown/webviewTemplate";
 import {
   cleanMarpHtml,
@@ -50,26 +50,68 @@ function wrapTablesForScrolling(html: string): string {
     return html;
   }
 
-  // Matches a table, optionally wrapped in a single <ins> or <del> tag
-  const tableRegex = /(?:<(ins|del)\b([^>]*)>\s*)?<table\b[\s\S]*?<\/table>(?:\s*<\/(?:ins|del)>)?/gi;
+  // Use findClosing() for correct nested-table boundary detection (O(N) linear).
+  // The old regex [\s\S]*?<\/table> broke on nested <table> tags.
+  const result: string[] = [];
+  let pos = 0;
 
-  return html.replace(
-    tableRegex,
-    (match, tagType, tagAttrs, offset, fullString) => {
-      // Check if this match is already wrapped in a div.table-scroll/table-block-wrapper
-      const preceding = fullString.slice(0, offset).trim();
-      const following = fullString.slice(offset + match.length).trim();
-
-      const isPrecededByScrollDiv = /<div\b[^>]*\bclass=["'][^"']*\b(table-scroll|table-block-wrapper)\b[^"']*["'][^>]*>\s*(?:<div\b[^>]*\bclass=["'][^"']*\btable-scroll\b[^"']*["'][^>]*>\s*)?$/i.test(preceding);
-      const isFollowedByCloseDiv = /^\s*<\/div>\s*(?:<\/div>)?/i.test(following);
-
-      if (isPrecededByScrollDiv && isFollowedByCloseDiv) {
-        return match;
-      }
-
-      return `<div class="table-block-wrapper"><div class="table-scroll">${match}</div></div>`;
+  while (pos < html.length) {
+    // Look for optional wrapping <ins>/<del> followed by <table
+    const nextTable = html.indexOf("<table", pos);
+    if (nextTable === -1) {
+      result.push(html.slice(pos));
+      break;
     }
-  );
+
+    // Check if an <ins> or <del> immediately precedes the <table>
+    let wrapperStart = nextTable;
+    const precedingSlice = html.slice(pos, nextTable);
+    const wrapperMatch = precedingSlice.match(/<(ins|del)\b([^>]*)>\s*$/i);
+    if (wrapperMatch) {
+      wrapperStart = nextTable - wrapperMatch[0].length;
+    }
+
+    // Emit everything before this table (or its wrapper)
+    result.push(html.slice(pos, wrapperStart));
+
+    // Find the matching </table> using depth tracking
+    const tableEnd = findClosing(html, nextTable, "table");
+    if (tableEnd === -1) {
+      // Malformed HTML: no closing tag found; emit remainder as-is
+      result.push(html.slice(wrapperStart));
+      break;
+    }
+
+    let matchEnd = tableEnd;
+
+    // If we detected a wrapper, look for the corresponding </ins> or </del>
+    if (wrapperMatch) {
+      const afterTable = html.slice(tableEnd);
+      const closeWrapperMatch = afterTable.match(/^\s*<\/(?:ins|del)>/i);
+      if (closeWrapperMatch) {
+        matchEnd = tableEnd + closeWrapperMatch[0].length;
+      }
+    }
+
+    const tableFragment = html.slice(wrapperStart, matchEnd);
+
+    // Check if already wrapped in .table-scroll / .table-block-wrapper
+    const preceding = html.slice(0, wrapperStart).trim();
+    const following = html.slice(matchEnd).trim();
+
+    const isPrecededByScrollDiv = /<div\b[^>]*\bclass=["'][^"']*\b(table-scroll|table-block-wrapper)\b[^"']*["'][^>]*>\s*(?:<div\b[^>]*\bclass=["'][^"']*\btable-scroll\b[^"']*["'][^>]*>\s*)?$/i.test(preceding);
+    const isFollowedByCloseDiv = /^\s*<\/div>\s*(?:<\/div>)?/i.test(following);
+
+    if (isPrecededByScrollDiv && isFollowedByCloseDiv) {
+      result.push(tableFragment);
+    } else {
+      result.push(`<div class="table-block-wrapper"><div class="table-scroll">${tableFragment}</div></div>`);
+    }
+
+    pos = matchEnd;
+  }
+
+  return result.join("");
 }
 
 function getLineOffset(original: string, content: string): number {

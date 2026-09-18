@@ -1411,12 +1411,95 @@ export function refineBlockDiffs(
 
   let resultHtml = html;
 
-  const alertRegex =
-    /(<del[^>]*>\s*(<div class="markdown-alert[^>]*>[\s\S]*?<\/div>)\s*<\/del>)\s*(<ins[^>]*>\s*(<div class="markdown-alert[^>]*>[\s\S]*?<\/div>)\s*<\/ins>)/gi;
+  // Use findClosing() instead of regex to correctly handle nested <div> inside
+  // markdown-alert blocks. The old regex [\s\S]*?<\/div> stopped at the first
+  // inner </div>, breaking alerts that contain nested elements.
+  resultHtml = (() => {
+    const ALERT_OPEN = '<div class="markdown-alert';
+    const parts: string[] = [];
+    let cursor = 0;
 
-  resultHtml = resultHtml.replace(
-    alertRegex,
-    (match, delBlock, oldInner, insBlock, newInner) => {
+    while (cursor < resultHtml.length) {
+      // Look for <del...><whitespace><div class="markdown-alert...
+      const delIdx = resultHtml.indexOf("<del", cursor);
+      if (delIdx === -1) {
+        parts.push(resultHtml.slice(cursor));
+        break;
+      }
+
+      // Find end of <del> opening tag
+      const delTagEnd = resultHtml.indexOf(">", delIdx);
+      if (delTagEnd === -1) { parts.push(resultHtml.slice(cursor)); break; }
+
+      // Check if the content after <del...> starts with a markdown-alert div
+      const afterDel = resultHtml.slice(delTagEnd + 1).trimStart();
+      if (!afterDel.startsWith(ALERT_OPEN)) {
+        // Not an alert pair — emit up to end of <del> tag and continue
+        parts.push(resultHtml.slice(cursor, delTagEnd + 1));
+        cursor = delTagEnd + 1;
+        continue;
+      }
+
+      // Find the actual alert <div> start position in the original string
+      const alertDivStart = resultHtml.indexOf(ALERT_OPEN, delTagEnd + 1);
+      if (alertDivStart === -1) { parts.push(resultHtml.slice(cursor, delTagEnd + 1)); cursor = delTagEnd + 1; continue; }
+
+      // Use findClosing to get the matching </div> for the alert
+      const alertDivEnd = findClosing(resultHtml, alertDivStart, "div");
+      if (alertDivEnd === -1) { parts.push(resultHtml.slice(cursor, delTagEnd + 1)); cursor = delTagEnd + 1; continue; }
+
+      // After the alert div, expect whitespace then </del>
+      const afterAlertDiv = resultHtml.slice(alertDivEnd).trimStart();
+      if (!afterAlertDiv.startsWith("</del>")) {
+        parts.push(resultHtml.slice(cursor, delTagEnd + 1));
+        cursor = delTagEnd + 1;
+        continue;
+      }
+      const delCloseEnd = resultHtml.indexOf("</del>", alertDivEnd) + 6;
+
+      // Now look for <ins...> immediately after </del>
+      const afterDelClose = resultHtml.slice(delCloseEnd).trimStart();
+      if (!afterDelClose.startsWith("<ins")) {
+        parts.push(resultHtml.slice(cursor, delCloseEnd));
+        cursor = delCloseEnd;
+        continue;
+      }
+
+      const insIdx = resultHtml.indexOf("<ins", delCloseEnd);
+      const insTagEnd = resultHtml.indexOf(">", insIdx);
+      if (insTagEnd === -1) { parts.push(resultHtml.slice(cursor, delCloseEnd)); cursor = delCloseEnd; continue; }
+
+      const afterIns = resultHtml.slice(insTagEnd + 1).trimStart();
+      if (!afterIns.startsWith(ALERT_OPEN)) {
+        parts.push(resultHtml.slice(cursor, delCloseEnd));
+        cursor = delCloseEnd;
+        continue;
+      }
+
+      const newAlertDivStart = resultHtml.indexOf(ALERT_OPEN, insTagEnd + 1);
+      if (newAlertDivStart === -1) { parts.push(resultHtml.slice(cursor, delCloseEnd)); cursor = delCloseEnd; continue; }
+
+      const newAlertDivEnd = findClosing(resultHtml, newAlertDivStart, "div");
+      if (newAlertDivEnd === -1) { parts.push(resultHtml.slice(cursor, delCloseEnd)); cursor = delCloseEnd; continue; }
+
+      const afterNewAlertDiv = resultHtml.slice(newAlertDivEnd).trimStart();
+      if (!afterNewAlertDiv.startsWith("</ins>")) {
+        parts.push(resultHtml.slice(cursor, delCloseEnd));
+        cursor = delCloseEnd;
+        continue;
+      }
+      const insCloseEnd = resultHtml.indexOf("</ins>", newAlertDivEnd) + 6;
+
+      // We have a valid <del>..alert..</del><ins>..alert..</ins> pair
+      parts.push(resultHtml.slice(cursor, delIdx));
+
+      const oldInner = resultHtml.slice(alertDivStart, alertDivEnd);
+      const newInner = resultHtml.slice(newAlertDivStart, newAlertDivEnd);
+
+      const delBlock = resultHtml.slice(delIdx, delCloseEnd);
+      const insBlock = resultHtml.slice(insIdx, insCloseEnd);
+
+      // Apply the same refinement logic as the original replacer
       const openTagRegex = /^<div class="markdown-alert[^>]*>/;
       const oldOpenMatch = oldInner.match(openTagRegex);
       const newOpenMatch = newInner.match(openTagRegex);
@@ -1445,13 +1528,25 @@ export function refineBlockDiffs(
           const oldBody = oldContent.replace(titleHtml, "").trim();
           const newBody = newContent.replace(titleHtml, "").trim();
           const diffBody = execute(oldBody, newBody);
-          return `${newOpen}${titleHtml}\n${diffBody}</div>`;
+          parts.push(`${newOpen}${titleHtml}\n${diffBody}</div>`);
+          cursor = insCloseEnd;
+          continue;
         }
       }
 
-      return replacer(match, delBlock, oldInner, insBlock, newInner);
-    },
-  );
+      // Fallback: use the generic replacer
+      parts.push(replacer(
+        resultHtml.slice(delIdx, insCloseEnd),
+        delBlock,
+        oldInner,
+        insBlock,
+        newInner,
+      ));
+      cursor = insCloseEnd;
+    }
+
+    return parts.join("");
+  })();
 
   const listContainerRegex =
     /<del[^>]*>\s*<(ol|ul|dl)([^>]*)>([\s\S]*?)<\/\1>\s*<\/del>\s*<ins[^>]*>\s*<(ol|ul|dl)([^>]*)>([\s\S]*?)<\/\4>\s*<\/ins>/gi;
