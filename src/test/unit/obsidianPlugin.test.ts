@@ -55,6 +55,16 @@ describe("MarkdownDiffProvider - Obsidian Plugin", () => {
     assert.ok(diff.includes("#中文标签"), "Should contain Chinese tag text");
   });
 
+  it("should render emoji tags correctly (L-1)", () => {
+    const oldMd = "";
+    const newMd = "#🚀 #🚀launch #project/🔥/task";
+    const { html: diff } = provider.computeDiff(oldMd, newMd);
+
+    assert.ok(diff.includes('data-tag="🚀"'), "Should support standalone emoji tag");
+    assert.ok(diff.includes('data-tag="🚀launch"'), "Should support emoji-prefixed tag");
+    assert.ok(diff.includes('data-tag="project/🔥/task"'), "Should support tag with embedded emoji");
+  });
+
   it("should render transclusions correctly (non-image)", () => {
     const oldMd = "";
     const newMd = "![[My Note]]";
