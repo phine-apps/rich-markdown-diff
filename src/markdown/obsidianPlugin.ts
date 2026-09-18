@@ -45,9 +45,9 @@ function obsidianPlugin(md: MarkdownIt, _options: ObsidianOptions = {}) {
        return false;
     }
 
-    // Regexp for tag: must start with a Unicode letter, then contain alphanumeric, slash, underscore, or hyphen
-    // Fully supports multi-byte characters (Japanese, Chinese, etc.) as per Obsidian specifications.
-    const tagRegex = /^#(\p{L}[\p{L}\p{N}_/\-]*)/u;
+    // Regexp for tag: must start with a Unicode letter or emoji, then contain alphanumeric, emoji, slash, underscore, or hyphen.
+    // Fully supports multi-byte characters (Japanese, Chinese, Emoji, etc.) as per Obsidian specifications.
+    const tagRegex = /^#((?:[\p{L}\p{Extended_Pictographic}])[\p{L}\p{N}\p{Extended_Pictographic}_/\-]*)/u;
     const match = src.slice(start).match(tagRegex);
 
     if (!match) {

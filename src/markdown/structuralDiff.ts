@@ -612,8 +612,8 @@ export function replaceLineAttributesWithTokens(html: string): {
   tokens: Record<string, string>;
 } {
   const tokens: Record<string, string> = {};
-  // Regex to find data-line or data-line-end attributes
-  const regex = /(\s?data-line(?:-end)?="[^"]*")/g;
+  // Regex to find data-line or data-line-end attributes (supporting both double and single quotes)
+  const regex = /(\s?data-line(?:-end)?=(?:"[^"]*"|'[^']*'))/g;
   const result = html.replace(regex, (match) => {
     return createToken(match, "ATTR", tokens);
   });
@@ -749,11 +749,50 @@ export function cleanupUnbalancedDiffTags(html: string): string {
  * In split mode, the outer <del> hides the inner <ins> on the right pane,
  * causing content to disappear.
  */
+
+/**
+ * Checks in O(N) linear time whether there are any nested <del> or <ins> tags.
+ * If depth never reaches 2, no flattening is needed.
+ */
+export function hasDiffNesting(html: string): boolean {
+  const tagRegex = /<(\/)?(del|ins)\b/gi;
+  let depth = 0;
+  let m: RegExpExecArray | null;
+  while ((m = tagRegex.exec(html)) !== null) {
+    const isClose = m[1] === "/";
+    if (!isClose) {
+      depth++;
+      if (depth >= 2) {
+        return true;
+      }
+    } else if (depth > 0) {
+      depth--;
+    }
+  }
+  return false;
+}
+
+/**
+ * Flattens nested <del> and <ins> tags to prevent UI rendering bugs where one tag hides another,
+ * causing content to disappear.
+ */
 export function flattenDiffNesting(html: string): string {
+  // Fast path: if there is no nesting, return immediately in O(N) time
+  // without executing the nested lookahead regex.
+  if (!hasDiffNesting(html)) {
+    return html;
+  }
+
   let result = html;
   let changed = true;
+  let iterations = 0;
+  const MAX_ITERATIONS = 50;
 
-  while (changed) {
+  while (changed && iterations++ < MAX_ITERATIONS) {
+    if (!hasDiffNesting(result)) {
+      break;
+    }
+
     const prev = result;
 
     // Pattern: <outer><inner>CONTENT</inner></outer> where outer and inner are same or different types (del/ins)
@@ -944,7 +983,7 @@ export function maskBlockAttributes(
 
   const masked = html.replace(regex, (match, tag, attrs, close, _offset) => {
     // Normalize attributes for hashing by stripping volatile parts (data-line)
-    const normalized = attrs.replace(/\s*data-line(-end)?="[^"]*"/g, "").trim();
+    const normalized = attrs.replace(/\s*data-line(-end)?=(?:"[^"]*"|'[^']*')/g, "").trim();
 
     // Include the tag name, normalized attributes, and a small snippet of the
     // following content in the hash. This helps htmldiff align the correct blocks
@@ -1292,7 +1331,7 @@ export function createToken(
 ): string {
   // Strip volatile data-line attributes from the hash content so that blocks
   // with identical content but different line numbers produce the same token.
-  const hashContent = content.replace(/\s?data-line(?:-end)?="[^"]*"/g, "");
+  const hashContent = content.replace(/\s?data-line(?:-end)?=(?:"[^"]*"|'[^']*')/g, "");
 
   const hash = crypto
     .createHash("sha256")
@@ -2201,7 +2240,7 @@ export function cleanupCheckboxArtifacts(html: string): string {
 }
 
 export function stripDataLineAttributes(html: string): string {
-  return html.replace(/ data-line(?:-end)?="\d+"/g, "");
+  return html.replace(/\sdata-line(?:-end)?=(?:"\d+"|'\d+')/g, "");
 }
 
 export function wrapHeadingPrefixes(html: string): string {
@@ -2629,8 +2668,7 @@ export function verifyDiffIntegrity(
   diffHtml: string,
 ): boolean {
   const strip = (html: string) => {
-    return html
-      .replace(/<[^>]+>/g, " ")
+    return stripHtmlTags(html, " ")
       .replace(/\s+/g, " ")
       .trim();
   };
