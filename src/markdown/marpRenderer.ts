@@ -63,8 +63,10 @@ export function cleanMarpHtml(html: string): { cleaned: string; scripts: string[
   } while (fullyCleaned !== prevCleaned);
 
   // Strip data-line from SVGs and Sections to fix Marp slide offsets and Quick Edit targeting
-  fullyCleaned = fullyCleaned.replace(/<(svg|section)\b[^>]*\sdata-line="[^"]*"[^>]*>/gi, (match) => {
-    return match.replace(/\sdata-line="[^"]*"/gi, "");
+  // Uses a quote-aware pattern (?:[^>"']|"[^"]*"|'[^']*')* to safely skip over
+  // attribute values that contain '>' characters (e.g. data-foo=">").
+  fullyCleaned = fullyCleaned.replace(/<(svg|section)\b(?:[^>"']|"[^"]*"|'[^']*')*>/gi, (match) => {
+    return match.replace(/\sdata-line(?:-end)?=(?:"[^"]*"|'[^']*')/gi, "");
   });
 
   return { cleaned: fullyCleaned, scripts };

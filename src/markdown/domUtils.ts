@@ -138,13 +138,14 @@ export function findClosing(
 
 /**
  * Strips all HTML tags from a string iteratively to prevent incomplete multi-character sanitization vulnerabilities (CWE-116).
+ * Uses a quote-aware regex that safely skips over attribute values containing '>'.
  */
 export function stripHtmlTags(input: string): string {
   let current = input;
   let previous: string;
   do {
     previous = current;
-    current = current.replace(/<[^>]+>/g, "");
+    current = current.replace(/<(?:[^>"']|"[^"]*"|'[^']*')*>/g, "");
   } while (current !== previous);
   return current;
 }

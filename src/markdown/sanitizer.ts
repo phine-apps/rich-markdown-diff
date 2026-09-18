@@ -237,8 +237,9 @@ export function sanitizeHtml(html: string): string {
         "text-align": [/.*/],
         color: [/.*/],
         "background-color": [/.*/],
-        "background-image": [/.*/],
-        background: [/.*/],
+        // Reject url() to prevent CSS exfiltration; allow color names, hex, rgb, gradients, and var()
+        "background-image": [/^(?!.*url\s*\().*$/i],
+        background: [/^(?!.*url\s*\().*$/i],
         // CSS Variables for Marp themes
         "--theme": [/.*/],
         "--color": [/.*/],

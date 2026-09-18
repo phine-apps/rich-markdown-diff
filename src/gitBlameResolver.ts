@@ -65,7 +65,11 @@ export async function resolveBlameInfo(
     // ...
     // filename <name>
     // \t<line_content>
-    const child = child_process.spawn("git", ["blame", "--porcelain", "--", fileName], { cwd });
+    // Sanitize env to prevent Electron-specific flags (e.g. ELECTRON_RUN_AS_NODE)
+    // from leaking into the git subprocess.
+    const sanitizedEnv = { ...process.env };
+    delete sanitizedEnv.ELECTRON_RUN_AS_NODE;
+    const child = child_process.spawn("git", ["blame", "--porcelain", "--", fileName], { cwd, env: sanitizedEnv });
 
     child.stderr?.resume();
 
