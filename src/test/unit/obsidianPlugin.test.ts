@@ -106,4 +106,32 @@ describe("MarkdownDiffProvider - Obsidian Plugin", () => {
     assert.ok(html.includes("updateBreadcrumbs"), "Should include updateBreadcrumbs JS function");
     assert.ok(html.includes("handleTagClick"), "Should include handleTagClick JS function");
   });
+
+  it("should not swallow Mermaid block when preceded by an Obsidian transclusion deletion", () => {
+    const oldMd = `
+## 9. Obsidian
+- ![[Page]]
+
+## 10. Mermaid
+\`\`\`mermaid
+graph TD
+    A --> B
+\`\`\`
+`;
+    const newMd = `
+## 9. Obsidian
+- [[sample.md|Alias]]
+
+## 10. Mermaid
+\`\`\`mermaid
+graph TD
+    A --> C
+\`\`\`
+`;
+    const { html: diff } = provider.computeDiff(oldMd, newMd);
+    assert.ok(!diff.includes("style Page fill"), "Should not leak Page as a Mermaid node style");
+    assert.ok(!diff.includes("style Alias fill"), "Should not leak Alias as a Mermaid node style");
+    assert.ok(diff.includes('class="obsidian-embed"'), "Should keep obsidian-embed inside its list item");
+    assert.ok(diff.includes('class="mermaid"'), "Should render mermaid diagram separately");
+  });
 });

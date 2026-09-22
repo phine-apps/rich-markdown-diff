@@ -2,11 +2,21 @@
 
 All notable changes to **Rich Markdown Diff** will be documented in this file.
 
-## [Unreleased]
+## [1.6.0] - 2026-09-22
 
-### Added
+### Added in 1.6.0
 
-- **Semantic Mermaid Diff**: Element-level diff highlighting for Mermaid flowcharts with dynamic color-coding and ghost outlines for deleted elements.
+- **Semantic Mermaid Diff**: Element-level diff highlighting for Mermaid flowcharts with dynamic color-coding, ghost outlines for deleted elements, and side-by-side pane separation.
+
+### Improved & Hardened in 1.6.0
+
+- **Performance & ReDoS Defense**: Replaced exponential backtracking regexes in block diff consolidation with linear depth tracking ($O(N)$), optimized table and section splitting to $O(N)$, and guarded LCS alignment against high memory usage.
+- **Security & Sanitization**: Hardened HTML tag stripping against multi-character bypasses, blocked CSS `url()` exfiltration, guarded wikilinks against path traversal (CWE-22), and validated webview message bounds.
+
+### Fixed in 1.6.0
+
+- **Mermaid & MDX Parsing**: Prevented false node generation from inline comments and directives in Mermaid, added CJK/Unicode node support, and resolved content truncation on single-line and inline MDX tags.
+- **Diff & Structure Stability**: Resolved void tag desyncs and table/alert nesting truncation, hardened Marp slide `data-line` stripping, preserved intentional blank lines in conflict resolution, and fixed block KaTeX styling.
 
 ## [1.5.0] - 2026-08-11
 
