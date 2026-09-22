@@ -1895,32 +1895,129 @@ export function refineBlockDiffs(
     },
   );
 
-  const genericBlockRegex =
-    /(<del[^>]*>\s*<([a-z1-6]+)(?:\s+[^>]*)?>([\s\S]*?)<\/\2>\s*<\/del>)\s*(<ins[^>]*>\s*<([a-z1-6]+)(?:\s+[^>]*)?>([\s\S]*?)<\/\5>\s*<\/ins>)/gi;
+  // Replace genericBlockRegex with deterministic linear parsing (findClosing)
+  // to prevent regex backtracking across intervening elements or multiple <del>/<ins> boundaries.
+  resultHtml = (() => {
+    let cursor = 0;
+    const parts: string[] = [];
+    const len = resultHtml.length;
 
-  resultHtml = resultHtml.replace(
-    genericBlockRegex,
-    (match, delWrapper, delTag, delInner, insWrapper, insTag, insInner) => {
-      if (delTag.toLowerCase() !== insTag.toLowerCase()) {
-        return match;
+    while (cursor < len) {
+      const delIdx = resultHtml.indexOf("<del", cursor);
+      if (delIdx === -1) {
+        parts.push(resultHtml.slice(cursor));
+        break;
       }
 
-      // Special handling for pre and table blocks to ensure we don't break syntax highlighting
-      // or bypass structured table diffing.
-      if (delTag.toLowerCase() === "pre" || delTag.toLowerCase() === "table") {
-        return match;
+      const delTagEnd = resultHtml.indexOf(">", delIdx);
+      if (delTagEnd === -1) {
+        parts.push(resultHtml.slice(cursor));
+        break;
       }
 
-      // Attempt to extract attributes from the new tag to preserve classes/line numbers
-      const attributesMatch = match.match(
-        /<ins[^>]*>\s*<[a-z1-6]+(\s+[^>]*)?>/i,
+      const afterDel = resultHtml.slice(delTagEnd + 1);
+      const tagMatch = afterDel.match(/^(\s*)<([a-z1-6]+)(\s+[^>]*)?>/i);
+      if (!tagMatch) {
+        parts.push(resultHtml.slice(cursor, delTagEnd + 1));
+        cursor = delTagEnd + 1;
+        continue;
+      }
+
+      const tagName = tagMatch[2].toLowerCase();
+      // Special handling for void tags, pre and table blocks to ensure we don't break syntax highlighting,
+      // image diffing, or bypass structured table diffing.
+      if (
+        HTML_VOID_TAGS.has(tagName) ||
+        tagName === "pre" ||
+        tagName === "table"
+      ) {
+        parts.push(resultHtml.slice(cursor, delTagEnd + 1));
+        cursor = delTagEnd + 1;
+        continue;
+      }
+
+      const openTagIdx = delTagEnd + 1 + tagMatch[1].length;
+      const closeTagIdx = findClosing(resultHtml, openTagIdx, tagName);
+      if (closeTagIdx === -1) {
+        parts.push(resultHtml.slice(cursor, delTagEnd + 1));
+        cursor = delTagEnd + 1;
+        continue;
+      }
+
+      const afterClose = resultHtml.slice(closeTagIdx);
+      const delCloseMatch = afterClose.match(/^(\s*)<\/del>/i);
+      if (!delCloseMatch) {
+        parts.push(resultHtml.slice(cursor, delTagEnd + 1));
+        cursor = delTagEnd + 1;
+        continue;
+      }
+
+      const delFullEnd = closeTagIdx + delCloseMatch[0].length;
+
+      const afterDelClose = resultHtml.slice(delFullEnd);
+      const insMatch = afterDelClose.match(
+        /^(\s*)<ins\b([^>]*)>(\s*)<([a-z1-6]+)(\s+[^>]*)?>/i,
       );
-      const attributes =
-        attributesMatch && attributesMatch[1] ? attributesMatch[1] : "";
+      if (!insMatch || insMatch[4].toLowerCase() !== tagName) {
+        parts.push(resultHtml.slice(cursor, delTagEnd + 1));
+        cursor = delTagEnd + 1;
+        continue;
+      }
 
-      // EXCEPTION: Do not re-diff the inside of specialized blocks like Mermaid or GitHub Alerts.
-      // For Mermaid Flowcharts: Compute semantic diff and inject element-level styles & ghost outlines.
-      // For Alerts & non-flowchart Mermaid: Preserve separate <del> and <ins> blocks to prevent layout issues.
+      const insOpenTagIdx =
+        delFullEnd +
+        insMatch[1].length +
+        insMatch[0].slice(insMatch[1].length).indexOf("<" + insMatch[4]);
+      const insCloseTagIdx = findClosing(resultHtml, insOpenTagIdx, tagName);
+      if (insCloseTagIdx === -1) {
+        parts.push(resultHtml.slice(cursor, delTagEnd + 1));
+        cursor = delTagEnd + 1;
+        continue;
+      }
+
+      const afterInsClose = resultHtml.slice(insCloseTagIdx);
+      const insCloseMatch = afterInsClose.match(/^(\s*)<\/ins>/i);
+      if (!insCloseMatch) {
+        parts.push(resultHtml.slice(cursor, delTagEnd + 1));
+        cursor = delTagEnd + 1;
+        continue;
+      }
+
+      const insFullEnd = insCloseTagIdx + insCloseMatch[0].length;
+
+      const delInnerStart = resultHtml.indexOf(">", openTagIdx) + 1;
+      const delInnerEnd = resultHtml.lastIndexOf("</", closeTagIdx - 1);
+      if (delInnerEnd < delInnerStart) {
+        parts.push(resultHtml.slice(cursor, delTagEnd + 1));
+        cursor = delTagEnd + 1;
+        continue;
+      }
+
+      const insInnerStart = resultHtml.indexOf(">", insOpenTagIdx) + 1;
+      const insInnerEnd = resultHtml.lastIndexOf("</", insCloseTagIdx - 1);
+      if (insInnerEnd < insInnerStart) {
+        parts.push(resultHtml.slice(cursor, delTagEnd + 1));
+        cursor = delTagEnd + 1;
+        continue;
+      }
+
+      parts.push(resultHtml.slice(cursor, delIdx));
+
+      const delWrapper = resultHtml.slice(delIdx, delFullEnd);
+      const insWrapper = resultHtml.slice(
+        delFullEnd + insMatch[1].length,
+        insFullEnd,
+      );
+
+      const delInner = resultHtml.slice(delInnerStart, delInnerEnd);
+      const insInner = resultHtml.slice(insInnerStart, insInnerEnd);
+
+      const attributes = resultHtml.slice(
+        insOpenTagIdx + 1 + tagName.length,
+        insInnerStart - 1,
+      );
+
+      let replaced = "";
       if (
         /class=["'][^"']*(?:mermaid|markdown-alert|katex)[^"']*["']/i.test(
           attributes,
@@ -1961,21 +2058,24 @@ export function refineBlockDiffs(
               `data-original-content="${escapedNew}"`,
             );
 
-            return `<del class="diffdel diff-block"><${delTag}${updatedDelAttrs}>\n${escapedOld}\n</${delTag}></del><ins class="diffins diff-block"><${insTag}${updatedInsAttrs}>\n${escapedNew}\n</${insTag}></ins>`;
+            replaced = `<del class="diffdel diff-block"><${tagName}${updatedDelAttrs}>\n${escapedOld}\n</${tagName}></del><ins class="diffins diff-block"><${tagName}${updatedInsAttrs}>\n${escapedNew}\n</${tagName}></ins>`;
           }
         }
-        return match;
+        if (!replaced) {
+          replaced = delWrapper + insMatch[1] + insWrapper;
+        }
+      } else {
+        const innerDiff = execute(delInner, insInner);
+        const cleanedInnerDiff = fixInvalidNesting(innerDiff);
+        replaced = `<${tagName}${attributes}>${cleanedInnerDiff}</${tagName}>`;
       }
 
-      // Re-run the diff on the inner content to restore granularity
-      const innerDiff = execute(delInner, insInner);
+      parts.push(replaced);
+      cursor = insFullEnd;
+    }
 
-      // Clean up potential invalid nesting introduced by htmldiff in fragments
-      const cleanedInnerDiff = fixInvalidNesting(innerDiff);
-
-      return `<${insTag}${attributes}>${cleanedInnerDiff}</${insTag}>`;
-    },
-  );
+    return parts.join("");
+  })();
 
   const boldToHeadingRe =
     /<p[^>]*>\s*<strong[^>]*>\s*<del[^>]*>([\s\S]*?)<\/del>\s*(?:<\/strong>)?\s*<\/p>\s*<ins[^>]*>\s*<(h[1-6])([^>]*)>([\s\S]*?)<\/\2>\s*<\/ins>/gi;
