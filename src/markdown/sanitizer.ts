@@ -240,10 +240,10 @@ export function sanitizeHtml(html: string): string {
         // Reject url() to prevent CSS exfiltration; allow color names, hex, rgb, gradients, and var()
         "background-image": [/^(?!.*url\s*\().*$/i],
         background: [/^(?!.*url\s*\().*$/i],
-        // CSS Variables for Marp themes
-        "--theme": [/.*/],
-        "--color": [/.*/],
-        "--background": [/.*/],
+        // CSS Variables for Marp themes: reject url() to prevent CSS exfiltration via var()
+        "--theme": [/^(?!.*url\s*\().*$/i],
+        "--color": [/^(?!.*url\s*\().*$/i],
+        "--background": [/^(?!.*url\s*\().*$/i],
       },
     },
     transformTags: {

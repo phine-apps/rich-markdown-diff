@@ -46,7 +46,7 @@ import {
 } from "./markdown/structuralDiff";
 
 function wrapTablesForScrolling(html: string): string {
-  if (!html.includes("<table")) {
+  if (!/<table\b/i.test(html)) {
     return html;
   }
 
@@ -54,14 +54,17 @@ function wrapTablesForScrolling(html: string): string {
   // The old regex [\s\S]*?<\/table> broke on nested <table> tags.
   const result: string[] = [];
   let pos = 0;
+  const tableRegex = /<table\b/gi;
 
   while (pos < html.length) {
     // Look for optional wrapping <ins>/<del> followed by <table
-    const nextTable = html.indexOf("<table", pos);
-    if (nextTable === -1) {
+    tableRegex.lastIndex = pos;
+    const tableMatch = tableRegex.exec(html);
+    if (!tableMatch) {
       result.push(html.slice(pos));
       break;
     }
+    const nextTable = tableMatch.index;
 
     // Check if an <ins> or <del> immediately precedes the <table>
     let wrapperStart = nextTable;

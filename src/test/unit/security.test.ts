@@ -72,6 +72,28 @@ describe("Security Tests", () => {
     );
   });
 
+  it("rejects url() inside CSS variables to prevent CSS exfiltration bypass (ADV-04)", () => {
+    const provider = new MarkdownDiffProvider();
+    const maliciousHtml = '<div style="--background: url(https://example.invalid/exfil-token-leak); --theme: url(https://example.invalid/exfil-theme); background-image: var(--background);">leak</div>';
+    const { html: diffHtml } = provider.computeDiff("", maliciousHtml);
+
+    assert.strictEqual(
+      diffHtml.includes("exfil-token-leak"),
+      false,
+      "url() in --background must be stripped by sanitizeHtml",
+    );
+    assert.strictEqual(
+      diffHtml.includes("exfil-theme"),
+      false,
+      "url() in --theme must be stripped by sanitizeHtml",
+    );
+    assert.strictEqual(
+      diffHtml.includes("--background:"),
+      false,
+      "--background property containing url() must be stripped",
+    );
+  });
+
   it("XSS in Filenames (Labels)", () => {
     const provider = new MarkdownDiffProvider();
     const maliciousLabel = '"><script>alert(1)</script>';
