@@ -16,8 +16,7 @@ export function findClosing(
 ): number {
   let depth = 0;
   const tagNameLower = tagName.toLowerCase();
-  const openTagPrefix = `<${tagNameLower}`;
-  const closeTagPrefix = `</${tagNameLower}`;
+  const tagLen = tagNameLower.length;
 
   let i = start;
   const len = html.length;
@@ -34,13 +33,33 @@ export function findClosing(
     }
 
     // 2. Check for closing tag: </tag ... >
-    if (html[i] === "<" && html.startsWith(closeTagPrefix, i)) {
-      const nextChar = html[i + closeTagPrefix.length];
+    // Matches case-insensitively and skips quotes in attributes to avoid premature termination on '>'
+    if (
+      html[i] === "<" &&
+      i + 2 + tagLen <= len &&
+      html[i + 1] === "/" &&
+      html.slice(i + 2, i + 2 + tagLen).toLowerCase() === tagNameLower
+    ) {
+      const nextChar = html[i + 2 + tagLen];
       if (nextChar === ">" || /[\s/]/.test(nextChar || "")) {
-        const endTag = html.indexOf(">", i + closeTagPrefix.length);
-        if (endTag === -1) {
+        let j = i + 2 + tagLen;
+        while (j < len && html[j] !== ">") {
+          if (html[j] === '"' || html[j] === "'") {
+            const quote = html[j];
+            j++;
+            while (j < len && html[j] !== quote) {
+              j++;
+            }
+            if (j >= len) {
+              return -1;
+            }
+          }
+          j++;
+        }
+        if (j >= len) {
           return -1;
         }
+        const endTag = j;
         depth--;
         if (depth === 0) {
           return endTag + 1;
@@ -51,11 +70,16 @@ export function findClosing(
     }
 
     // 3. Check for opening tag: <tag ... > or <tag ... />
-    if (html[i] === "<" && html.startsWith(openTagPrefix, i)) {
-      const nextChar = html[i + openTagPrefix.length];
+    // Matches case-insensitively
+    if (
+      html[i] === "<" &&
+      i + 1 + tagLen <= len &&
+      html.slice(i + 1, i + 1 + tagLen).toLowerCase() === tagNameLower
+    ) {
+      const nextChar = html[i + 1 + tagLen];
       if (!nextChar || /[\s/>]/.test(nextChar)) {
         // Scan the attributes of this tag, skipping quoted strings safely in O(tag length)
-        let j = i + openTagPrefix.length;
+        let j = i + 1 + tagLen;
         let isSelfClosing = false;
 
         while (j < len) {

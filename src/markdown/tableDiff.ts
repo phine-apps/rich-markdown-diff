@@ -36,8 +36,28 @@ export function diffTables(
   const oldTable = parseTable(oldTableHtml);
   const newTable = parseTable(newTableHtml);
 
-  // 1. Align Columns by header name or index
-  const colMapping = alignColumns(oldTable.headers, newTable.headers);
+  // 1. Align Columns by header name or index (fallback to row cells count for headerless tables)
+  let oldHeaders = oldTable.headers;
+  let newHeaders = newTable.headers;
+  if (oldHeaders.length === 0 && newHeaders.length === 0) {
+    const maxOldCols = oldTable.rows.reduce(
+      (m: number, r: { cells: unknown[] }) => Math.max(m, r.cells.length),
+      0,
+    );
+    const maxNewCols = newTable.rows.reduce(
+      (m: number, r: { cells: unknown[] }) => Math.max(m, r.cells.length),
+      0,
+    );
+    oldHeaders = Array.from({ length: maxOldCols }, () => ({
+      html: "",
+      attrs: "",
+    }));
+    newHeaders = Array.from({ length: maxNewCols }, () => ({
+      html: "",
+      attrs: "",
+    }));
+  }
+  const colMapping = alignColumns(oldHeaders, newHeaders);
 
   // 2. Align Rows by content similarity or index
   const rowMapping = alignRows(oldTable.rows, newTable.rows);
@@ -355,31 +375,33 @@ export function renderMergedTable(
 ): string {
   let html = `<table${newTable.tableAttrs || oldTable.tableAttrs}>`;
 
-  // Render Header
-  html += "<thead><tr>";
-  colMapping.forEach((m) => {
-    const colClass =
-      m.newIdx === null
-        ? "diff-col-del"
-        : m.oldIdx === null
-          ? "diff-col-ins"
-          : "";
+  // Render Header (only if at least one table has headers)
+  if (oldTable.headers.length > 0 || newTable.headers.length > 0) {
+    html += "<thead><tr>";
+    colMapping.forEach((m) => {
+      const colClass =
+        m.newIdx === null
+          ? "diff-col-del"
+          : m.oldIdx === null
+            ? "diff-col-ins"
+            : "";
 
-    const oldH = m.oldIdx !== null && m.oldIdx >= 0 && m.oldIdx < oldTable.headers.length ? oldTable.headers[m.oldIdx] : undefined;
-    const newH = m.newIdx !== null && m.newIdx >= 0 && m.newIdx < newTable.headers.length ? newTable.headers[m.newIdx] : undefined;
+      const oldH = m.oldIdx !== null && m.oldIdx >= 0 && m.oldIdx < oldTable.headers.length ? oldTable.headers[m.oldIdx] : undefined;
+      const newH = m.newIdx !== null && m.newIdx >= 0 && m.newIdx < newTable.headers.length ? newTable.headers[m.newIdx] : undefined;
 
-    if (oldH && newH) {
-      const diff = execute(oldH.html, newH.html);
-      html += `<th${appendClass(newH.attrs, colClass)}>${diff}</th>`;
-    } else if (oldH) {
-      html += `<th${appendClass(oldH.attrs, colClass)}><del class="diffdel">${oldH.html}</del></th>`;
-    } else if (newH) {
-      html += `<th${appendClass(newH.attrs, colClass)}><ins class="diffins">${newH.html}</ins></th>`;
-    } else {
-      html += `<th${appendClass("", colClass)}></th>`;
-    }
-  });
-  html += "</tr></thead>";
+      if (oldH && newH) {
+        const diff = execute(oldH.html, newH.html);
+        html += `<th${appendClass(newH.attrs, colClass)}>${diff}</th>`;
+      } else if (oldH) {
+        html += `<th${appendClass(oldH.attrs, colClass)}><del class="diffdel">${oldH.html}</del></th>`;
+      } else if (newH) {
+        html += `<th${appendClass(newH.attrs, colClass)}><ins class="diffins">${newH.html}</ins></th>`;
+      } else {
+        html += `<th${appendClass("", colClass)}></th>`;
+      }
+    });
+    html += "</tr></thead>";
+  }
 
   // Render Body
   html += "<tbody>";

@@ -14,7 +14,7 @@ import {
   splitConsolidatedDiffs,
   lcsAlignment,
 } from "../../markdown/structuralDiff";
-import { appendClass } from "../../markdown/tableDiff";
+import { appendClass, diffTables } from "../../markdown/tableDiff";
 import { findClosing } from "../../markdown/domUtils";
 
 describe("MarkdownDiffProvider - Edge Cases", () => {
@@ -164,6 +164,15 @@ describe("MarkdownDiffProvider - Edge Cases", () => {
     const wrappedOutput = provider.getWebviewContent(wrappedInput, "", "", "", "");
     
     assert.ok(wrappedOutput.includes(wrappedInput), "Should not double-wrap already-wrapped table with attributes and spacing");
+  });
+
+  it("should wrap uppercase TABLE elements in table-block-wrapper and table-scroll (ADV-03)", () => {
+    const table = '<TABLE class="my-table"><TR><TD>Cell</TD></TR></TABLE>';
+    const wrappedOutput = provider.getWebviewContent(table, "", "", "", "");
+    assert.ok(
+      wrappedOutput.includes('<div class="table-block-wrapper"><div class="table-scroll"><TABLE class="my-table"><TR><TD>Cell</TD></TR></TABLE></div></div>'),
+      "Should wrap uppercase TABLE in table-block-wrapper and table-scroll",
+    );
   });
 
   it("should validate input types correctly for applyEdit message payload (BUG-07)", () => {
@@ -322,6 +331,35 @@ describe("MarkdownDiffProvider - Edge Cases", () => {
 
       assert.strictEqual(end, html.length);
       assert.ok(elapsed < 200, `Expected linear time execution, took ${elapsed}ms`);
+    });
+
+    it("should handle uppercase and mixed-case tag names correctly (ADV-01)", () => {
+      const htmlUpper = "<DIV><p>test</p></DIV>";
+      assert.strictEqual(findClosing(htmlUpper, 0, "div"), htmlUpper.length);
+      assert.strictEqual(findClosing(htmlUpper, 0, "DIV"), htmlUpper.length);
+
+      const htmlMixed = "<Div>Outer <DIV>Inner</DIV> More Outer</Div>";
+      assert.strictEqual(findClosing(htmlMixed, 0, "div"), htmlMixed.length);
+
+      const htmlTable = '<table border="1"><TR><TD>Cell</TD></TR></table>';
+      const trStart = htmlTable.indexOf("<TR>");
+      assert.strictEqual(findClosing(htmlTable, trStart, "tr"), htmlTable.indexOf("</table>"));
+    });
+
+    it("should safely skip attributes with > in closing tags (ADV-02)", () => {
+      const html = '<div><span attr="test">content</span data-extra=">"></div>';
+      const spanEnd = findClosing(html, 5, "span");
+      assert.strictEqual(html.slice(5, spanEnd), '<span attr="test">content</span data-extra=">">');
+      assert.strictEqual(spanEnd, '<div><span attr="test">content</span data-extra=">">'.length);
+    });
+
+    it("should preserve rows when diffing tables with uppercase TR and TD tags (ADV-01)", () => {
+      const oldTable = '<table border="1"><TR><TD>Old</TD></TR></table>';
+      const newTable = '<table border="1"><TR><TD>New</TD></TR></table>';
+      const diff = diffTables(oldTable, newTable, (a, b) => `<del>${a}</del><ins>${b}</ins>`);
+      assert.ok(diff.includes("Old"), "Old cell content must be preserved in diff");
+      assert.ok(diff.includes("New"), "New cell content must be preserved in diff");
+      assert.ok(diff.includes("<tr"), "Diff must contain table row element");
     });
   });
 
