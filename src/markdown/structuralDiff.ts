@@ -195,7 +195,7 @@ export function executeWithFullPipeline(
   // to allow refineBlockDiffs to granularly diff slide content.
   let restored = restoreComplexTokens(diff, localTokens);
 
-  // --- CONTENT INTEGRITY GUARD ---
+  // --- CONTENT INTEGRITY GUARD (PRE-REFINEMENT) ---
   // If the complex pipeline caused data loss (e.g. htmldiff failed to align correctly),
   // fallback to a safe raw diff. We check after restoration so we can see the words.
   if (!verifyDiffIntegrity(newHtml, restored)) {
@@ -204,7 +204,7 @@ export function executeWithFullPipeline(
     );
     let fallbackDiff = execute(oldHtml, newHtml);
     // Even in fallback, we still want to apply basic cleanup to ensure valid HTML
-    fallbackDiff = fixInvalidNesting(fallbackDiff);
+    fallbackDiff = cleanupUnbalancedDiffTags(fixInvalidNesting(fallbackDiff));
     return { diff: fallbackDiff, tokens: {} };
   }
 
@@ -214,12 +214,55 @@ export function executeWithFullPipeline(
     ...cbTokensNew,
   });
 
+  // Snapshot before post-restoration refinements for Stage-1 graceful degradation
+  const preRefinementSnapshot = restored;
+
   // Apply post-restoration refinements (like list Ghost items)
   if (!options.skipRefinement) {
     restored = applyStructuralDiffPipeline(restored, execute, localTokens);
   }
 
   restored = normalizeMathBlockDiffs(restored);
+
+  // --- CLOSED-LOOP POST-CONDITION VERIFICATION & GRACEFUL DEGRADATION ---
+  if (
+    !verifyPipelinePostConditions(
+      oldHtml,
+      newHtml,
+      restored,
+      localTokens,
+      sharedToken,
+      preRefinementSnapshot,
+    )
+  ) {
+    if (!options.skipRefinement) {
+      const degradedStage1 = normalizeMathBlockDiffs(
+        cleanupUnbalancedDiffTags(preRefinementSnapshot),
+      );
+      if (
+        verifyPipelinePostConditions(
+          oldHtml,
+          newHtml,
+          degradedStage1,
+          localTokens,
+          sharedToken,
+        )
+      ) {
+        console.warn(
+          "Post-refinement structural check failed. Degrading to pre-refinement diff.",
+        );
+        return { diff: degradedStage1, tokens: localTokens };
+      }
+    }
+
+    console.warn(
+      "Post-condition check failed. Falling back to safe raw diff.",
+    );
+    let fallbackDiff = execute(oldHtml, newHtml);
+    fallbackDiff = cleanupUnbalancedDiffTags(fixInvalidNesting(fallbackDiff));
+    return { diff: fallbackDiff, tokens: {} };
+  }
+
   return { diff: restored, tokens: localTokens };
 }
 
@@ -691,8 +734,19 @@ export function balanceDiffTags(html: string): string {
       if (stack.length > 0 && stack[stack.length - 1] === tagName) {
         stack.pop();
         balanced += html.substring(lastIndex, m.index + fullTag.length);
+      } else if (stack.includes(tagName)) {
+        // Crossed closing tag (e.g. <ins><del>...</ins></del>):
+        // Emit text before this closing tag, then close inner tags down to tagName
+        balanced += html.substring(lastIndex, m.index);
+        while (stack.length > 0) {
+          const popped = stack.pop()!;
+          balanced += `</${popped}>`;
+          if (popped === tagName) {
+            break;
+          }
+        }
       } else {
-        // Stray closing tag - ignore or just include the text before it
+        // Stray closing tag - ignore and only include the text before it
         balanced += html.substring(lastIndex, m.index);
       }
     } else {
@@ -717,23 +771,29 @@ export function cleanupUnbalancedDiffTags(html: string): string {
   const preBlocks: string[] = [];
   const maskedHtml = html.replace(/<pre\b[^>]*>[\s\S]*?<\/pre>/gi, (match) => {
     // Inside <pre>, only remove strictly empty diff tags with no content at all
-    const cleanedPre = match.replace(/<(ins|del)[^>]*><\/\1>/gi, "");
+    const cleanedPre = balanceDiffTags(
+      match.replace(/<(ins|del)[^>]*><\/\1>/gi, ""),
+    );
     const token = `__PRE_CLEANUP_${preBlocks.length}_TOKEN__`;
     preBlocks.push(cleanedPre);
     return token;
   });
 
-  let result = balanceDiffTags(maskedHtml);
-
   // Fix cases like <section></del></ins> which happen if htmldiff gets confused by fragments
-  result = result.replace(/<section>\s*<\/del>\s*<\/ins>/gi, "<section>");
+  let result = maskedHtml.replace(/<section>\s*<\/del>\s*<\/ins>/gi, "<section>");
   result = result.replace(/<section>\s*<\/ins>\s*<\/del>/gi, "<section>");
 
-  // Fix inverted closing tags inside content
-  result = result.replace(/<\/del>\s*<\/ins>/g, "</ins></del>");
+  // Balance all <ins> and <del> tags (including crossed closing tags)
+  result = balanceDiffTags(result);
+
+  // Flatten any nested <ins>/<del> pairs exposed by balancing crossed closing tags
+  result = flattenDiffNesting(result);
 
   // Remove empty diff tags
   result = result.replace(/<(ins|del)[^>]*>\s*<\/\1>/gi, "");
+
+  // Final balance pass in case empty tag removal exposed an outer pair
+  result = balanceDiffTags(result);
 
   // Restore protected pre blocks
   for (let i = 0; i < preBlocks.length; i++) {
@@ -796,9 +856,9 @@ export function flattenDiffNesting(html: string): string {
     const prev = result;
 
     // Pattern: <outer><inner>CONTENT</inner></outer> where outer and inner are same or different types (del/ins)
-    // We use negative lookaheads to ensure we don't match across sibling tags.
+    // We use negative lookaheads to ensure we match an innermost diff tag and never span across sibling diff tags.
     result = result.replace(
-      /<(del|ins)([^>]*)>((?:(?!<\/\1>)[\s\S])*?)<(ins|del)([^>]*)>([\s\S]*?)<\/\4>((?:(?!<\/\1>)[\s\S])*?)<\/\1>/gi,
+      /<(del|ins)([^>]*)>((?:(?!<\/\1>)[\s\S])*?)<(ins|del)([^>]*)>((?:(?!<\/?(?:ins|del)\b)[\s\S])*?)<\/\4>((?:(?!<\/\1>)[\s\S])*?)<\/\1>/gi,
       (match, t1, a1, s1, t2, a2, content, s2) => {
         if (t1.toLowerCase() === t2.toLowerCase()) {
           // Double wrapping of same type: consolidate them
@@ -2589,6 +2649,23 @@ export function extractSharedReparentedLists(html: string): string {
 
 export function fixInvalidNesting(html: string): string {
   let fixed = html;
+  // 0. Repair upstream htmldiff-js <sup> bug: htmldiff-js includes <sup> in specialCaseOpeningTagRegex
+  // (injecting <ins class="mod"> and shifting <sup> on delete) but omits </sup> from specialCaseClosingTags.
+  // When <sup> was shifted on delete (so <ins class="mod"> is not preceded by <sup>), replace the orphan </sup> with </ins>.
+  fixed = fixed.replace(
+    /<ins class="mod">((?:(?!<sup\b|<\/ins>)[\s\S])*?(?:<\/(?:ins|del)>)?(?:(?!<sup\b|<\/ins>)[\s\S])*?)<\/sup>/gi,
+    (match, inner, offset, fullStr) => {
+      const prefix = fullStr.slice(0, offset).toLowerCase();
+      const hasOpenSup = prefix.lastIndexOf("<sup") > prefix.lastIndexOf("</sup");
+      if (hasOpenSup) {
+        if (/\bdiffmod\b|<del\b/i.test(inner)) {
+          return `<ins class="mod">${inner}</ins></sup>`;
+        }
+        return match;
+      }
+      return `<ins class="mod">${inner}</ins>`;
+    },
+  );
   // 1. Fix order of closing tags for common inline elements
   const inlineTags = "strong|em|b|i|u|s|code|span|a|mark|sub|sup";
   const blockTags =
@@ -2759,13 +2836,174 @@ export function labelBlockDiffTags(html: string): string {
   );
 }
 
+function stripDiffTagSide(html: string, tagToExclude: "del" | "ins"): string {
+  const openMarker = `<${tagToExclude}`;
+  if (!html.toLowerCase().includes(openMarker)) {
+    return html;
+  }
+  const pattern = new RegExp(
+    `<${tagToExclude}\\b[^>]*>((?:(?!<${tagToExclude}\\b)[\\s\\S])*?)<\\/${tagToExclude}>`,
+    "gi",
+  );
+  let current = html;
+  let previous: string;
+  let iterations = 0;
+  do {
+    previous = current;
+    current = current.replace(pattern, (match, inner) => {
+      // htmldiff-js injects <ins class="mod"> around shared (equal) words when inline formatting
+      // tags (strong, em, s, sub, sup, etc.) change. Unwrap <ins class="mod"> so shared words
+      // and any nested <del> tags are retained when verifying the "old" side.
+      if (
+        tagToExclude === "ins" &&
+        /^<ins\b[^>]*\bclass=["']mod["']/i.test(match)
+      ) {
+        return inner;
+      }
+      return " ";
+    });
+    iterations++;
+  } while (
+    current !== previous &&
+    iterations < 10 &&
+    current.toLowerCase().includes(openMarker)
+  );
+  return current;
+}
+
 /**
- * Verifies that the diff HTML contains all the significant content from the modified version.
- * If significant content is missing, it indicates a catastrophic failure in htmldiff alignment.
+ * Checks whether any internal pipeline placeholder or token leaked into the final HTML output
+ * without having been present in the original input HTML strings.
+ */
+export function hasUnrestoredPipelineTokens(
+  finalHtml: string,
+  tokens: Record<string, string> = {},
+  sharedAttrToken?: string,
+  oldHtml: string = "",
+  newHtml: string = "",
+): boolean {
+  const lowerFinal = finalHtml.toLowerCase();
+  const lowerOld = oldHtml.toLowerCase();
+  const lowerNew = newHtml.toLowerCase();
+
+  if (sharedAttrToken) {
+    const lowerShared = sharedAttrToken.toLowerCase();
+    if (
+      lowerFinal.includes(lowerShared) &&
+      !lowerOld.includes(lowerShared) &&
+      !lowerNew.includes(lowerShared)
+    ) {
+      return true;
+    }
+  }
+
+  for (const key of Object.keys(tokens)) {
+    const lowerKey = key.toLowerCase();
+    if (
+      lowerFinal.includes(lowerKey) &&
+      !lowerOld.includes(lowerKey) &&
+      !lowerNew.includes(lowerKey)
+    ) {
+      return true;
+    }
+  }
+
+  const internalPlaceholderMatch = finalHtml.match(
+    /__PRE_CLEANUP_\d+_TOKEN__|PREDIFF_\d+_[a-z0-9]+_PLACEHOLDER|data(?:-attr-masked-|AttrMasked)[a-z0-9]+x[a-f0-9]{8}="true"|TK[0-9a-f]{12}(?:MERMAID|ALERT|CODEBLOCK|HR|MATHBLOCK|MATH|SECTION|TABLE|LIST_UL|LIST_OL|LIST_DL|ATTR)|TKCB\d+H[0-9a-f]{8}S(?:CHECKED|UNCHECKED)/i,
+  );
+  if (internalPlaceholderMatch) {
+    const leaked = internalPlaceholderMatch[0].toLowerCase();
+    if (!lowerOld.includes(leaked) && !lowerNew.includes(leaked)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Verifies in O(N) linear time that all <ins> and <del> tags in the HTML string
+ * are strictly balanced in LIFO order with no unclosed or stray closing diff tags.
+ */
+export function areDiffTagsBalanced(html: string): boolean {
+  const stack: string[] = [];
+  const tagRegex = /<(\/)?(ins|del)\b[^>]*>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = tagRegex.exec(html)) !== null) {
+    const isClosing = m[1] === "/";
+    const tagName = m[2].toLowerCase();
+    if (isClosing) {
+      if (stack.length === 0 || stack[stack.length - 1] !== tagName) {
+        return false;
+      }
+      stack.pop();
+    } else if (!m[0].endsWith("/>")) {
+      stack.push(tagName);
+    }
+  }
+  return stack.length === 0;
+}
+
+/**
+ * Closed-loop post-condition sensor for the structural diff pipeline.
+ * Verifies:
+ * 1. No internal placeholder or attribute mask tokens leaked into the output.
+ * 2. Both the "new" side (Shared + Inserted) and "old" side (Shared + Deleted) preserve content integrity.
+ * 3. All <ins> and <del> diff tags are strictly balanced, and full HTML tag balance does not regress
+ *    relative to the pre-refinement baseline (or balanced inputs when no baseline is provided).
+ */
+export function verifyPipelinePostConditions(
+  oldHtml: string,
+  newHtml: string,
+  finalHtml: string,
+  tokens: Record<string, string> = {},
+  sharedAttrToken?: string,
+  baselineHtml?: string,
+): boolean {
+  if (
+    hasUnrestoredPipelineTokens(
+      finalHtml,
+      tokens,
+      sharedAttrToken,
+      oldHtml,
+      newHtml,
+    )
+  ) {
+    return false;
+  }
+
+  if (!areDiffTagsBalanced(finalHtml)) {
+    return false;
+  }
+
+  if (!verifyDiffIntegrity(newHtml, finalHtml, "new")) {
+    return false;
+  }
+
+  if (!verifyDiffIntegrity(oldHtml, finalHtml, "old")) {
+    return false;
+  }
+
+  const shouldCheckFullBalance =
+    baselineHtml !== undefined
+      ? areHtmlTagsBalanced(baselineHtml)
+      : areHtmlTagsBalanced(oldHtml) && areHtmlTagsBalanced(newHtml);
+
+  if (shouldCheckFullBalance && !areHtmlTagsBalanced(finalHtml)) {
+    return false;
+  }
+
+  return true;
+}
+
+/**
+ * Verifies that the diff HTML contains all the significant content from the target version ("new" or "old").
+ * If significant content is missing, it indicates a failure in htmldiff alignment or post-processing.
  */
 export function verifyDiffIntegrity(
-  newHtml: string,
+  targetHtml: string,
   diffHtml: string,
+  side: "new" | "old" = "new",
 ): boolean {
   const strip = (html: string) => {
     return stripHtmlTags(html, " ")
@@ -2773,16 +3011,14 @@ export function verifyDiffIntegrity(
       .trim();
   };
 
-  const newText = strip(newHtml);
+  const targetText = strip(targetHtml);
 
-  // We want to ensure that all words from the modified version are present
-  // in the "new" side of the diff (Shared + Inserted).
-  // Therefore, we must EXCLUDE <del> blocks from the integrity check.
-  const diffNewSideHtml = diffHtml.replace(
-    /<del\b[^>]*>[\s\S]*?<\/del>/gi,
-    " ",
-  );
-  const diffText = strip(diffNewSideHtml);
+  // When verifying the "new" side (Shared + Inserted), exclude <del> blocks.
+  // When verifying the "old" side (Shared + Deleted), exclude <ins> blocks.
+  const excludedTag = side === "old" ? "ins" : "del";
+  const diffSideHtml = stripDiffTagSide(diffHtml, excludedTag);
+  const diffText = strip(diffSideHtml);
+  const diffTextLower = diffText.toLowerCase();
 
   // We check for all alphanumeric words to ensure total integrity.
   // CJK characters (Han, Hiragana, Katakana, Hangul) are matched individually
@@ -2794,8 +3030,8 @@ export function verifyDiffIntegrity(
     return text.toLowerCase().match(regex) || [];
   };
 
-  const newWords = getWords(newText);
-  if (newWords.length === 0) {
+  const targetWords = getWords(targetText);
+  if (targetWords.length === 0) {
     return true; // Nothing to check
   }
 
@@ -2804,24 +3040,45 @@ export function verifyDiffIntegrity(
     diffWordsMap.set(word, (diffWordsMap.get(word) || 0) + 1);
   }
 
-  const newWordsMap = new Map<string, number>();
-  for (const word of newWords) {
-    newWordsMap.set(word, (newWordsMap.get(word) || 0) + 1);
+  const targetWordsMap = new Map<string, number>();
+  for (const word of targetWords) {
+    targetWordsMap.set(word, (targetWordsMap.get(word) || 0) + 1);
   }
+
+  const countSubstringOccurrences = (haystack: string, needle: string): number => {
+    if (!needle) {
+      return 0;
+    }
+    let count = 0;
+    let pos = 0;
+    while ((pos = haystack.indexOf(needle, pos)) !== -1) {
+      count++;
+      pos += needle.length;
+    }
+    return count;
+  };
 
   let missingCount = 0;
   let totalChecked = 0;
   const missingWords: string[] = [];
 
-  for (const [word, newCount] of newWordsMap.entries()) {
-    const diffCount = diffWordsMap.get(word) || 0;
-    if (diffCount < newCount) {
-      missingCount += (newCount - diffCount);
+  for (const [word, targetCount] of targetWordsMap.entries()) {
+    let diffCount = diffWordsMap.get(word) || 0;
+    if (diffCount < targetCount && word.length >= 2) {
+      // htmldiff-js + cleanInnerDiffTags may strip inline tags (e.g. <sub>/<sup>) inside a deleted
+      // block, concatenating adjacent tokens (e.g. "sensor<sub>sub</sub>" -> "sensorsub").
+      diffCount = Math.max(
+        diffCount,
+        Math.min(targetCount, countSubstringOccurrences(diffTextLower, word)),
+      );
+    }
+    if (diffCount < targetCount) {
+      missingCount += (targetCount - diffCount);
       if (missingWords.length < 10) {
         missingWords.push(word);
       }
     }
-    totalChecked += newCount;
+    totalChecked += targetCount;
   }
 
   const failureThreshold = 0.02; // 2.0% margin of error
@@ -2830,7 +3087,7 @@ export function verifyDiffIntegrity(
 
   if (isBroken) {
     console.warn(
-      `Integrity check failed: missing ${missingCount}/${totalChecked} words (${(missingRatio * 100).toFixed(1)}%). Missing: ${missingWords.join(", ")}`,
+      `Integrity check (${side}) failed: missing ${missingCount}/${totalChecked} words (${(missingRatio * 100).toFixed(1)}%). Missing: ${missingWords.join(", ")}`,
     );
     return false;
   }
