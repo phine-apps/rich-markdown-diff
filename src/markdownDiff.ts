@@ -139,9 +139,23 @@ function getLineOffset(original: string, content: string): number {
   if (!original || !content) {
     return 0;
   }
-  const index = original.indexOf(content);
+  let searchStartIndex = 0;
+  // If frontmatter is present at the beginning of the file, skip past the frontmatter block
+  // to prevent matching substrings inside the frontmatter values (collision defense)
+  const fmMatch = original.match(
+    /^(?:---|\+\+\+|;---;)[ \t]*\r?\n[\s\S]*?\r?\n(?:---|\+\+\+|;---;)[ \t]*(?:\r?\n|$)/,
+  );
+  if (fmMatch) {
+    searchStartIndex = fmMatch[0].length;
+  }
+  const index = original.indexOf(content, searchStartIndex);
   if (index === -1) {
-    return 0;
+    const fallbackIndex = original.indexOf(content);
+    if (fallbackIndex === -1) {
+      return 0;
+    }
+    const prefix = original.slice(0, fallbackIndex);
+    return prefix.split(/\r?\n/).length - 1;
   }
   const prefix = original.slice(0, index);
   return prefix.split(/\r?\n/).length - 1;

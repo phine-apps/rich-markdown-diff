@@ -220,4 +220,71 @@ describe("Security Tests", () => {
       "Frontmatter values should be properly escaped",
     );
   });
+
+  it("prevents XSS via user-supplied <script> in Marp documents", async () => {
+    const provider = new MarkdownDiffProvider();
+    await provider.waitForReady();
+    const maliciousMarp = `---
+marp: true
+---
+# Slide 1
+<script>alert("XSS_ATTACK")</script>
+`;
+    const diff = provider.computeDiff(maliciousMarp, maliciousMarp);
+
+    // Verify that marpJs does NOT contain the malicious script
+    assert.strictEqual(
+      diff.marpJs ? diff.marpJs.includes("XSS_ATTACK") : false,
+      false,
+      "marpJs must not extract or execute user-supplied script tags",
+    );
+
+    const webview = provider.getWebviewContent(
+      diff.html,
+      "",
+      "",
+      "",
+      "",
+      "Orig",
+      "Mod",
+      "",
+      {},
+      diff.marpCss,
+      diff.marpJs,
+    );
+
+    assert.strictEqual(
+      webview.includes('<script>alert("XSS_ATTACK")</script>'),
+      false,
+      "Webview content must not contain raw executable user script tags",
+    );
+    assert.ok(
+      webview.includes("&lt;script&gt;alert(&quot;XSS_ATTACK&quot;)&lt;/script&gt;") ||
+      webview.includes('&lt;script&gt;alert("XSS_ATTACK")&lt;/script&gt;'),
+      "User script in markdown must be safely escaped as inert text",
+    );
+  });
+
+  it("prevents frontmatter offset collision with body content", async () => {
+    const provider = new MarkdownDiffProvider();
+    const docWithCollision = `---
+title: Test
+desc: TargetBodyWord
+---
+TargetBodyWord
+SecondLine`;
+
+    const { html } = provider.computeDiff(docWithCollision, docWithCollision);
+    // The markdown body starts at line index 4 (0: ---, 1: title, 2: desc, 3: ---, 4: TargetBodyWord)
+    // data-line should be 4, NOT 2 (where desc: TargetBodyWord appeared)
+    assert.ok(
+      html.includes('data-line="4"'),
+      `Expected data-line="4" for body content, but got HTML: ${html}`,
+    );
+    assert.strictEqual(
+      html.includes('data-line="2"'),
+      false,
+      "data-line must not collide with line index 2 inside frontmatter",
+    );
+  });
 });
