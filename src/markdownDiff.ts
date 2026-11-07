@@ -117,6 +117,24 @@ function wrapTablesForScrolling(html: string): string {
   return result.join("");
 }
 
+function safeParseMatter(markdown: string): {
+  content: string;
+  data: Record<string, any>;
+} {
+  try {
+    const parsed = matter(markdown);
+    const data =
+      parsed.data &&
+      typeof parsed.data === "object" &&
+      !Array.isArray(parsed.data)
+        ? (parsed.data as Record<string, any>)
+        : {};
+    return { content: parsed.content, data };
+  } catch {
+    return { content: markdown, data: {} };
+  }
+}
+
 function getLineOffset(original: string, content: string): number {
   if (!original || !content) {
     return 0;
@@ -176,8 +194,8 @@ export class MarkdownDiffProvider {
     oldImageResolver?: (src: string) => string,
     options: { tokenizeListContainers?: boolean } = {},
   ): { html: string; marpCss?: string; marpJs?: string; hasDiff: boolean } {
-    const oldMatter = matter(oldMarkdown);
-    const newMatter = matter(newMarkdown);
+    const oldMatter = safeParseMatter(oldMarkdown);
+    const newMatter = safeParseMatter(newMarkdown);
 
     const isMarp = !!(oldMatter.data.marp || newMatter.data.marp);
 
