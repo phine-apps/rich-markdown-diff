@@ -16,9 +16,7 @@ updates:
           - "*"
     ignore:
       - dependency-name: "@types/vscode"
-      - dependency-name: "markdown-it"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "typescript"
+      - dependency-name: "*"
         update-types: ["version-update:semver-major"]
 
   - package-ecosystem: "github-actions"
