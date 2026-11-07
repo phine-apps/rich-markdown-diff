@@ -34,7 +34,7 @@ export async function loadMarp() {
   const MarpClass = (marpMod as any).Marp || marpMod;
   return new MarpClass({
     container: false,
-    html: true,
+    html: MarpClass.html || true,
     inlineSVG: false,
     math: "katex",
   });
@@ -49,7 +49,14 @@ export function cleanMarpHtml(html: string): { cleaned: string; scripts: string[
   let m: RegExpExecArray | null;
   while ((m = scriptRegex.exec(html)) !== null) {
     const content = m[1].trim();
-    if (content) {
+    // Only allow Marp Core's official auto-scaling / SVG polyfill scripts to be extracted.
+    // User scripts or untrusted scripts must never be extracted or executed.
+    const isMarpInternalScript =
+      content.includes("data-marp-auto-scaling") ||
+      content.includes("marpitSVGPolyfill") ||
+      content.includes("marp-auto-scaling");
+
+    if (content && isMarpInternalScript) {
       scripts.push(content);
     }
   }
