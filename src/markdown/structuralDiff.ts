@@ -524,26 +524,60 @@ export function splitByBlocks(
       }
 
       if (html[i + 1] === "/") {
-        nesting = Math.max(0, nesting - 1);
-        const endTag = html.indexOf(">", i);
-        if (endTag !== -1) {
-          i = endTag + 1;
+        let j = i + 2;
+        while (j < html.length && html[j] !== ">") {
+          if (html[j] === '"' || html[j] === "'") {
+            const quote = html[j];
+            j++;
+            while (j < html.length && html[j] !== quote) {
+              j++;
+            }
+          }
+          j++;
+        }
+        if (j < html.length) {
+          nesting = Math.max(0, nesting - 1);
+          i = j + 1;
           continue;
         }
       } else if (html[i + 1] !== "!" && html[i + 1] !== "?") {
-        const tagMatchRegex = /<([a-z0-9]+)\b/iy;
+        const tagMatchRegex = /<([a-z0-9-]+)\b/iy;
         tagMatchRegex.lastIndex = i;
         const match = tagMatchRegex.exec(html);
         if (match) {
           const tagName = match[1].toLowerCase();
-          const isVoid = ["img", "br", "hr", "meta", "link", "input"].includes(tagName);
-          const endOfTag = html.indexOf(">", i);
-          const isSelfClosing = endOfTag !== -1 && html[endOfTag - 1] === "/";
-          if (!isVoid && !isSelfClosing) {
-            nesting++;
+          const isVoid = HTML_VOID_TAGS.has(tagName);
+          let j = i + 1;
+          let isSelfClosing = false;
+          while (j < html.length) {
+            const c = html[j];
+            if (c === ">") {
+              let k = j - 1;
+              while (k > i && /\s/.test(html[k])) {
+                k--;
+              }
+              if (k > i && html[k] === "/") {
+                isSelfClosing = true;
+              }
+              break;
+            }
+            if (c === '"' || c === "'") {
+              const quote = c;
+              j++;
+              while (j < html.length && html[j] !== quote) {
+                j++;
+              }
+              if (j >= html.length) {
+                break;
+              }
+            }
+            j++;
           }
-          if (endOfTag !== -1) {
-            i = endOfTag + 1;
+          if (j < html.length) {
+            if (!isVoid && !isSelfClosing) {
+              nesting++;
+            }
+            i = j + 1;
             continue;
           }
         }
@@ -1031,15 +1065,17 @@ export function maskBlockAttributes(
   const blockTags =
     "h[1-6]|p|blockquote|pre|div|table|ul|ol|dl|section|li|tr|th|td|img";
 
-  // Exclude already masked tags
-  const regex = new RegExp(
-    `(<(?:${blockTags}))(\\s+(?!data-attr-masked-)[^>]*?)(>)`,
-    "gi",
-  );
-
   const token =
     providedToken ||
     `data-attr-masked-${Math.random().toString(36).substring(2, 10)}`;
+  const escapedToken = token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+  // Exclude already masked tags (both hyphenated default and camelCase provided tokens)
+  // and use quote-aware scanning so '>' inside attribute values does not corrupt tags.
+  const regex = new RegExp(
+    `(<(?:${blockTags}))(\\s+(?!data-attr-masked-|${escapedToken})(?:[^>"']|"[^"]*"|'[^']*')*?)(>)`,
+    "gi",
+  );
 
   const masked = html.replace(regex, (match, tag, attrs, close, _offset) => {
     // Normalize attributes for hashing by stripping volatile parts (data-line)
@@ -2649,23 +2685,69 @@ export function extractSharedReparentedLists(html: string): string {
 
 export function fixInvalidNesting(html: string): string {
   let fixed = html;
-  // 0. Repair upstream htmldiff-js <sup> bug: htmldiff-js includes <sup> in specialCaseOpeningTagRegex
-  // (injecting <ins class="mod"> and shifting <sup> on delete) but omits </sup> from specialCaseClosingTags.
-  // When <sup> was shifted on delete (so <ins class="mod"> is not preceded by <sup>), replace the orphan </sup> with </ins>.
-  fixed = fixed.replace(
-    /<ins class="mod">((?:(?!<sup\b|<\/ins>)[\s\S])*?(?:<\/(?:ins|del)>)?(?:(?!<sup\b|<\/ins>)[\s\S])*?)<\/sup>/gi,
-    (match, inner, offset, fullStr) => {
-      const prefix = fullStr.slice(0, offset).toLowerCase();
+  // 0. Repair upstream htmldiff-js <sup> bug in strict O(N) linear time:
+  // htmldiff-js includes <sup> in specialCaseOpeningTagRegex (injecting <ins class="mod"> and
+  // shifting <sup> on delete) but omits </sup> from specialCaseClosingTags.
+  // When <sup> was shifted on delete (so <ins class="mod"> is not preceded by <sup>),
+  // replace the orphan </sup> with </ins>.
+  fixed = (() => {
+    const marker = '<ins class="mod">';
+    const lower = fixed.toLowerCase();
+    if (!lower.includes(marker) || !lower.includes("</sup>")) {
+      return fixed;
+    }
+
+    const parts: string[] = [];
+    let cursor = 0;
+    const len = fixed.length;
+
+    while (cursor < len) {
+      const idx = lower.indexOf(marker, cursor);
+      if (idx === -1) {
+        parts.push(fixed.slice(cursor));
+        break;
+      }
+
+      const innerStart = idx + marker.length;
+      const supCloseIdx = lower.indexOf("</sup>", innerStart);
+      if (supCloseIdx === -1) {
+        // No more </sup> anywhere in the remaining string
+        parts.push(fixed.slice(cursor));
+        break;
+      }
+
+      // Scan tokens between innerStart and supCloseIdx:
+      // Must contain no <sup\b and at most one </ins>
+      const candidateInnerLower = lower.slice(innerStart, supCloseIdx);
+      const hasNestedSup = /<sup\b/.test(candidateInnerLower);
+      const closeInsMatches = candidateInnerLower.match(/<\/ins>/g);
+      const closeInsCount = closeInsMatches ? closeInsMatches.length : 0;
+
+      if (hasNestedSup || closeInsCount > 1) {
+        parts.push(fixed.slice(cursor, innerStart));
+        cursor = innerStart;
+        continue;
+      }
+
+      const inner = fixed.slice(innerStart, supCloseIdx);
+      const prefix = lower.slice(0, idx);
       const hasOpenSup = prefix.lastIndexOf("<sup") > prefix.lastIndexOf("</sup");
+
+      parts.push(fixed.slice(cursor, idx));
       if (hasOpenSup) {
         if (/\bdiffmod\b|<del\b/i.test(inner)) {
-          return `<ins class="mod">${inner}</ins></sup>`;
+          parts.push(`<ins class="mod">${inner}</ins></sup>`);
+        } else {
+          parts.push(fixed.slice(idx, supCloseIdx + 6));
         }
-        return match;
+      } else {
+        parts.push(`<ins class="mod">${inner}</ins>`);
       }
-      return `<ins class="mod">${inner}</ins>`;
-    },
-  );
+      cursor = supCloseIdx + 6;
+    }
+
+    return parts.join("");
+  })();
   // 1. Fix order of closing tags for common inline elements
   const inlineTags = "strong|em|b|i|u|s|code|span|a|mark|sub|sup";
   const blockTags =
@@ -2807,29 +2889,28 @@ export function cleanInnerDiffTags(html: string, type: "ins" | "del"): string {
 }
 
 /**
- * Labels block-level diff tags with human-readable descriptions based on their content.
+ * Labels block-level diff tags with human-readable descriptions based on their immediate child element.
  */
 export function labelBlockDiffTags(html: string): string {
   return html.replace(
-    /<(ins|del)\b[^>]*class="[^"]*diff-block[^"]*"[^>]*>/gi,
-    (match) => {
-      if (match.includes("data-diff-label")) {
+    /(<(?:ins|del)\b[^>]*class="[^"]*diff-block[^"]*"[^>]*>)(\s*<[a-z0-9-]+\b(?:[^>"']|"[^"]*"|'[^']*')*>)/gi,
+    (match, openDiffTag: string, childOpenTag: string) => {
+      if (openDiffTag.includes("data-diff-label")) {
         return match;
       }
       let label = "";
-      if (match.includes('class="mermaid"')) {
+      if (/\bclass=["'][^"']*\bmermaid\b[^"']*["']/i.test(childOpenTag)) {
         label = "Mermaid Diagram";
       } else if (
-        match.includes('class="katex-block"') ||
-        match.includes('class="katex-display"')
+        /\bclass=["'][^"']*\bkatex-(?:block|display)\b[^"']*["']/i.test(childOpenTag)
       ) {
         label = "Block math";
-      } else if (match.includes('class="markdown-alert"')) {
+      } else if (/\bclass=["'][^"']*\bmarkdown-alert\b[^"']*["']/i.test(childOpenTag)) {
         label = "Alert";
       }
 
       if (label) {
-        return match.replace(/>$/, ` data-diff-label="${label}">`);
+        return openDiffTag.replace(/>$/, ` data-diff-label="${label}">`) + childOpenTag;
       }
       return match;
     },

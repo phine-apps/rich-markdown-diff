@@ -427,5 +427,25 @@ graph TD
     const { newMermaid } = computeMermaidDiffPair(oldCode, newCode);
     assert.ok(newMermaid.includes("style 終了 fill:#132a1c"), "Inserted node 終了 should have insert style");
   });
+
+  it("should not hang on adversarial long runs of spaces in unclosed inline edge labels (ReDoS defense)", () => {
+    const spaces = " ".repeat(10000);
+    const adversarial = [
+      "flowchart TD",
+      `A -- ${spaces}!`,
+      `B == ${spaces}!`,
+      `C -. ${spaces}!`,
+    ].join("\n");
+
+    const start = Date.now();
+    const edges = parseMermaidEdges(adversarial);
+    const elapsed = Date.now() - start;
+
+    assert.strictEqual(edges.length, 0);
+    assert.ok(
+      elapsed < 200,
+      `parseMermaidEdges took ${elapsed}ms on 10,000 spaces (expected < 200ms, linear time)`,
+    );
+  });
 });
 

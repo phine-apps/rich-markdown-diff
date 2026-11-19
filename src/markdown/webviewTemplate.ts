@@ -164,16 +164,16 @@ export function getWebviewContent(
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; base-uri 'none'; connect-src 'none'; form-action 'none'; style-src-elem ${cspSource} 'unsafe-inline'; style-src-attr 'unsafe-inline'; script-src 'nonce-${nonce}'; img-src ${cspSource} https: data:; font-src ${cspSource};">
     <title>${escapeHtml(t("Markdown Diff"))}</title>
     <!-- KaTeX CSS (inlined with absolute font URIs for webview compatibility) -->
-    <style nonce="${nonce}">${katexCssInline}</style>
+    <style nonce="${nonce}">${katexCssInline.replace(/<\s*\/\s*style/gi, "\\3c /style")}</style>
     <!-- Highlight.js CSS -->
     <link rel="stylesheet" href="${hljsLightCssUri}" media="(prefers-color-scheme: light)">
     <link rel="stylesheet" href="${hljsDarkCssUri}" media="(prefers-color-scheme: dark)">
     <!-- Mermaid JS -->
     <script nonce="${nonce}" src="${mermaidJsUri}"></script>
     <!-- Marp CSS -->
-    ${marpCss ? `<style nonce="${nonce}">${marpCss}</style>` : ""}
+    ${marpCss ? `<style nonce="${nonce}">${marpCss.replace(/<\s*\/\s*style/gi, "\\3c /style")}</style>` : ""}
     <!-- Marp JS -->
-    ${marpJs ? `<script nonce="${nonce}">${marpJs}</script>` : ""}
+    ${marpJs ? `<script nonce="${nonce}">${marpJs.replace(/<\s*\/\s*script/gi, "<\\/script")}</script>` : ""}
     <style nonce="${nonce}">
         :root { /* VRT_THEME_VARS */ }
         html, body {

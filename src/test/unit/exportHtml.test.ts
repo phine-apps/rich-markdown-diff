@@ -217,5 +217,29 @@ describe("Export HTML Module", () => {
       assert.strictEqual(result.includes("data:application/octet-stream"), false);
       assert.strictEqual(result.includes("SECRET_DATA"), false);
     });
+
+    it("should enforce allowedRoots and block out-of-workspace asset exfiltration", async () => {
+      const insideUri = "https://file%2B.vscode-resource.vscode-cdn.net/workspace/docs/diagram.png";
+      const outsideUri = "https://file%2B.vscode-resource.vscode-cdn.net/outside/private.svg";
+      const traversalUri = "https://file%2B.vscode-resource.vscode-cdn.net/workspace/docs/../../outside/secret.png";
+      const mockHtml = `
+<img src="${insideUri}">
+<img src="${outsideUri}">
+<img src="${traversalUri}">
+`;
+      const readPaths: string[] = [];
+      const result = await prepareExportHtml(mockHtml, {
+        allowedRoots: ["/workspace"],
+        readFile: async (fsPath: string) => {
+          readPaths.push(fsPath);
+          return Buffer.from("ALLOWED_PNG_DATA");
+        },
+      });
+
+      assert.deepStrictEqual(readPaths, ["/workspace/docs/diagram.png"]);
+      assert.ok(result.includes("data:image/png;base64,"), "In-workspace asset should be inlined");
+      assert.ok(result.includes(`src="${outsideUri}"`), "Out-of-workspace asset must not be inlined");
+      assert.ok(result.includes(`src="${traversalUri}"`), "Path traversal asset must not be inlined");
+    });
   });
 });

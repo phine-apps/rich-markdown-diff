@@ -237,13 +237,14 @@ export function sanitizeHtml(html: string): string {
         "text-align": [/.*/],
         color: [/.*/],
         "background-color": [/.*/],
-        // Reject url() to prevent CSS exfiltration; allow color names, hex, rgb, gradients, and var()
-        "background-image": [/^(?!.*url\s*\().*$/i],
-        background: [/^(?!.*url\s*\().*$/i],
-        // CSS Variables for Marp themes: reject url() to prevent CSS exfiltration via var()
-        "--theme": [/^(?!.*url\s*\().*$/i],
-        "--color": [/^(?!.*url\s*\().*$/i],
-        "--background": [/^(?!.*url\s*\().*$/i],
+        // Reject url(), image-set(), CSS comments, and backslash escapes to prevent CSS exfiltration;
+        // allow color names, hex, rgb, gradients, and var()
+        "background-image": [/^(?!.*(?:\\|\/\*|(?:url|image-set|-webkit-image-set)\s*\()).*$/i],
+        background: [/^(?!.*(?:\\|\/\*|(?:url|image-set|-webkit-image-set)\s*\()).*$/i],
+        // CSS Variables for Marp themes: reject url() and obfuscation to prevent CSS exfiltration via var()
+        "--theme": [/^(?!.*(?:\\|\/\*|(?:url|image-set|-webkit-image-set)\s*\()).*$/i],
+        "--color": [/^(?!.*(?:\\|\/\*|(?:url|image-set|-webkit-image-set)\s*\()).*$/i],
+        "--background": [/^(?!.*(?:\\|\/\*|(?:url|image-set|-webkit-image-set)\s*\()).*$/i],
       },
     },
     transformTags: {
@@ -278,9 +279,15 @@ export function sanitizeHtml(html: string): string {
       "vscode-webview-resource",
       "vscode-resource",
     ],
-    allowedSchemesAppliedToAttributes: ["href", "action", "cite"],
+    allowedSchemesAppliedToAttributes: ["href", "src", "action", "cite"],
     allowedSchemesByTag: {
-      img: ["http", "https", "data"],
+      img: [
+        "http",
+        "https",
+        "data",
+        "vscode-webview-resource",
+        "vscode-resource",
+      ],
     },
     allowedIframeHostnames: [],
     allowProtocolRelative: false,

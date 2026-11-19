@@ -134,4 +134,13 @@ graph TD
     assert.ok(diff.includes('class="obsidian-embed"'), "Should keep obsidian-embed inside its list item");
     assert.ok(diff.includes('class="mermaid"'), "Should render mermaid diagram separately");
   });
+
+  it("should keep ZWJ compound emoji tags intact without splitting", () => {
+    const md = "Tag #👨‍💻 here";
+    const { html } = provider.computeDiff(md, md);
+    assert.ok(
+      html.includes('data-tag="👨‍💻"'),
+      `Expected compound ZWJ emoji tag to stay intact, got: ${html}`,
+    );
+  });
 });

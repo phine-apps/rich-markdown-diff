@@ -45,9 +45,10 @@ function obsidianPlugin(md: MarkdownIt, _options: ObsidianOptions = {}) {
        return false;
     }
 
-    // Regexp for tag: must start with a Unicode letter or emoji, then contain alphanumeric, emoji, slash, underscore, or hyphen.
+    // Regexp for tag: must start with a Unicode letter or emoji, then contain alphanumeric, emoji
+    // (including ZWJ \u200D and variation selector \uFE0F for compound emojis), slash, underscore, or hyphen.
     // Fully supports multi-byte characters (Japanese, Chinese, Emoji, etc.) as per Obsidian specifications.
-    const tagRegex = /^#((?:[\p{L}\p{Extended_Pictographic}])[\p{L}\p{N}\p{Extended_Pictographic}_/\-]*)/u;
+    const tagRegex = /^#((?:[\p{L}\p{Extended_Pictographic}])(?:[\p{L}\p{N}\p{Extended_Pictographic}_/\-]|\u200D|\uFE0F)*)/u;
     const match = src.slice(start).match(tagRegex);
 
     if (!match) {

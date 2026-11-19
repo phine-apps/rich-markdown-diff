@@ -22,9 +22,26 @@
  * SOFTWARE.
  */
 
+import { findClosing } from "./domUtils";
+
 /**
  * Handles Marp-specific rendering, HTML cleaning, and CSS scoping.
  */
+
+/**
+ * Exact set of trusted internal scripts emitted by `@marp-team/marp-core`
+ * (captured from rendering an empty document with zero user input).
+ * Prevents user-supplied `<script>` tags from spoofing Marp internal scripts.
+ */
+const trustedMarpScripts = new Set<string>();
+
+/**
+ * Neutralizes any `</style` sequence inside CSS so it cannot break out of a
+ * `<style>` element in either the VS Code Webview or standalone exported HTML.
+ */
+export function sanitizeCssForStyleTag(css: string): string {
+  return css.replace(/<\s*\/\s*style/gi, "\\3c /style");
+}
 
 /**
  * Dynamically loads the Marp Core library and initializes an instance.
@@ -32,12 +49,30 @@
 export async function loadMarp() {
   const marpMod = await import("@marp-team/marp-core");
   const MarpClass = (marpMod as any).Marp || marpMod;
-  return new MarpClass({
+  const instance = new MarpClass({
     container: false,
     html: MarpClass.html || true,
     inlineSVG: false,
     math: "katex",
   });
+
+  // Capture the exact internal browser script(s) emitted by Marp Core on empty input
+  try {
+    const baseline = instance.render("");
+    const baselineHtml = typeof baseline?.html === "string" ? baseline.html : "";
+    const scriptRegex = /<\s*script\b(?:[^>"']|"[^"]*"|'[^']*')*>([\s\S]*?)<\/\s*script\b[^>]*>/gi;
+    let m: RegExpExecArray | null;
+    while ((m = scriptRegex.exec(baselineHtml)) !== null) {
+      const content = m[1].trim();
+      if (content) {
+        trustedMarpScripts.add(content);
+      }
+    }
+  } catch {
+    // Ignore baseline capture errors; no scripts will be trusted if capture fails
+  }
+
+  return instance;
 }
 
 /**
@@ -45,25 +80,21 @@ export async function loadMarp() {
  */
 export function cleanMarpHtml(html: string): { cleaned: string; scripts: string[] } {
   const scripts: string[] = [];
-  const scriptRegex = /<\s*script\b[^>]*>([\s\S]*?)<\/\s*script\b[^>]*>/gi;
+  const scriptRegex = /<\s*script\b(?:[^>"']|"[^"]*"|'[^']*')*>([\s\S]*?)<\/\s*script\b[^>]*>/gi;
   let m: RegExpExecArray | null;
   while ((m = scriptRegex.exec(html)) !== null) {
     const content = m[1].trim();
-    // Only allow Marp Core's official auto-scaling / SVG polyfill scripts to be extracted.
-    // User scripts or untrusted scripts must never be extracted or executed.
-    const isMarpInternalScript =
-      content.includes("data-marp-auto-scaling") ||
-      content.includes("marpitSVGPolyfill") ||
-      content.includes("marp-auto-scaling");
-
-    if (content && isMarpInternalScript) {
+    // Only allow scripts that exactly match Marp Core's baseline internal script(s).
+    // Substring checks are bypassable by user-supplied <script> tags containing comments.
+    if (content && trustedMarpScripts.has(content)) {
       scripts.push(content);
     }
   }
 
   let fullyCleaned = html;
   let prevCleaned: string;
-  const tagRemoveRegex = /<\s*(?:script|style)\b[^>]*>[\s\S]*?<\/\s*(?:script|style)\b[^>]*>/gi;
+  const tagRemoveRegex =
+    /<\s*(script|style)\b(?:[^>"']|"[^"]*"|'[^']*')*>[\s\S]*?<\/\s*\1\b[^>]*>/gi;
   do {
     prevCleaned = fullyCleaned;
     fullyCleaned = fullyCleaned.replace(tagRemoveRegex, "");
@@ -81,13 +112,20 @@ export function cleanMarpHtml(html: string): { cleaned: string; scripts: string[
 
 /**
  * Splits a Marp HTML string into individual slide strings (each containing the <section> tag).
+ * Uses depth-tracking `findClosing` so nested `<section>` elements inside slides are not truncated.
  */
 export function splitMarpSlides(html: string): string[] {
   const slides: string[] = [];
-  const regex = /<section\b[^>]*>([\s\S]*?)<\/section>/gi;
+  const openRegex = /<section\b/gi;
   let m: RegExpExecArray | null;
-  while ((m = regex.exec(html)) !== null) {
-    slides.push(m[0]);
+  while ((m = openRegex.exec(html)) !== null) {
+    const start = m.index;
+    const end = findClosing(html, start, "section");
+    if (end === -1) {
+      break;
+    }
+    slides.push(html.slice(start, end));
+    openRegex.lastIndex = end;
   }
   return slides;
 }
@@ -201,8 +239,8 @@ export function scopeMarpCss(
   scoped += buffer;
 
   return {
-    charsets,
-    imports,
-    scoped,
+    charsets: charsets.map(sanitizeCssForStyleTag),
+    imports: imports.map(sanitizeCssForStyleTag),
+    scoped: sanitizeCssForStyleTag(scoped),
   };
 }

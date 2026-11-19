@@ -150,13 +150,17 @@ export function parseMermaidEdges(code: string): MermaidEdge[] {
   const ARROWS = `(?:--+>|---+|==+>|===+|-\\.->|-\\.-|<-->|<--|--o|--x|o--o|x--x)`;
   const ID = `([\\p{L}\\p{N}_]+(?:-[\\p{L}\\p{N}_]+)*)`;
 
+  // Disjoint word-separated label pattern: prevents catastrophic backtracking (ReDoS)
+  // caused by overlapping \s* + [\p{L}\p{N}_\s]+ + \s* on long runs of spaces.
+  const UNQUOTED_LABEL = `([\\p{L}\\p{N}_]+(?:[ \\t]+[\\p{L}\\p{N}_]+)*)`;
+
   const edgeRegex = new RegExp(
-    `(?<![\\p{L}\\p{N}_-])${ID}${SHAPE_GROUP}${CLASS_ATTACHMENT}\\s*` +
+    `(?<![\\p{L}\\p{N}_-])${ID}${SHAPE_GROUP}${CLASS_ATTACHMENT}[ \\t]*` +
       `(?:` +
-        `${ARROWS}\\s*(?:\\|([^|]+)\\|)?\\s*` +
-        `|--\\s*(?:["']([^"']+)["']|([\\p{L}\\p{N}_\\s]+))\\s*(?:--+>|---+)\\s*` +
-        `|==\\s*(?:["']([^"']+)["']|([\\p{L}\\p{N}_\\s]+))\\s*(?:==+>|===+)\\s*` +
-        `|-\\.\\s*(?:["']([^"']+)["']|([\\p{L}\\p{N}_\\s]+))\\s*\\.(?:->|-)\\s*` +
+        `${ARROWS}[ \\t]*(?:\\|([^|]+)\\|)?[ \\t]*` +
+        `|--[ \\t]*(?:["']([^"']+)["']|${UNQUOTED_LABEL})[ \\t]*(?:--+>|---+)[ \\t]*` +
+        `|==[ \\t]*(?:["']([^"']+)["']|${UNQUOTED_LABEL})[ \\t]*(?:==+>|===+)[ \\t]*` +
+        `|-\\.[ \\t]*(?:["']([^"']+)["']|${UNQUOTED_LABEL})[ \\t]*\\.(?:->|-)[ \\t]*` +
       `)` +
       `${ID}${CLASS_ATTACHMENT}`,
     "gu",
