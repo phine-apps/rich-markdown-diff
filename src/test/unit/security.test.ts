@@ -287,4 +287,113 @@ SecondLine`;
       "data-line must not collide with line index 2 inside frontmatter",
     );
   });
+
+  it("blocks Marp script allowlist spoofing via internal-looking comments", async () => {
+    const provider = new MarkdownDiffProvider();
+    await provider.waitForReady();
+
+    const spoofedMarp = `---
+marp: true
+---
+# Slide 1
+<script>/* data-marp-auto-scaling */ alert("SPOOFED_XSS")</script>
+`;
+    const diff = provider.computeDiff(spoofedMarp, spoofedMarp);
+
+    assert.strictEqual(
+      diff.marpJs ? diff.marpJs.includes("SPOOFED_XSS") : false,
+      false,
+      "marpJs must not extract user scripts that spoof internal Marp identifiers",
+    );
+
+    const webview = provider.getWebviewContent(
+      diff.html,
+      "",
+      "",
+      "",
+      "",
+      "Orig",
+      "Mod",
+      "",
+      {},
+      diff.marpCss,
+      diff.marpJs,
+    );
+    const scriptBlocks = [...webview.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)].map(
+      (m) => m[1],
+    );
+    assert.strictEqual(
+      scriptBlocks.some((block) => block.includes("SPOOFED_XSS")),
+      false,
+      "No <script> block in webview may contain spoofed Marp script payloads",
+    );
+    assert.ok(
+      diff.marpJs && diff.marpJs.length > 0,
+      "Legitimate Marp Core internal browser script should still be preserved",
+    );
+  });
+
+  it("neutralizes </style> breakout sequences in Marp CSS", async () => {
+    const provider = new MarkdownDiffProvider();
+    await provider.waitForReady();
+
+    const breakoutMarp = `---
+marp: true
+---
+<style>
+section { color: red; }
+/* </style><script>alert("CSS_BREAKOUT")</script> */
+</style>
+
+# Slide 1
+`;
+    const diff = provider.computeDiff(breakoutMarp, breakoutMarp);
+    assert.strictEqual(
+      diff.marpCss ? /<\s*\/\s*style/i.test(diff.marpCss) : false,
+      false,
+      "marpCss must neutralize closing </style> tags",
+    );
+
+    const webview = provider.getWebviewContent(
+      diff.html,
+      "",
+      "",
+      "",
+      "",
+      "Orig",
+      "Mod",
+      "",
+      {},
+      diff.marpCss,
+      diff.marpJs,
+    );
+    assert.strictEqual(
+      webview.includes('</style><script>alert("CSS_BREAKOUT")</script>'),
+      false,
+      "Webview must not allow </style> breakout into raw <script>",
+    );
+  });
+
+  it("strips dangerous javascript: scheme from <img src> attributes", () => {
+    const provider = new MarkdownDiffProvider();
+    const malicious = '<img src="javascript:alert(1)" alt="bad">';
+    const { html } = provider.computeDiff("", malicious);
+
+    assert.strictEqual(
+      /javascript:/i.test(html),
+      false,
+      "javascript: scheme must be stripped from img src attributes",
+    );
+  });
+
+  it("blocks obfuscated CSS url() exfiltration via backslash escapes, comments, and image-set()", () => {
+    const provider = new MarkdownDiffProvider();
+    const malicious =
+      '<div style="background-image: u\\72 l(https://example.invalid/leak1); --theme: url/**/(https://example.invalid/leak2); background: image-set(https://example.invalid/leak3);">x</div>';
+    const { html } = provider.computeDiff("", malicious);
+
+    assert.strictEqual(html.includes("leak1"), false, "CSS backslash-escaped url() must be stripped");
+    assert.strictEqual(html.includes("leak2"), false, "CSS comment-obfuscated url() must be stripped");
+    assert.strictEqual(html.includes("leak3"), false, "CSS image-set() must be stripped");
+  });
 });

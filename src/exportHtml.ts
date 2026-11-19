@@ -122,8 +122,28 @@ async function defaultReadFile(fsPath: string): Promise<Uint8Array> {
   return await fs.promises.readFile(fsPath);
 }
 
+/**
+ * Verifies that a local filesystem path stays strictly within at least one
+ * allowed root directory (prevents local file exfiltration via path traversal).
+ */
+export function isPathWithinAllowedRoots(
+  filePath: string,
+  allowedRoots: readonly string[],
+): boolean {
+  if (!filePath || filePath.includes("\0") || allowedRoots.length === 0) {
+    return false;
+  }
+  const resolvedTarget = path.resolve(filePath);
+  return allowedRoots.some((root) => {
+    const resolvedRoot = path.resolve(root);
+    const rel = path.relative(resolvedRoot, resolvedTarget);
+    return !rel.startsWith("..") && !path.isAbsolute(rel);
+  });
+}
+
 export interface PrepareExportHtmlOptions {
   readFile?: (fsPath: string) => Promise<Uint8Array>;
+  allowedRoots?: readonly string[];
   mermaidCdn?: string;
   hljsLightCdn?: string;
   hljsDarkCdn?: string;
@@ -209,6 +229,13 @@ export async function prepareExportHtml(
 
     const fsPath = extractLocalFsPath(uri);
     if (!fsPath || !isAllowedAsset(fsPath)) {
+      continue;
+    }
+
+    if (
+      options.allowedRoots !== undefined &&
+      !isPathWithinAllowedRoots(fsPath, options.allowedRoots)
+    ) {
       continue;
     }
 

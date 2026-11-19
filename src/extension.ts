@@ -845,11 +845,17 @@ async function bindDiffPanel(
     }
 
     if (message.command === "runtimeDiagnostics") {
-      appendRuntimeDiagnostics(
-        panel,
-        currentState,
-        message.payload as RuntimeDiagnosticsPayload,
-      );
+      if (
+        message.payload &&
+        typeof message.payload === "object" &&
+        typeof message.payload.reason === "string"
+      ) {
+        appendRuntimeDiagnostics(
+          panel,
+          currentState,
+          message.payload as RuntimeDiagnosticsPayload,
+        );
+      }
       return;
     }
 
@@ -874,6 +880,8 @@ async function bindDiffPanel(
         if (
           typeof start !== "number" ||
           typeof end !== "number" ||
+          !Number.isInteger(start) ||
+          !Number.isInteger(end) ||
           start < 0 ||
           end < start
         ) {
@@ -901,10 +909,11 @@ async function bindDiffPanel(
 
       if (
         uri &&
-        uri.scheme !== "git" &&
-        uri.scheme !== "gitlens" &&
+        (uri.scheme === "file" || uri.scheme === "untitled") &&
         typeof start === "number" &&
         typeof end === "number" &&
+        Number.isInteger(start) &&
+        Number.isInteger(end) &&
         typeof newContent === "string" &&
         start >= 0 &&
         end >= start
@@ -954,7 +963,7 @@ async function bindDiffPanel(
       return;
     }
 
-    if (message.page) {
+    if (typeof message.page === "string" && message.page.length > 0) {
       const resolvedUri = await resolveWikilinkUri(message.page, uriToOpen);
       if (resolvedUri) {
         try {
@@ -983,7 +992,11 @@ async function bindDiffPanel(
         preserveFocus: false,
       });
 
-      if (typeof message.line === "number") {
+      if (
+        typeof message.line === "number" &&
+        Number.isInteger(message.line) &&
+        message.line >= 0
+      ) {
         const range = new vscode.Range(message.line, 0, message.line, 0);
         editor.revealRange(range, vscode.TextEditorRevealType.InCenter);
         editor.selection = new vscode.Selection(range.start, range.start);
@@ -1003,7 +1016,11 @@ async function bindDiffPanel(
           viewColumn: vscode.ViewColumn.One,
         });
 
-        if (typeof message.line === "number") {
+        if (
+          typeof message.line === "number" &&
+          Number.isInteger(message.line) &&
+          message.line >= 0
+        ) {
           const range = new vscode.Range(message.line, 0, message.line, 0);
           editor.revealRange(range, vscode.TextEditorRevealType.InCenter);
           editor.selection = new vscode.Selection(range.start, range.start);
@@ -1190,7 +1207,13 @@ export function activate(context: vscode.ExtensionContext) {
 
       try {
         const rawHtml = activePanel.webview.html;
+        const allowedRoots = [
+          vscode.Uri.joinPath(context.extensionUri, "media").fsPath,
+          vscode.Uri.joinPath(context.extensionUri, "data").fsPath,
+          ...(vscode.workspace.workspaceFolders?.map((folder) => folder.uri.fsPath) ?? []),
+        ];
         const htmlContent = await prepareExportHtml(rawHtml, {
+          allowedRoots,
           readFile: async (fsPath: string) => {
             return await vscode.workspace.fs.readFile(vscode.Uri.file(fsPath));
           },
@@ -1357,7 +1380,7 @@ export function activate(context: vscode.ExtensionContext) {
           }
 
           if (editor) {
-            if (message.page) {
+            if (typeof message.page === "string" && message.page.length > 0) {
               resolveWikilinkUri(message.page, editor.document.uri).then((resolvedUri) => {
                 if (resolvedUri) {
                   vscode.workspace.openTextDocument(resolvedUri).then((doc) => {
@@ -1382,7 +1405,11 @@ export function activate(context: vscode.ExtensionContext) {
             vscode.window
               .showTextDocument(editor.document, vscode.ViewColumn.One)
               .then((e) => {
-                if (typeof line === "number") {
+                if (
+                  typeof line === "number" &&
+                  Number.isInteger(line) &&
+                  line >= 0
+                ) {
                   const range = new vscode.Range(line, 0, line, 0);
                   e.revealRange(range, vscode.TextEditorRevealType.InCenter);
                 }

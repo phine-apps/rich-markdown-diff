@@ -8,12 +8,16 @@ import * as assert from "assert";
 import { MarkdownDiffProvider } from "../../markdownDiff";
 import {
   restoreBlockAttributes,
+  maskBlockAttributes,
+  fixInvalidNesting,
+  labelBlockDiffTags,
   extractSharedReparentedLists,
   normalizeListContainerChanges,
   splitByBlocks,
   splitConsolidatedDiffs,
   lcsAlignment,
 } from "../../markdown/structuralDiff";
+import { splitMarpSlides } from "../../markdown/marpRenderer";
 import { appendClass, diffTables } from "../../markdown/tableDiff";
 import { findClosing } from "../../markdown/domUtils";
 
@@ -454,6 +458,50 @@ describe("MarkdownDiffProvider - Edge Cases", () => {
       assert.ok(
         elapsed < 5000,
         `computeDiff took ${elapsed}ms, expected under 5,000ms for ~2,000 lines (possible O(N²) or ReDoS regression)`,
+      );
+    });
+  });
+
+  describe("Adversarial audit regression guards", () => {
+    it("runs fixInvalidNesting Step 0 in linear time on long unclosed <ins class=\"mod\">", () => {
+      const payload = '<ins class="mod">' + "a".repeat(50000);
+      const start = Date.now();
+      const result = fixInvalidNesting(payload);
+      const elapsed = Date.now() - start;
+
+      assert.strictEqual(result, payload);
+      assert.ok(elapsed < 100, `fixInvalidNesting took ${elapsed}ms (expected < 100ms, linear time)`);
+    });
+
+    it("preserves attributes containing quoted > in maskBlockAttributes", () => {
+      const input = '<div title="a > b" data-line="5">hello</div>';
+      const { masked, attributePools } = maskBlockAttributes(input, "dataAttrMasked12345678");
+      assert.strictEqual(
+        masked.includes('b" data-line="5">'),
+        false,
+        "maskBlockAttributes must not split opening tags at '>' inside quoted attributes",
+      );
+      const restored = restoreBlockAttributes(masked, attributePools, attributePools, "dataAttrMasked12345678");
+      assert.strictEqual(restored, input);
+    });
+
+    it("splits Marp slides without truncating nested <section> elements", () => {
+      const html = '<section data-page="1"><div><section>inner</section></div><p>after</p></section><section data-page="2"><p>slide 2</p></section>';
+      const slides = splitMarpSlides(html);
+      assert.strictEqual(slides.length, 2);
+      assert.strictEqual(
+        slides[0],
+        '<section data-page="1"><div><section>inner</section></div><p>after</p></section>',
+      );
+      assert.strictEqual(slides[1], '<section data-page="2"><p>slide 2</p></section>');
+    });
+
+    it("labels block-level diff wrappers based on their immediate child element", () => {
+      const mermaidDiff = '<ins class="diffins diff-block"><div class="mermaid">graph TD</div></ins>';
+      const labeled = labelBlockDiffTags(mermaidDiff);
+      assert.ok(
+        labeled.includes('data-diff-label="Mermaid Diagram"'),
+        `Expected data-diff-label="Mermaid Diagram", got: ${labeled}`,
       );
     });
   });

@@ -141,9 +141,10 @@ function getLineOffset(original: string, content: string): number {
   }
   let searchStartIndex = 0;
   // If frontmatter is present at the beginning of the file, skip past the frontmatter block
-  // to prevent matching substrings inside the frontmatter values (collision defense)
+  // to prevent matching substrings inside the frontmatter values (collision defense).
+  // Supports optional UTF-8 BOM, empty frontmatter, and matching closing delimiters.
   const fmMatch = original.match(
-    /^(?:---|\+\+\+|;---;)[ \t]*\r?\n[\s\S]*?\r?\n(?:---|\+\+\+|;---;)[ \t]*(?:\r?\n|$)/,
+    /^\uFEFF?(---|\+\+\+|;---;)[ \t]*(?:\r?\n[\s\S]*?)?\r?\n\1[ \t]*(?:\r?\n|$)/,
   );
   if (fmMatch) {
     searchStartIndex = fmMatch[0].length;
@@ -292,16 +293,22 @@ export class MarkdownDiffProvider {
             return true;
           }
 
-          // Fuzzy match: compare stripped text content
+          // Fuzzy match: compare stripped text content using code-point safe slicing
           const textA = stripHtmlTags(hA).trim();
           const textB = stripHtmlTags(hB).trim();
+          const charsA = Array.from(textA);
+          const charsB = Array.from(textB);
+          const hasCjk = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(
+            textA + textB,
+          );
+          const minLen = hasCjk ? 2 : 5;
 
-          if (textA.length >= 5 && textB.length >= 5) {
-            // Match if one contains the other or they share a 10-char prefix
+          if (charsA.length >= minLen && charsB.length >= minLen) {
+            // Match if one contains the other or they share a 10-code-point prefix
             if (
               textA.includes(textB) ||
               textB.includes(textA) ||
-              textA.substring(0, 10) === textB.substring(0, 10)
+              charsA.slice(0, 10).join("") === charsB.slice(0, 10).join("")
             ) {
               return true;
             }
