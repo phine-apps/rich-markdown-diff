@@ -319,9 +319,9 @@ marp: true
       diff.marpCss,
       diff.marpJs,
     );
-    const scriptBlocks = [...webview.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)].map(
-      (m) => m[1],
-    );
+    const scriptBlocks = [
+      ...webview.matchAll(/<\s*script\b(?:[^>"']|"[^"]*"|'[^']*')*>([\s\S]*?)<\/\s*script\b[^>]*>/gi),
+    ].map((m) => m[1]);
     assert.strictEqual(
       scriptBlocks.some((block) => block.includes("SPOOFED_XSS")),
       false,
