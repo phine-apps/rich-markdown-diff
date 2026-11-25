@@ -800,6 +800,37 @@ export function balanceDiffTags(html: string): string {
   return balanced;
 }
 
+const BLOCK_BOUNDARY_TAGS =
+  "p|div|section|blockquote|pre|h[1-6]|li|ul|ol|dl|dt|dd|table|thead|tbody|tr|td|th|hr";
+
+function isBlockBoundaryBefore(html: string, index: number): boolean {
+  const before = html.slice(0, index).trimEnd();
+  if (before.length === 0) {
+    return true;
+  }
+  return new RegExp(`</?(?:${BLOCK_BOUNDARY_TAGS})(?:\\s[^>]*)?>$`, "i").test(
+    before,
+  );
+}
+
+function isBlockBoundaryAfter(html: string, index: number): boolean {
+  const after = html.slice(index).trimStart();
+  if (after.length === 0) {
+    return true;
+  }
+  return new RegExp(`^</?(?:${BLOCK_BOUNDARY_TAGS})(?:\\s|/?>)`, "i").test(
+    after,
+  );
+}
+
+function isAtBlockBoundary(
+  html: string,
+  start: number,
+  end: number,
+): boolean {
+  return isBlockBoundaryBefore(html, start) || isBlockBoundaryAfter(html, end);
+}
+
 export function cleanupUnbalancedDiffTags(html: string): string {
   // Protect pre/code blocks from having whitespace/newline diff tags stripped
   const preBlocks: string[] = [];
@@ -823,8 +854,26 @@ export function cleanupUnbalancedDiffTags(html: string): string {
   // Flatten any nested <ins>/<del> pairs exposed by balancing crossed closing tags
   result = flattenDiffNesting(result);
 
-  // Remove empty diff tags
-  result = result.replace(/<(ins|del)[^>]*>\s*<\/\1>/gi, "");
+  // Remove strictly empty diff tags everywhere
+  result = result.replace(/<(ins|del)\b[^>]*><\/\1>/gi, "");
+
+  // Collapse adjacent opposite-polarity whitespace-only diff tags in running text
+  // into a single plain space (both sides have a separator there), while removing
+  // them at block boundaries where whitespace separates nothing.
+  result = result.replace(
+    /<del\b[^>]*>\s+<\/del>\s*<ins\b[^>]*>\s+<\/ins>|<ins\b[^>]*>\s+<\/ins>\s*<del\b[^>]*>\s+<\/del>/gi,
+    (match, offset: number, full: string) =>
+      isAtBlockBoundary(full, offset, offset + match.length) ? "" : " ",
+  );
+
+  // Remove remaining whitespace-only diff tags only at block boundaries;
+  // keep them inside running text so words separated by a changed space/newline
+  // do not merge together in either pane.
+  result = result.replace(
+    /<(ins|del)\b[^>]*>\s+<\/\1>/gi,
+    (match, _tag: string, offset: number, full: string) =>
+      isAtBlockBoundary(full, offset, offset + match.length) ? "" : match,
+  );
 
   // Final balance pass in case empty tag removal exposed an outer pair
   result = balanceDiffTags(result);
@@ -2754,6 +2803,28 @@ export function fixInvalidNesting(html: string): string {
     "p|div|section|blockquote|pre|h[1-6]|li|ul|ol|table|tr|td|th";
   const noBlockOrDiff = `((?:(?!<\\/?(?:${blockTags}|ins|del))[\\s\\S])*?)`;
 
+  const getTagDepth = (
+    fragment: string,
+    tagName: string,
+  ): { depth: number; minDepth: number } => {
+    const escaped = tagName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const tagRe = new RegExp(`<(\\/)?${escaped}\\b([^>]*)>`, "gi");
+    let depth = 0;
+    let minDepth = 0;
+    let m: RegExpExecArray | null;
+    while ((m = tagRe.exec(fragment)) !== null) {
+      if (m[1] === "/") {
+        depth--;
+        if (depth < minDepth) {
+          minDepth = depth;
+        }
+      } else if (!/\/\s*$/.test(m[2])) {
+        depth++;
+      }
+    }
+    return { depth, minDepth };
+  };
+
   const pattern = new RegExp(
     `<(ins|del)\\b([^>]*?)>${noBlockOrDiff}<\\/(${inlineTags})>${noBlockOrDiff}<\\/\\1>`,
     "gi",
@@ -2762,6 +2833,10 @@ export function fixInvalidNesting(html: string): string {
     pattern,
     (match, t1, a1, c1, t2, c2) => {
       if (t2.toLowerCase() === "span" && /\bclass=["']?[^"']*\bkatex\b/i.test(match)) {
+        return match;
+      }
+      // Only move </t2> outside </t1> if t2 was not opened inside c1.
+      if (getTagDepth(c1, t2).depth > 0) {
         return match;
       }
       return `<${t1}${a1}>${c1}${c2}</${t1}></${t2}>`;
@@ -2777,7 +2852,7 @@ export function fixInvalidNesting(html: string): string {
     },
   );
 
-  // 3. Fix cases where an inline tag is opened inside and closed outside (reversed)
+  // 3. Fix cases where an inline tag is opened outside and closed inside (reversed)
   const reversePattern = new RegExp(
     `<(${inlineTags})\\b([^>]*?)>${noBlockOrDiff}<(ins|del)\\b([^>]*?)>${noBlockOrDiff}<\\/\\1>${noBlockOrDiff}<\\/\\4>`,
     "gi",
@@ -2788,38 +2863,103 @@ export function fixInvalidNesting(html: string): string {
       if (itag.toLowerCase() === "span" && /\bkatex\b/i.test(iattrs)) {
         return match;
       }
+      // Ensure the initial <itag> stays open across c1 and </itag> closes it rather than an inner <itag> in c2.
+      const c1Depth = getTagDepth(c1, itag);
+      const c2Depth = getTagDepth(c2, itag);
+      if (
+        c1Depth.depth !== 0 ||
+        c1Depth.minDepth < 0 ||
+        c2Depth.depth !== 0 ||
+        c2Depth.minDepth < 0
+      ) {
+        return match;
+      }
       const dclass = dtag === "ins" ? "diffins" : "diffdel";
       return `<${dtag} class="${dclass}">${c1}<${itag}${iattrs}>${c2}</${itag}>${c3}</${dtag}>`;
     },
   );
 
   // 4. Promote internal diffs to block level if they effectively cover the entire content of a block-like element.
-  // This handles the "bad pairing" issue where htmldiff incorrectly shares block tags for unrelated content.
+  // Use depth-aware findClosing() so nested blocks (e.g. <div><div>...</div></div>) are not cut short at inner close tags.
   const blockLikeTags = "p|li|div|h[1-6]|section|dt|dd";
-  const blockRegex = new RegExp(
-    `(<(${blockLikeTags})\\b[^>]*>)([\\s\\S]*?)(<\\/\\2>)`,
-    "gi",
-  );
+  const promoteBlockDiffs = (input: string): string => {
+    const openBlockLikeRe = new RegExp(
+      `<(${blockLikeTags})\\b(?:[^>"']|"[^"]*"|'[^']*')*>`,
+      "gi",
+    );
+    const parts: string[] = [];
+    let cursor = 0;
 
-  fixed = fixed.replace(blockRegex, (match, open, tag, content, close) => {
-    // ALWAYS balance tags within the block first to prevent leaks
-    const balancedContent = balanceDiffTags(content);
-    
-    // Only promote if the ENTIRE content is wrapped in diff tags,
-    // AND they are all of the same type.
-    const allIns = balancedContent.replace(/<ins\b[^>]*>([\s\S]*?)<\/ins>/gi, "").trim() === "";
-    const allDel = balancedContent.replace(/<del\b[^>]*>([\s\S]*?)<\/del>/gi, "").trim() === "";
+    while (cursor < input.length) {
+      openBlockLikeRe.lastIndex = cursor;
+      const openMatch = openBlockLikeRe.exec(input);
+      if (!openMatch) {
+        parts.push(input.slice(cursor));
+        break;
+      }
 
-    if (allIns && !allDel) {
-      const inner = balancedContent.replace(/<ins\b[^>]*>([\s\S]*?)<\/ins>/gi, "$1");
-      return `<ins class="diffins diff-block">${open}${inner}${close}</ins>`;
-    } else if (allDel && !allIns) {
-      const inner = balancedContent.replace(/<del\b[^>]*>([\s\S]*?)<\/del>/gi, "$1");
-      return `<del class="diffdel diff-block">${open}${inner}${close}</del>`;
+      const openStart = openMatch.index;
+      const openTag = openMatch[0];
+      const openEnd = openStart + openTag.length;
+      const tagName = openMatch[1];
+
+      // Skip self-closing tags
+      if (/\/\s*>$/.test(openTag)) {
+        parts.push(input.slice(cursor, openEnd));
+        cursor = openEnd;
+        continue;
+      }
+
+      const closeEnd = findClosing(input, openStart, tagName);
+      if (closeEnd === -1) {
+        parts.push(input.slice(cursor, openEnd));
+        cursor = openEnd;
+        continue;
+      }
+
+      const closeStart = input.lastIndexOf("<", closeEnd - 1);
+      const closeTag = input.slice(closeStart, closeEnd);
+      const content = input.slice(openEnd, closeStart);
+
+      // ALWAYS balance tags within the block first to prevent leaks
+      const balancedContent = balanceDiffTags(content);
+
+      // Only promote if the ENTIRE content is wrapped in diff tags,
+      // AND they are all of the same type.
+      const allIns =
+        balancedContent.replace(/<ins\b[^>]*>([\s\S]*?)<\/ins>/gi, "").trim() ===
+        "";
+      const allDel =
+        balancedContent.replace(/<del\b[^>]*>([\s\S]*?)<\/del>/gi, "").trim() ===
+        "";
+
+      parts.push(input.slice(cursor, openStart));
+      if (allIns && !allDel) {
+        const inner = balancedContent.replace(
+          /<ins\b[^>]*>([\s\S]*?)<\/ins>/gi,
+          "$1",
+        );
+        parts.push(
+          `<ins class="diffins diff-block">${openTag}${inner}${closeTag}</ins>`,
+        );
+      } else if (allDel && !allIns) {
+        const inner = balancedContent.replace(
+          /<del\b[^>]*>([\s\S]*?)<\/del>/gi,
+          "$1",
+        );
+        parts.push(
+          `<del class="diffdel diff-block">${openTag}${inner}${closeTag}</del>`,
+        );
+      } else {
+        parts.push(openTag + promoteBlockDiffs(balancedContent) + closeTag);
+      }
+      cursor = closeEnd;
     }
 
-    return open + balancedContent + close;
-  });
+    return parts.join("");
+  };
+
+  fixed = promoteBlockDiffs(fixed);
 
   return fixed;
 }
