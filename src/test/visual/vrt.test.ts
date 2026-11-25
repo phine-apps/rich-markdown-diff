@@ -68,6 +68,35 @@ test.describe("Visual Regression Tests", () => {
 
       await page.setContent(html);
       await page.waitForTimeout(5000);
+      await page.evaluate(async () => {
+        if (document.fonts && document.fonts.ready) {
+          await document.fonts.ready;
+        }
+        // Wait for consecutive animation frames with identical layout dimensions
+        // so fullPage screenshots do not oscillate by 1px during stabilization.
+        const measure = () => {
+          const left = document.getElementById("left-pane");
+          const right = document.getElementById("right-pane");
+          return [
+            document.documentElement.scrollHeight,
+            document.body.scrollHeight,
+            left ? left.scrollHeight : 0,
+            right ? right.scrollHeight : 0,
+          ].join(",");
+        };
+        let last = measure();
+        let stableFrames = 0;
+        for (let i = 0; i < 30 && stableFrames < 5; i++) {
+          await new Promise((r) => requestAnimationFrame(r));
+          const next = measure();
+          if (next === last) {
+            stableFrames++;
+          } else {
+            last = next;
+            stableFrames = 0;
+          }
+        }
+      });
 
       // Systemic check: Save the rendered HTML to a file for objective inspection
       const htmlDumpPath = path.join(__dirname, `../../../test-results/${c.name}-${c.suffix}.html`);

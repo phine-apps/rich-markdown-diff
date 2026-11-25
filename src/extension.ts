@@ -692,6 +692,215 @@ async function renderDiffPanel(
   return contentKey;
 }
 
+/**
+ * Attaches the shared Webview message handler for diff panels (used by both
+ * git/file diff panels and the clipboard diff panel).
+ */
+export function attachDiffWebviewMessageHandler(
+  panel: vscode.WebviewPanel,
+  getState: () => DiffPanelState | undefined,
+  options?: { originalUnavailableMessage?: string },
+): vscode.Disposable {
+  return panel.webview.onDidReceiveMessage(async (message) => {
+    if (message.command === "ready") {
+      isWebviewReadyForTesting = true;
+      return;
+    }
+
+    const currentState = getState();
+
+    if (message.command === "runtimeDiagnostics") {
+      if (
+        message.payload &&
+        typeof message.payload === "object" &&
+        typeof message.payload.reason === "string"
+      ) {
+        appendRuntimeDiagnostics(
+          panel,
+          currentState,
+          message.payload as RuntimeDiagnosticsPayload,
+        );
+      }
+      return;
+    }
+
+    if (message.command === "searchTag") {
+      if (typeof message.tag !== "string") {
+        return;
+      }
+      vscode.commands.executeCommand("workbench.action.findInFiles", {
+        query: message.tag,
+        triggerSearch: true,
+        isCaseSensitive: false,
+        isRegex: false,
+      });
+      return;
+    }
+
+    if (message.command === "requestBlockSource" && currentState) {
+      const uri = currentState.modifiedUri ?? currentState.fallbackSourceUri;
+      if (uri) {
+        const start = message.lineStart;
+        const end = message.lineEnd;
+        if (
+          typeof start !== "number" ||
+          typeof end !== "number" ||
+          !Number.isInteger(start) ||
+          !Number.isInteger(end) ||
+          start < 0 ||
+          end < start
+        ) {
+          return;
+        }
+        try {
+          const document = await vscode.workspace.openTextDocument(uri);
+          let content = "";
+          for (let i = start; i < end && i < document.lineCount; i++) {
+            content += document.lineAt(i).text + (i < end - 1 ? "\n" : "");
+          }
+          panel.webview.postMessage({ command: "receiveBlockSource", content });
+        } catch (e) {
+          console.error("Failed to read block source:", e);
+        }
+      }
+      return;
+    }
+
+    if (message.command === "applyEdit" && currentState) {
+      const uri = currentState.modifiedUri ?? currentState.fallbackSourceUri;
+      const start = message.lineStart;
+      const end = message.lineEnd;
+      const newContent = message.newContent;
+
+      if (
+        uri &&
+        (uri.scheme === "file" || uri.scheme === "untitled") &&
+        typeof start === "number" &&
+        typeof end === "number" &&
+        Number.isInteger(start) &&
+        Number.isInteger(end) &&
+        typeof newContent === "string" &&
+        start >= 0 &&
+        end >= start
+      ) {
+        try {
+          const document = await vscode.workspace.openTextDocument(uri);
+          const edit = new vscode.WorkspaceEdit();
+
+          // Construct range. end is exclusive line in markdown-it,
+          // but in VS Code Range, (start, 0) to (end, 0) means lines [start, end-1].
+          // To replace full lines including trailing newline of the last line:
+          const range = new vscode.Range(
+            new vscode.Position(start, 0),
+            document.validatePosition(new vscode.Position(end, 0)),
+          );
+
+          // Ensure newContent ends with newline if we replaced full lines
+          let text = newContent;
+          if (end < document.lineCount && !text.endsWith("\n")) {
+            text += "\n";
+          }
+
+          edit.replace(uri, range, text);
+          await vscode.workspace.applyEdit(edit);
+        } catch (e) {
+          vscode.window.showErrorMessage(
+            l10n.t("Failed to apply edit: {0}", String(e)),
+          );
+        }
+      }
+      return;
+    }
+
+    if (message.command !== "openSource" || !currentState) {
+      return;
+    }
+
+    const uriToOpen =
+      message.side === "original"
+        ? currentState.originalUri
+        : (currentState.modifiedUri ?? currentState.fallbackSourceUri);
+
+    if (!uriToOpen) {
+      vscode.window.showInformationMessage(
+        message.side === "original" && options?.originalUnavailableMessage
+          ? options.originalUnavailableMessage
+          : l10n.t("No source is available for this side of the diff."),
+      );
+      return;
+    }
+
+    if (typeof message.page === "string" && message.page.length > 0) {
+      const resolvedUri = await resolveWikilinkUri(message.page, uriToOpen);
+      if (resolvedUri) {
+        try {
+          const document = await vscode.workspace.openTextDocument(resolvedUri);
+          await vscode.window.showTextDocument(document, {
+            viewColumn: vscode.ViewColumn.One,
+            preserveFocus: false,
+          });
+        } catch (error) {
+          vscode.window.showErrorMessage(
+            l10n.t("Could not open file: {0}", String(error)),
+          );
+        }
+      } else {
+        vscode.window.showWarningMessage(
+          l10n.t("Wikilink target not found: {0}", message.page),
+        );
+      }
+      return;
+    }
+
+    try {
+      const document = await vscode.workspace.openTextDocument(uriToOpen);
+      const editor = await vscode.window.showTextDocument(document, {
+        viewColumn: vscode.ViewColumn.One,
+        preserveFocus: false,
+      });
+
+      if (
+        typeof message.line === "number" &&
+        Number.isInteger(message.line) &&
+        message.line >= 0
+      ) {
+        const range = new vscode.Range(message.line, 0, message.line, 0);
+        editor.revealRange(range, vscode.TextEditorRevealType.InCenter);
+        editor.selection = new vscode.Selection(range.start, range.start);
+      }
+    } catch (error) {
+      if (message.side === "original") {
+        vscode.window.showWarningMessage(
+          l10n.t(
+            "Could not open the original version. Opening the current file instead.",
+          ),
+        );
+
+        const fallbackDocument = await vscode.workspace.openTextDocument(
+          currentState.fallbackSourceUri,
+        );
+        const editor = await vscode.window.showTextDocument(fallbackDocument, {
+          viewColumn: vscode.ViewColumn.One,
+        });
+
+        if (
+          typeof message.line === "number" &&
+          Number.isInteger(message.line) &&
+          message.line >= 0
+        ) {
+          const range = new vscode.Range(message.line, 0, message.line, 0);
+          editor.revealRange(range, vscode.TextEditorRevealType.InCenter);
+          editor.selection = new vscode.Selection(range.start, range.start);
+        }
+      } else {
+        vscode.window.showErrorMessage(
+          l10n.t("Could not open file: {0}", String(error)),
+        );
+      }
+    }
+  });
+}
+
 async function bindDiffPanel(
   panel: vscode.WebviewPanel,
   context: vscode.ExtensionContext,
@@ -828,208 +1037,19 @@ async function bindDiffPanel(
     }
   });
 
+  const messageDisposable = attachDiffWebviewMessageHandler(
+    panel,
+    () => currentState,
+  );
+
   panel.onDidDispose(() => {
     isDisposed = true;
+    messageDisposable.dispose();
     documentSubscription.dispose();
     configSubscription.dispose();
     repositorySubscription?.dispose();
     if (timeout) {
       clearTimeout(timeout);
-    }
-  });
-
-  panel.webview.onDidReceiveMessage(async (message) => {
-    if (message.command === "ready") {
-      isWebviewReadyForTesting = true;
-      return;
-    }
-
-    if (message.command === "runtimeDiagnostics") {
-      if (
-        message.payload &&
-        typeof message.payload === "object" &&
-        typeof message.payload.reason === "string"
-      ) {
-        appendRuntimeDiagnostics(
-          panel,
-          currentState,
-          message.payload as RuntimeDiagnosticsPayload,
-        );
-      }
-      return;
-    }
-
-    if (message.command === "searchTag") {
-      if (typeof message.tag !== "string") {
-        return;
-      }
-      vscode.commands.executeCommand("workbench.action.findInFiles", {
-        query: message.tag,
-        triggerSearch: true,
-        isCaseSensitive: false,
-        isRegex: false,
-      });
-      return;
-    }
-
-    if (message.command === "requestBlockSource" && currentState) {
-      const uri = currentState.modifiedUri ?? currentState.fallbackSourceUri;
-      if (uri) {
-        const start = message.lineStart;
-        const end = message.lineEnd;
-        if (
-          typeof start !== "number" ||
-          typeof end !== "number" ||
-          !Number.isInteger(start) ||
-          !Number.isInteger(end) ||
-          start < 0 ||
-          end < start
-        ) {
-          return;
-        }
-        try {
-          const document = await vscode.workspace.openTextDocument(uri);
-          let content = "";
-          for (let i = start; i < end && i < document.lineCount; i++) {
-            content += document.lineAt(i).text + (i < end - 1 ? "\n" : "");
-          }
-          panel.webview.postMessage({ command: "receiveBlockSource", content });
-        } catch (e) {
-          console.error("Failed to read block source:", e);
-        }
-      }
-      return;
-    }
-
-    if (message.command === "applyEdit" && currentState) {
-      const uri = currentState.modifiedUri ?? currentState.fallbackSourceUri;
-      const start = message.lineStart;
-      const end = message.lineEnd;
-      const newContent = message.newContent;
-
-      if (
-        uri &&
-        (uri.scheme === "file" || uri.scheme === "untitled") &&
-        typeof start === "number" &&
-        typeof end === "number" &&
-        Number.isInteger(start) &&
-        Number.isInteger(end) &&
-        typeof newContent === "string" &&
-        start >= 0 &&
-        end >= start
-      ) {
-        try {
-          const document = await vscode.workspace.openTextDocument(uri);
-          const edit = new vscode.WorkspaceEdit();
-
-          // Construct range. end is exclusive line in markdown-it,
-          // but in VS Code Range, (start, 0) to (end, 0) means lines [start, end-1].
-          // To replace full lines including trailing newline of the last line:
-          const range = new vscode.Range(
-            new vscode.Position(start, 0),
-            document.validatePosition(new vscode.Position(end, 0)),
-          );
-
-          // Ensure newContent ends with newline if we replaced full lines
-          let text = newContent;
-          if (end < document.lineCount && !text.endsWith("\n")) {
-            text += "\n";
-          }
-
-          edit.replace(uri, range, text);
-          await vscode.workspace.applyEdit(edit);
-        } catch (e) {
-          vscode.window.showErrorMessage(
-            l10n.t("Failed to apply edit: {0}", String(e)),
-          );
-        }
-      }
-      return;
-    }
-
-    if (message.command !== "openSource" || !currentState) {
-      return;
-    }
-
-    const uriToOpen =
-      message.side === "original"
-        ? currentState.originalUri
-        : (currentState.modifiedUri ?? currentState.fallbackSourceUri);
-
-    if (!uriToOpen) {
-      vscode.window.showInformationMessage(
-        l10n.t("No source is available for this side of the diff."),
-      );
-      return;
-    }
-
-    if (typeof message.page === "string" && message.page.length > 0) {
-      const resolvedUri = await resolveWikilinkUri(message.page, uriToOpen);
-      if (resolvedUri) {
-        try {
-          const document = await vscode.workspace.openTextDocument(resolvedUri);
-          await vscode.window.showTextDocument(document, {
-            viewColumn: vscode.ViewColumn.One,
-            preserveFocus: false,
-          });
-        } catch (error) {
-          vscode.window.showErrorMessage(
-            l10n.t("Could not open file: {0}", String(error)),
-          );
-        }
-      } else {
-        vscode.window.showWarningMessage(
-          l10n.t("Wikilink target not found: {0}", message.page),
-        );
-      }
-      return;
-    }
-
-    try {
-      const document = await vscode.workspace.openTextDocument(uriToOpen);
-      const editor = await vscode.window.showTextDocument(document, {
-        viewColumn: vscode.ViewColumn.One,
-        preserveFocus: false,
-      });
-
-      if (
-        typeof message.line === "number" &&
-        Number.isInteger(message.line) &&
-        message.line >= 0
-      ) {
-        const range = new vscode.Range(message.line, 0, message.line, 0);
-        editor.revealRange(range, vscode.TextEditorRevealType.InCenter);
-        editor.selection = new vscode.Selection(range.start, range.start);
-      }
-    } catch (error) {
-      if (message.side === "original") {
-        vscode.window.showWarningMessage(
-          l10n.t(
-            "Could not open the original version. Opening the current file instead.",
-          ),
-        );
-
-        const fallbackDocument = await vscode.workspace.openTextDocument(
-          currentState.fallbackSourceUri,
-        );
-        const editor = await vscode.window.showTextDocument(fallbackDocument, {
-          viewColumn: vscode.ViewColumn.One,
-        });
-
-        if (
-          typeof message.line === "number" &&
-          Number.isInteger(message.line) &&
-          message.line >= 0
-        ) {
-          const range = new vscode.Range(message.line, 0, message.line, 0);
-          editor.revealRange(range, vscode.TextEditorRevealType.InCenter);
-          editor.selection = new vscode.Selection(range.start, range.start);
-        }
-      } else {
-        vscode.window.showErrorMessage(
-          l10n.t("Could not open file: {0}", String(error)),
-        );
-      }
     }
   });
 
@@ -1365,58 +1385,24 @@ export function activate(context: vscode.ExtensionContext) {
 
       panel.webview.html = webviewContent;
 
-      // Handle Double Click
-      const messageDisposable = panel.webview.onDidReceiveMessage((message) => {
-        if (message.command === "openSource") {
-          const side = message.side;
-          const line = message.line;
-          if (side === "original") {
-            vscode.window.showInformationMessage(
-              l10n.t(
-                "Original source is the clipboard content and cannot be opened as a file.",
-              ),
-            );
-            return;
-          }
+      const clipboardPanelState: DiffPanelState = {
+        modifiedUri: document.uri,
+        leftLabel: "Clipboard",
+        rightLabel: path.basename(document.fileName),
+        watchUris: [],
+        modifiedImageBaseUri: document.uri,
+        fallbackSourceUri: document.uri,
+      };
 
-          if (editor) {
-            if (typeof message.page === "string" && message.page.length > 0) {
-              resolveWikilinkUri(message.page, editor.document.uri).then((resolvedUri) => {
-                if (resolvedUri) {
-                  vscode.workspace.openTextDocument(resolvedUri).then((doc) => {
-                    vscode.window.showTextDocument(doc, {
-                      viewColumn: vscode.ViewColumn.One,
-                      preserveFocus: false,
-                    });
-                  }, (err) => {
-                    vscode.window.showErrorMessage(
-                      l10n.t("Could not open file: {0}", String(err)),
-                    );
-                  });
-                } else {
-                  vscode.window.showWarningMessage(
-                    l10n.t("Wikilink target not found: {0}", message.page),
-                  );
-                }
-              });
-              return;
-            }
-
-            vscode.window
-              .showTextDocument(editor.document, vscode.ViewColumn.One)
-              .then((e) => {
-                if (
-                  typeof line === "number" &&
-                  Number.isInteger(line) &&
-                  line >= 0
-                ) {
-                  const range = new vscode.Range(line, 0, line, 0);
-                  e.revealRange(range, vscode.TextEditorRevealType.InCenter);
-                }
-              });
-          }
-        }
-      });
+      const messageDisposable = attachDiffWebviewMessageHandler(
+        panel,
+        () => clipboardPanelState,
+        {
+          originalUnavailableMessage: l10n.t(
+            "Original source is the clipboard content and cannot be opened as a file.",
+          ),
+        },
+      );
 
       panel.onDidDispose(() => {
         messageDisposable.dispose();
