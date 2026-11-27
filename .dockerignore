@@ -1,0 +1,8 @@
+.git
+.vscode-test
+node_modules
+out
+playwright-report
+test-results
+.pnpm-store
+*.vsix
