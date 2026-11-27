@@ -827,6 +827,102 @@ export function attachDiffWebviewMessageHandler(
       return;
     }
 
+    if (message.command === "openLink" && currentState) {
+      if (typeof message.href !== "string" || message.href.trim().length === 0) {
+        return;
+      }
+      const rawHref = message.href.trim();
+      const lowerHref = rawHref.toLowerCase();
+      if (
+        lowerHref.startsWith("http://") ||
+        lowerHref.startsWith("https://") ||
+        lowerHref.startsWith("mailto:")
+      ) {
+        try {
+          await vscode.env.openExternal(vscode.Uri.parse(rawHref, true));
+        } catch (error) {
+          vscode.window.showErrorMessage(
+            l10n.t("Could not open link: {0}", String(error)),
+          );
+        }
+        return;
+      }
+
+      // Reject any other explicit URI scheme (e.g. javascript:, data:, command:, file:)
+      if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(rawHref)) {
+        return;
+      }
+
+      const baseSideUri =
+        message.side === "original"
+          ? (currentState.originalUri ?? currentState.fallbackSourceUri)
+          : (currentState.modifiedUri ?? currentState.fallbackSourceUri);
+      if (!baseSideUri) {
+        return;
+      }
+
+      const hashIndex = rawHref.indexOf("#");
+      const rawPathPart = hashIndex >= 0 ? rawHref.slice(0, hashIndex) : rawHref;
+      const fragment = hashIndex >= 0 ? rawHref.slice(hashIndex + 1) : "";
+      if (!rawPathPart) {
+        return;
+      }
+
+      let decodedPath: string;
+      try {
+        decodedPath = decodeURIComponent(rawPathPart);
+      } catch {
+        return;
+      }
+
+      if (decodedPath.includes("\0") || /^[a-zA-Z]:[\\/]/.test(decodedPath)) {
+        return;
+      }
+
+      const cleanBase = toFileBackedUri(baseSideUri);
+      let targetUri: vscode.Uri;
+      if (decodedPath.startsWith("/")) {
+        const workspaceFolder =
+          vscode.workspace.getWorkspaceFolder(cleanBase) ??
+          vscode.workspace.workspaceFolders?.[0];
+        if (!workspaceFolder) {
+          return;
+        }
+        targetUri = vscode.Uri.joinPath(
+          workspaceFolder.uri,
+          decodedPath.replace(/^\/+/, ""),
+        );
+      } else {
+        targetUri = vscode.Uri.joinPath(cleanBase, "..", decodedPath);
+      }
+
+      if (!isPathInsideRoot(targetUri, cleanBase)) {
+        return;
+      }
+
+      try {
+        const doc = await vscode.workspace.openTextDocument(targetUri);
+        const editor = await vscode.window.showTextDocument(doc, {
+          preserveFocus: false,
+        });
+        const lineMatch = /^L(\d+)(?:-L?(\d+))?$/i.exec(fragment);
+        if (lineMatch) {
+          const startLine = Math.max(0, parseInt(lineMatch[1], 10) - 1);
+          const endLine = lineMatch[2]
+            ? Math.max(startLine, parseInt(lineMatch[2], 10) - 1)
+            : startLine;
+          const range = new vscode.Range(startLine, 0, endLine, 0);
+          editor.revealRange(range, vscode.TextEditorRevealType.InCenter);
+          editor.selection = new vscode.Selection(range.start, range.end);
+        }
+      } catch (error) {
+        vscode.window.showErrorMessage(
+          l10n.t("Could not open file: {0}", String(error)),
+        );
+      }
+      return;
+    }
+
     if (message.command !== "openSource" || !currentState) {
       return;
     }

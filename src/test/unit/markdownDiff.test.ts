@@ -2101,5 +2101,38 @@ title: "Doc 1"
       "Webview should restore scroll position on initial load and layout stabilization",
     );
   });
+
+  it("should handle quick-edit double-click, CSS-escaped anchors, and safe link navigation in webview", () => {
+    const provider = new MarkdownDiffProvider();
+    const html = provider.getWebviewContent(
+      '<p><a href="#fn1">1</a> <a href="guide.md#L10">guide</a></p>',
+      "",
+      "",
+      "",
+      "",
+      "Old",
+      "New",
+      "https://example.invalid",
+      {},
+    );
+
+    assert.ok(
+      html.includes("lastQuickEditStart") && html.includes("BlockEditor.close()"),
+      "Double-click right after single-click Quick Edit should close the overlay and open source",
+    );
+    assert.ok(
+      html.includes("CSS.escape") && html.includes("jumpToPaneAnchor"),
+      "Anchor jump should escape selector values using CSS.escape",
+    );
+    assert.ok(
+      html.includes("command: 'openLink'"),
+      "Non-anchor links should post openLink to the extension host",
+    );
+
+    const vm = require("vm");
+    for (const match of html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/gi)) {
+      new vm.Script(match[1]);
+    }
+  });
 });
 

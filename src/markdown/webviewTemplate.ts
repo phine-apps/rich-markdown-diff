@@ -3969,10 +3969,31 @@ export function getWebviewContent(
              }
         });
 
+        let lastQuickEditStart = null;
+
         // Double Click to Open Source (Whole File)
         document.body.addEventListener('dblclick', (e) => {
-            // Check if click originated from toolbar or buttons
-            if (e.target.closest('.toolbar') || e.target.closest('.block-editor-overlay')) {
+            if (e.target.closest('.toolbar')) {
+                return;
+            }
+
+            const overlayEl = e.target.closest('.block-editor-overlay');
+            if (overlayEl) {
+                // If single-click Quick Edit just opened (< 800ms ago), treat this as
+                // a double-click on the modified pane to open the source file.
+                if (
+                    lastQuickEditStart &&
+                    Date.now() - lastQuickEditStart.time <= 800
+                ) {
+                    const lineToOpen = lastQuickEditStart.lineStart;
+                    lastQuickEditStart = null;
+                    BlockEditor.close();
+                    vscode.postMessage({
+                        command: 'openSource',
+                        side: 'modified',
+                        line: lineToOpen,
+                    });
+                }
                 return;
             }
 
@@ -4077,54 +4098,114 @@ export function getWebviewContent(
             const lineStart = parseInt(lineAttr, 10);
             const lineEnd = parseInt(lineEl.getAttribute('data-line-end'), 10) || lineStart + 1;
 
-            // Optional: Delay slightly to see if it's a double click
-            // For now, let's just open the editor on single click. 
-            // If the user double clicks, the jump will happen anyway.
+            lastQuickEditStart = {
+                time: Date.now(),
+                lineStart,
+            };
             BlockEditor.start(lineEl, lineStart, lineEnd);
         });
 
-        // --- Footnote Navigation Support ---
-        document.body.addEventListener('click', (e) => {
-            const anchor = e.target.closest('a');
-            if (!anchor || !anchor.getAttribute('href')) return;
-            
-            const href = anchor.getAttribute('href');
-            // Support both default (fn1) and prefixed (fn-old-1) IDs
-            if (href.startsWith('#fn')) {
-                const targetId = href.substring(1);
-                const pane = anchor.closest('.pane');
-                if (pane) {
-                    // Search for the ID strictly within the same pane to avoid cross-pane jumping
-                    const target = pane.querySelector('[id="' + targetId + '"]');
-                    if (target) {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        
-                        // Center the target in the pane
-                        const paneHeight = pane.clientHeight;
-                        const elTop = getRelativeTop(target, pane);
-                        const elHeight = target.getBoundingClientRect().height || 20;
-                        const targetScrollTop = elTop - (paneHeight / 2) + (elHeight / 2);
-                        
-                        pane.scrollTop = Math.max(0, targetScrollTop);
-                        
-                        // Highlight target temporarily
-                        target.classList.add('jump-highlight');
-                        setTimeout(() => target.classList.remove('jump-highlight'), 1500);
-                        
-                        // Sync other pane if in split mode
-                        if (!isInline) {
-                            const otherPane = pane === leftPane ? rightPane : leftPane;
-                            const sourceMax = pane.scrollHeight - pane.clientHeight;
-                            const otherMax = otherPane.scrollHeight - otherPane.clientHeight;
-                            if (sourceMax > 0 && otherMax > 0) {
-                                const pct = pane.scrollTop / sourceMax;
-                                otherPane.scrollTop = pct * otherMax;
-                            }
-                        }
+        // --- Anchor, Footnote, File & External Link Navigation ---
+        const escapeCssSelectorValue = (value) => {
+            if (typeof CSS !== 'undefined' && typeof CSS.escape === 'function') {
+                return CSS.escape(value);
+            }
+            return String(value).replace(/["\\\\]/g, '\\\\$&');
+        };
+
+        const slugifyHeadingText = (text) => {
+            return String(text || '')
+                .trim()
+                .toLowerCase()
+                .replace(/[^\p{L}\p{N}\s-]/gu, '')
+                .replace(/\s+/g, '-');
+        };
+
+        const jumpToPaneAnchor = (pane, rawId) => {
+            let targetId = rawId;
+            try {
+                targetId = decodeURIComponent(rawId);
+            } catch {}
+
+            const escaped = escapeCssSelectorValue(targetId);
+            let target =
+                pane.querySelector('[id="' + escaped + '"]') ||
+                pane.querySelector('[name="' + escaped + '"]');
+
+            if (!target) {
+                const normalizedSlug = targetId.toLowerCase();
+                const headings = pane.querySelectorAll('h1, h2, h3, h4, h5, h6');
+                for (let i = 0; i < headings.length; i++) {
+                    if (slugifyHeadingText(headings[i].textContent) === normalizedSlug) {
+                        target = headings[i];
+                        break;
                     }
                 }
             }
+
+            if (!target) {
+                return false;
+            }
+
+            const paneHeight = pane.clientHeight;
+            const elTop = getRelativeTop(target, pane);
+            const elHeight = target.getBoundingClientRect().height || 20;
+            const targetScrollTop = elTop - (paneHeight / 2) + (elHeight / 2);
+
+            pane.scrollTop = Math.max(0, targetScrollTop);
+
+            target.classList.add('jump-highlight');
+            setTimeout(() => target.classList.remove('jump-highlight'), 1500);
+
+            if (!isInline) {
+                const otherPane = pane === leftPane ? rightPane : leftPane;
+                const mappedTop = mapPaneScrollTop(pane, otherPane, pane.scrollTop);
+                if (Math.abs(otherPane.scrollTop - mappedTop) > 0.5) {
+                    otherPane.scrollTop = mappedTop;
+                    markMirroredScroll(otherPane);
+                }
+            }
+            return true;
+        };
+
+        document.body.addEventListener('click', (e) => {
+            const anchor = e.target.closest('a');
+            if (!anchor || anchor.classList.contains('wikilink')) return;
+
+            const href = anchor.getAttribute('href');
+            if (!href) return;
+
+            const pane = anchor.closest('.pane');
+            if (href.startsWith('#')) {
+                if (pane) {
+                    const jumped = jumpToPaneAnchor(pane, href.substring(1));
+                    if (jumped) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                    }
+                }
+                return;
+            }
+
+            const lowerHref = href.trim().toLowerCase();
+            if (
+                lowerHref.startsWith('javascript:') ||
+                lowerHref.startsWith('data:') ||
+                lowerHref.startsWith('vbscript:') ||
+                lowerHref.startsWith('command:')
+            ) {
+                e.preventDefault();
+                return;
+            }
+
+            e.preventDefault();
+            e.stopPropagation();
+            const side = pane && pane.id === 'left-pane' ? 'original' : 'modified';
+            vscode.postMessage({
+                command: 'openLink',
+                href,
+                side,
+            });
         });
 
         // --- Ghost Element Cleanup ---

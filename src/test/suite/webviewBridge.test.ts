@@ -164,5 +164,43 @@ describe("Webview Bridge Integration Tests", () => {
         });
         disposable.dispose();
     });
+
+    it("should reject dangerous schemes and path traversal in openLink handler", async () => {
+        const { attachDiffWebviewMessageHandler } = require("../../extension");
+
+        let listener: ((msg: unknown) => Promise<void>) | undefined;
+        const mockPanel = {
+            webview: {
+                onDidReceiveMessage: (cb: (msg: unknown) => Promise<void>) => {
+                    listener = cb;
+                    return { dispose: () => {} };
+                },
+                postMessage: async () => true,
+            },
+        } as unknown as vscode.WebviewPanel;
+
+        const disposable = attachDiffWebviewMessageHandler(
+            mockPanel,
+            () => ({
+                modifiedUri: tmpFile,
+                leftLabel: "Original",
+                rightLabel: "Modified",
+                watchUris: [],
+                modifiedImageBaseUri: tmpFile,
+                fallbackSourceUri: tmpFile,
+            }),
+        );
+
+        assert.ok(listener);
+        const beforeActive = vscode.window.activeTextEditor?.document.uri.toString();
+
+        // Dangerous schemes and path traversal must be silently ignored without opening any document
+        await listener!({ command: "openLink", href: "javascript:alert(1)", side: "modified" });
+        await listener!({ command: "openLink", href: "../../../../../../etc/passwd", side: "modified" });
+
+        const afterActive = vscode.window.activeTextEditor?.document.uri.toString();
+        assert.strictEqual(afterActive, beforeActive, "Blocked openLink must not change active editor");
+        disposable.dispose();
+    });
 });
 
