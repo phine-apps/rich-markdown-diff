@@ -3513,14 +3513,13 @@ export function getWebviewContent(
             const targetScrollTop = getGroupTargetScrollTop(groupMetrics, targetPane);
             targetPane.scrollTop = targetScrollTop;
 
-            // Sync the other pane proportionally to keep side-by-side aligned
+            // Sync the other pane using anchored block mapping to keep side-by-side aligned
             if (!isInline) {
                 const otherPane = targetPane === leftPane ? rightPane : leftPane;
-                const sourceMax = targetPane.scrollHeight - targetPane.clientHeight;
-                const otherMax = otherPane.scrollHeight - otherPane.clientHeight;
-                if (sourceMax > 0 && otherMax > 0) {
-                    const pct = targetPane.scrollTop / sourceMax;
-                    otherPane.scrollTop = pct * otherMax;
+                const mappedTop = mapPaneScrollTop(targetPane, otherPane, targetPane.scrollTop);
+                if (Math.abs(otherPane.scrollTop - mappedTop) > 0.5) {
+                    otherPane.scrollTop = mappedTop;
+                    markMirroredScroll(otherPane);
                 }
             }
 
@@ -3609,6 +3608,116 @@ export function getWebviewContent(
           return true;
         };
 
+        let cachedScrollAnchorKey = '';
+        let cachedScrollAnchors = [];
+
+        const getScrollAnchorPairs = () => {
+          const cacheKey = [
+            leftPane.scrollHeight,
+            rightPane.scrollHeight,
+            leftPane.clientWidth,
+            rightPane.clientWidth,
+          ].join(':');
+          if (cacheKey === cachedScrollAnchorKey) {
+            return cachedScrollAnchors;
+          }
+
+          const pairs = [];
+          const leftChildren = leftContent.children;
+          const rightChildren = rightContent.children;
+          const count = Math.min(leftChildren.length, rightChildren.length);
+
+          for (let i = 0; i < count; i++) {
+            const leftEl = leftChildren[i];
+            const rightEl = rightChildren[i];
+            if (leftEl.offsetHeight <= 0 || rightEl.offsetHeight <= 0) {
+              continue;
+            }
+            const leftTop = getRelativeTop(leftEl, leftPane);
+            const rightTop = getRelativeTop(rightEl, rightPane);
+            const leftHeight = leftEl.getBoundingClientRect().height;
+            const rightHeight = rightEl.getBoundingClientRect().height;
+            if (leftHeight <= 0 || rightHeight <= 0) {
+              continue;
+            }
+            pairs.push({
+              leftTop,
+              leftBottom: leftTop + leftHeight,
+              rightTop,
+              rightBottom: rightTop + rightHeight,
+            });
+          }
+
+          cachedScrollAnchorKey = cacheKey;
+          cachedScrollAnchors = pairs;
+          return pairs;
+        };
+
+        const mapPaneScrollTop = (sourcePane, targetPane, sourceScrollTop) => {
+          const sourceMax = sourcePane.scrollHeight - sourcePane.clientHeight;
+          const targetMax = targetPane.scrollHeight - targetPane.clientHeight;
+          if (sourceMax <= 0 || targetMax <= 0) {
+            return targetPane.scrollTop;
+          }
+          if (sourceScrollTop <= 2) {
+            return 0;
+          }
+          if (sourceScrollTop >= sourceMax - 2) {
+            return targetMax;
+          }
+
+          const anchors = getScrollAnchorPairs();
+          if (anchors.length === 0) {
+            const percentage = sourceScrollTop / sourceMax;
+            return percentage * targetMax;
+          }
+
+          const sourceIsLeft = sourcePane === leftPane;
+          const points = [{ s: 0, t: 0 }];
+          for (let i = 0; i < anchors.length; i++) {
+            const a = anchors[i];
+            const sTop = sourceIsLeft ? a.leftTop : a.rightTop;
+            const tTop = sourceIsLeft ? a.rightTop : a.leftTop;
+            const sBot = sourceIsLeft ? a.leftBottom : a.rightBottom;
+            const tBot = sourceIsLeft ? a.rightBottom : a.leftBottom;
+
+            const prev = points[points.length - 1];
+            if (sTop >= prev.s && tTop >= prev.t) {
+              points.push({ s: sTop, t: tTop });
+            }
+            const prev2 = points[points.length - 1];
+            if (sBot > prev2.s && tBot >= prev2.t) {
+              points.push({ s: sBot, t: tBot });
+            }
+          }
+          const last = points[points.length - 1];
+          if (sourceMax > last.s && targetMax >= last.t) {
+            points.push({ s: sourceMax, t: targetMax });
+          } else if (sourceMax >= last.s) {
+            points[points.length - 1] = { s: sourceMax, t: targetMax };
+          }
+
+          let lo = 0;
+          let hi = points.length - 2;
+          while (lo <= hi) {
+            const mid = (lo + hi) >> 1;
+            const p0 = points[mid];
+            const p1 = points[mid + 1];
+            if (sourceScrollTop < p0.s) {
+              hi = mid - 1;
+            } else if (sourceScrollTop > p1.s) {
+              lo = mid + 1;
+            } else {
+              const span = p1.s - p0.s;
+              const ratio = span > 0 ? (sourceScrollTop - p0.s) / span : 0;
+              return Math.min(Math.max(0, p0.t + ratio * (p1.t - p0.t)), targetMax);
+            }
+          }
+
+          const percentage = sourceScrollTop / sourceMax;
+          return percentage * targetMax;
+        };
+
         const syncScroll = (sourcePane, targetPane) => {
             // Only sync if the source is the one being actively scrolled by user
             if (!activePane) activePane = sourcePane; 
@@ -3629,16 +3738,11 @@ export function getWebviewContent(
               let shouldMarkTargetScroll = false;
 
               if (sourceMax > 0 && targetMax > 0) {
-                let targetScrollTop = targetPane.scrollTop;
-
-                if (sourcePane.scrollTop <= 2) {
-                  targetScrollTop = 0;
-                } else if (sourcePane.scrollTop >= sourceMax - 2) {
-                  targetScrollTop = targetMax;
-                } else {
-                  const percentage = sourcePane.scrollTop / sourceMax;
-                  targetScrollTop = percentage * targetMax;
-                }
+                const targetScrollTop = mapPaneScrollTop(
+                  sourcePane,
+                  targetPane,
+                  sourcePane.scrollTop,
+                );
 
                 if (Math.abs(targetPane.scrollTop - targetScrollTop) > 0.5) {
                   targetPane.scrollTop = targetScrollTop;
