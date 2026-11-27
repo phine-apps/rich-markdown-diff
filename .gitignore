@@ -13,23 +13,14 @@ node_modules/
 # OS files
 **/.DS_Store
 
-# Serena MCP config
-.serena/
-
 # Playwright
 test-results/
 playwright-report/
-blob-report/
-playwright/.cache/
-vrt-output/
 # pnpm
 .pnpm-store/
 
 # Build artifacts
 index.html
-
-# Cache/Temp data
-data/
 
 # Environment specific screenshots
 *-darwin.png
