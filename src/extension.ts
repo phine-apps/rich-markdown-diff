@@ -428,6 +428,21 @@ async function readDocumentText(uri?: vscode.Uri): Promise<string> {
     return "";
   }
 
+  if (uri.scheme === "file") {
+    const openDoc = vscode.workspace.textDocuments.find(
+      (doc) => doc.uri.toString() === uri.toString(),
+    );
+    if (openDoc && openDoc.isDirty) {
+      return openDoc.getText();
+    }
+    try {
+      const bytes = await vscode.workspace.fs.readFile(uri);
+      return new TextDecoder("utf-8").decode(bytes);
+    } catch {
+      // Fall back to openTextDocument if direct disk read fails
+    }
+  }
+
   try {
     const document = await vscode.workspace.openTextDocument(uri);
     return document.getText();
@@ -692,157 +707,22 @@ async function renderDiffPanel(
   return contentKey;
 }
 
-async function bindDiffPanel(
+/**
+ * Attaches the shared Webview message handler for diff panels (used by both
+ * git/file diff panels and the clipboard diff panel).
+ */
+export function attachDiffWebviewMessageHandler(
   panel: vscode.WebviewPanel,
-  context: vscode.ExtensionContext,
-  resolveState: ResolveDiffPanelState,
-) {
-  attachPanelTracking(panel);
-
-  const diffProvider = new MarkdownDiffProvider();
-  const debounceDelay = 300;
-  let timeout: NodeJS.Timeout | undefined;
-  let currentState: DiffPanelState | undefined;
-  let repositorySubscription: vscode.Disposable | undefined;
-  let currentRepository: GitRepository | undefined;
-  let isDisposed = false;
-  let isUpdating = false;
-  let queuedTrigger: DiffPanelUpdateTrigger | undefined;
-  let lastContentKey: string | undefined;
-
-  const scheduleUpdate = (trigger: DiffPanelUpdateTrigger) => {
-    if (timeout) {
-      clearTimeout(timeout);
-    }
-
-    timeout = setTimeout(
-      () => {
-        timeout = undefined;
-        void update(trigger);
-      },
-      trigger === "initial" ? 0 : debounceDelay,
-    );
-  };
-
-  const queueUpdate = (trigger: DiffPanelUpdateTrigger) => {
-    if (!queuedTrigger) {
-      queuedTrigger = trigger;
-      return;
-    }
-
-    if (trigger === "document" || queuedTrigger === "initial") {
-      queuedTrigger = trigger;
-      return;
-    }
-
-    if (trigger === "repository" && queuedTrigger !== "document") {
-      queuedTrigger = trigger;
-    }
-  };
-
-
-  const update = async (trigger: DiffPanelUpdateTrigger) => {
-    if (isDisposed) {
-      return;
-    }
-
-    if (isUpdating) {
-      queueUpdate(trigger);
-      return;
-    }
-
-    isUpdating = true;
-    try {
-      const nextState = await resolveState({
-        refreshComparisonStatus: trigger !== "repository",
-        trigger,
-      });
-
-      if (isDisposed) {
-        return;
-      }
-
-      currentState = nextState;
-
-      if (currentRepository !== nextState.repository) {
-        repositorySubscription?.dispose();
-        currentRepository = nextState.repository;
-        repositorySubscription = nextState.repository?.state.onDidChange(() => {
-          scheduleUpdate("repository");
-        });
-      }
-
-      lastContentKey = await renderDiffPanel(
-        panel,
-        context,
-        diffProvider,
-        nextState,
-        lastContentKey,
-      );
-
-      if (isDisposed) {
-        return;
-      }
-    } catch (error) {
-      if (!isDisposed) {
-        panel.webview.html = `<h1>${escapeHtml(l10n.t("Error reading file: {0}", String(error)))}</h1>`;
-      }
-    } finally {
-      isUpdating = false;
-
-      if (queuedTrigger) {
-        const nextTrigger = queuedTrigger;
-        queuedTrigger = undefined;
-        scheduleUpdate(nextTrigger);
-      }
-    }
-  };
-
-  const configSubscription = vscode.workspace.onDidChangeConfiguration((e) => {
-    if (
-      e.affectsConfiguration("rich-markdown-diff.showGutterMarkers") ||
-      e.affectsConfiguration("rich-markdown-diff.showGitBlame") ||
-      e.affectsConfiguration("rich-markdown-diff.lineHoverDelay") ||
-      e.affectsConfiguration("rich-markdown-diff.insertedColor") ||
-      e.affectsConfiguration("rich-markdown-diff.deletedColor") ||
-      e.affectsConfiguration("rich-markdown-diff.defaultViewMode") ||
-      e.affectsConfiguration("rich-markdown-diff.defaultFoldUnchanged")
-    ) {
-      lastContentKey = undefined; // Force re-render
-      scheduleUpdate("document");
-    }
-  });
-
-  const documentSubscription = vscode.workspace.onDidChangeTextDocument((e) => {
-    if (!currentState) {
-      return;
-    }
-
-    const watchedUris = currentState.watchUris.filter(
-      (uri) => uri.scheme === "file",
-    );
-    if (
-      watchedUris.some((uri) => uri.toString() === e.document.uri.toString())
-    ) {
-      scheduleUpdate("document");
-    }
-  });
-
-  panel.onDidDispose(() => {
-    isDisposed = true;
-    documentSubscription.dispose();
-    configSubscription.dispose();
-    repositorySubscription?.dispose();
-    if (timeout) {
-      clearTimeout(timeout);
-    }
-  });
-
-  panel.webview.onDidReceiveMessage(async (message) => {
+  getState: () => DiffPanelState | undefined,
+  options?: { originalUnavailableMessage?: string },
+): vscode.Disposable {
+  return panel.webview.onDidReceiveMessage(async (message) => {
     if (message.command === "ready") {
       isWebviewReadyForTesting = true;
       return;
     }
+
+    const currentState = getState();
 
     if (message.command === "runtimeDiagnostics") {
       if (
@@ -958,7 +838,9 @@ async function bindDiffPanel(
 
     if (!uriToOpen) {
       vscode.window.showInformationMessage(
-        l10n.t("No source is available for this side of the diff."),
+        message.side === "original" && options?.originalUnavailableMessage
+          ? options.originalUnavailableMessage
+          : l10n.t("No source is available for this side of the diff."),
       );
       return;
     }
@@ -1030,6 +912,200 @@ async function bindDiffPanel(
           l10n.t("Could not open file: {0}", String(error)),
         );
       }
+    }
+  });
+}
+
+async function bindDiffPanel(
+  panel: vscode.WebviewPanel,
+  context: vscode.ExtensionContext,
+  resolveState: ResolveDiffPanelState,
+) {
+  attachPanelTracking(panel);
+
+  const diffProvider = new MarkdownDiffProvider();
+  const debounceDelay = 300;
+  let timeout: NodeJS.Timeout | undefined;
+  let currentState: DiffPanelState | undefined;
+  let repositorySubscription: vscode.Disposable | undefined;
+  let currentRepository: GitRepository | undefined;
+  let fileWatcherDisposables: vscode.Disposable[] = [];
+  let watchedFileKey = "";
+  let isDisposed = false;
+  let isUpdating = false;
+  let queuedTrigger: DiffPanelUpdateTrigger | undefined;
+  let lastContentKey: string | undefined;
+
+  const disposeFileWatchers = () => {
+    for (const d of fileWatcherDisposables) {
+      d.dispose();
+    }
+    fileWatcherDisposables = [];
+    watchedFileKey = "";
+  };
+
+  const syncFileWatchers = (watchUris: readonly vscode.Uri[]) => {
+    const fileUris = watchUris.filter((uri) => uri.scheme === "file");
+    const nextKey = fileUris
+      .map((uri) => uri.fsPath)
+      .sort()
+      .join("\0");
+    if (nextKey === watchedFileKey) {
+      return;
+    }
+    disposeFileWatchers();
+    watchedFileKey = nextKey;
+
+    for (const uri of fileUris) {
+      const dirUri = vscode.Uri.file(path.dirname(uri.fsPath));
+      const pattern = new vscode.RelativePattern(
+        dirUri,
+        path.basename(uri.fsPath),
+      );
+      const watcher = vscode.workspace.createFileSystemWatcher(pattern);
+      const onDiskChange = () => scheduleUpdate("document");
+      fileWatcherDisposables.push(
+        watcher,
+        watcher.onDidChange(onDiskChange),
+        watcher.onDidCreate(onDiskChange),
+        watcher.onDidDelete(onDiskChange),
+      );
+    }
+  };
+
+  const scheduleUpdate = (trigger: DiffPanelUpdateTrigger) => {
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+
+    timeout = setTimeout(
+      () => {
+        timeout = undefined;
+        void update(trigger);
+      },
+      trigger === "initial" ? 0 : debounceDelay,
+    );
+  };
+
+  const queueUpdate = (trigger: DiffPanelUpdateTrigger) => {
+    if (!queuedTrigger) {
+      queuedTrigger = trigger;
+      return;
+    }
+
+    if (trigger === "document" || queuedTrigger === "initial") {
+      queuedTrigger = trigger;
+      return;
+    }
+
+    if (trigger === "repository" && queuedTrigger !== "document") {
+      queuedTrigger = trigger;
+    }
+  };
+
+
+  const update = async (trigger: DiffPanelUpdateTrigger) => {
+    if (isDisposed) {
+      return;
+    }
+
+    if (isUpdating) {
+      queueUpdate(trigger);
+      return;
+    }
+
+    isUpdating = true;
+    try {
+      const nextState = await resolveState({
+        refreshComparisonStatus: trigger !== "repository",
+        trigger,
+      });
+
+      if (isDisposed) {
+        return;
+      }
+
+      currentState = nextState;
+      syncFileWatchers(nextState.watchUris);
+
+      if (currentRepository !== nextState.repository) {
+        repositorySubscription?.dispose();
+        currentRepository = nextState.repository;
+        repositorySubscription = nextState.repository?.state.onDidChange(() => {
+          scheduleUpdate("repository");
+        });
+      }
+
+      lastContentKey = await renderDiffPanel(
+        panel,
+        context,
+        diffProvider,
+        nextState,
+        lastContentKey,
+      );
+
+      if (isDisposed) {
+        return;
+      }
+    } catch (error) {
+      if (!isDisposed) {
+        panel.webview.html = `<h1>${escapeHtml(l10n.t("Error reading file: {0}", String(error)))}</h1>`;
+      }
+    } finally {
+      isUpdating = false;
+
+      if (queuedTrigger) {
+        const nextTrigger = queuedTrigger;
+        queuedTrigger = undefined;
+        scheduleUpdate(nextTrigger);
+      }
+    }
+  };
+
+  const configSubscription = vscode.workspace.onDidChangeConfiguration((e) => {
+    if (
+      e.affectsConfiguration("rich-markdown-diff.showGutterMarkers") ||
+      e.affectsConfiguration("rich-markdown-diff.showGitBlame") ||
+      e.affectsConfiguration("rich-markdown-diff.lineHoverDelay") ||
+      e.affectsConfiguration("rich-markdown-diff.insertedColor") ||
+      e.affectsConfiguration("rich-markdown-diff.deletedColor") ||
+      e.affectsConfiguration("rich-markdown-diff.defaultViewMode") ||
+      e.affectsConfiguration("rich-markdown-diff.defaultFoldUnchanged")
+    ) {
+      lastContentKey = undefined; // Force re-render
+      scheduleUpdate("document");
+    }
+  });
+
+  const documentSubscription = vscode.workspace.onDidChangeTextDocument((e) => {
+    if (!currentState) {
+      return;
+    }
+
+    const watchedUris = currentState.watchUris.filter(
+      (uri) => uri.scheme === "file",
+    );
+    if (
+      watchedUris.some((uri) => uri.toString() === e.document.uri.toString())
+    ) {
+      scheduleUpdate("document");
+    }
+  });
+
+  const messageDisposable = attachDiffWebviewMessageHandler(
+    panel,
+    () => currentState,
+  );
+
+  panel.onDidDispose(() => {
+    isDisposed = true;
+    messageDisposable.dispose();
+    documentSubscription.dispose();
+    configSubscription.dispose();
+    repositorySubscription?.dispose();
+    disposeFileWatchers();
+    if (timeout) {
+      clearTimeout(timeout);
     }
   });
 
@@ -1365,58 +1441,24 @@ export function activate(context: vscode.ExtensionContext) {
 
       panel.webview.html = webviewContent;
 
-      // Handle Double Click
-      const messageDisposable = panel.webview.onDidReceiveMessage((message) => {
-        if (message.command === "openSource") {
-          const side = message.side;
-          const line = message.line;
-          if (side === "original") {
-            vscode.window.showInformationMessage(
-              l10n.t(
-                "Original source is the clipboard content and cannot be opened as a file.",
-              ),
-            );
-            return;
-          }
+      const clipboardPanelState: DiffPanelState = {
+        modifiedUri: document.uri,
+        leftLabel: "Clipboard",
+        rightLabel: path.basename(document.fileName),
+        watchUris: [],
+        modifiedImageBaseUri: document.uri,
+        fallbackSourceUri: document.uri,
+      };
 
-          if (editor) {
-            if (typeof message.page === "string" && message.page.length > 0) {
-              resolveWikilinkUri(message.page, editor.document.uri).then((resolvedUri) => {
-                if (resolvedUri) {
-                  vscode.workspace.openTextDocument(resolvedUri).then((doc) => {
-                    vscode.window.showTextDocument(doc, {
-                      viewColumn: vscode.ViewColumn.One,
-                      preserveFocus: false,
-                    });
-                  }, (err) => {
-                    vscode.window.showErrorMessage(
-                      l10n.t("Could not open file: {0}", String(err)),
-                    );
-                  });
-                } else {
-                  vscode.window.showWarningMessage(
-                    l10n.t("Wikilink target not found: {0}", message.page),
-                  );
-                }
-              });
-              return;
-            }
-
-            vscode.window
-              .showTextDocument(editor.document, vscode.ViewColumn.One)
-              .then((e) => {
-                if (
-                  typeof line === "number" &&
-                  Number.isInteger(line) &&
-                  line >= 0
-                ) {
-                  const range = new vscode.Range(line, 0, line, 0);
-                  e.revealRange(range, vscode.TextEditorRevealType.InCenter);
-                }
-              });
-          }
-        }
-      });
+      const messageDisposable = attachDiffWebviewMessageHandler(
+        panel,
+        () => clipboardPanelState,
+        {
+          originalUnavailableMessage: l10n.t(
+            "Original source is the clipboard content and cannot be opened as a file.",
+          ),
+        },
+      );
 
       panel.onDidDispose(() => {
         messageDisposable.dispose();

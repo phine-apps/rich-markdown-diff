@@ -106,5 +106,63 @@ describe("Webview Bridge Integration Tests", () => {
         const absoluteResolved = await resolveWikilinkUri("/etc/passwd", tmpFile);
         assert.strictEqual(absoluteResolved, undefined, "Absolute path wikilink must resolve to undefined");
     });
+
+    it("should handle requestBlockSource and applyEdit via attachDiffWebviewMessageHandler (clipboard diff mode)", async () => {
+        const { attachDiffWebviewMessageHandler } = require("../../extension");
+
+        let listener: ((msg: unknown) => Promise<void>) | undefined;
+        const postedMessages: unknown[] = [];
+
+        const mockPanel = {
+            webview: {
+                onDidReceiveMessage: (cb: (msg: unknown) => Promise<void>) => {
+                    listener = cb;
+                    return { dispose: () => {} };
+                },
+                postMessage: async (msg: unknown) => {
+                    postedMessages.push(msg);
+                    return true;
+                },
+            },
+        } as unknown as vscode.WebviewPanel;
+
+        const disposable = attachDiffWebviewMessageHandler(
+            mockPanel,
+            () => ({
+                modifiedUri: tmpFile,
+                leftLabel: "Clipboard",
+                rightLabel: path.basename(tmpFile.fsPath),
+                watchUris: [],
+                modifiedImageBaseUri: tmpFile,
+                fallbackSourceUri: tmpFile,
+            }),
+        );
+
+        assert.ok(listener, "onDidReceiveMessage listener should be registered");
+
+        await listener!({ command: "requestBlockSource", lineStart: 0, lineEnd: 2 });
+        assert.deepStrictEqual(postedMessages, [
+            { command: "receiveBlockSource", content: "Line 1\nLine 2" },
+        ]);
+
+        await listener!({
+            command: "applyEdit",
+            lineStart: 1,
+            lineEnd: 2,
+            newContent: "Edited Line 2",
+        });
+
+        const updatedDoc = await vscode.workspace.openTextDocument(tmpFile);
+        assert.strictEqual(updatedDoc.lineAt(1).text, "Edited Line 2");
+
+        // Revert changes
+        await listener!({
+            command: "applyEdit",
+            lineStart: 1,
+            lineEnd: 2,
+            newContent: "Line 2",
+        });
+        disposable.dispose();
+    });
 });
 

@@ -2259,7 +2259,9 @@ export function getWebviewContent(
     <div class="overview-ruler" id="right-overview-ruler"></div>
     ${showGitBlame ? '<div id="blame-tooltip" class="blame-tooltip"></div>' : ''}
     <script nonce="${nonce}">
-        const vscode = typeof acquireVsCodeApi !== 'undefined' ? acquireVsCodeApi() : { postMessage: () => {} };
+        const vscode = typeof acquireVsCodeApi !== 'undefined'
+            ? acquireVsCodeApi()
+            : { postMessage: () => {}, getState: () => null, setState: () => {} };
         window.vscode = vscode;
     </script>
     <script nonce="${nonce}">
@@ -2486,10 +2488,70 @@ export function getWebviewContent(
           emitRuntimeDiagnostics('unhandled-rejection', reason, { force: true });
         });
 
-        let isInline = false;
+        let isInline = document.body.classList.contains('inline-mode');
         let isFolded = false;
         let changeElements = [];
         let currentChangeIndex = -1;
+
+        const readSavedViewState = () => {
+            try {
+                return typeof vscode.getState === 'function' ? vscode.getState() : null;
+            } catch {
+                return null;
+            }
+        };
+        const initialSavedState = readSavedViewState();
+        const pendingRestoreState =
+            initialSavedState && typeof initialSavedState === 'object'
+                ? initialSavedState
+                : null;
+        let hasUserInteracted = false;
+        let isRestoringViewState = false;
+
+        const persistViewState = () => {
+            if (isRestoringViewState || typeof vscode.setState !== 'function') {
+                return;
+            }
+            const pane = activePane || (isInline ? rightPane : leftPane);
+            try {
+                vscode.setState({
+                    isInline,
+                    isFolded,
+                    activePaneId: pane ? pane.id : 'left-pane',
+                    scrollTop: pane ? pane.scrollTop : 0,
+                    scrollLeft: pane ? pane.scrollLeft : 0,
+                });
+            } catch {}
+        };
+
+        const applySavedScrollPosition = () => {
+            if (hasUserInteracted || !pendingRestoreState) {
+                return;
+            }
+            if (typeof pendingRestoreState.scrollTop !== 'number') {
+                return;
+            }
+            const targetPane =
+                pendingRestoreState.activePaneId === 'right-pane' || isInline
+                    ? rightPane
+                    : leftPane;
+            const otherPane = targetPane === leftPane ? rightPane : leftPane;
+            isRestoringViewState = true;
+            try {
+                const maxTop = Math.max(targetPane.scrollHeight - targetPane.clientHeight, 0);
+                targetPane.scrollTop = Math.min(Math.max(0, pendingRestoreState.scrollTop), maxTop);
+                if (typeof pendingRestoreState.scrollLeft === 'number') {
+                    const maxLeft = Math.max(targetPane.scrollWidth - targetPane.clientWidth, 0);
+                    targetPane.scrollLeft = Math.min(Math.max(0, pendingRestoreState.scrollLeft), maxLeft);
+                }
+                if (!isInline) {
+                    activePane = targetPane;
+                    syncScroll(targetPane, otherPane);
+                }
+            } finally {
+                isRestoringViewState = false;
+            }
+        };
 
         const toggleInline = () => {
             isInline = !isInline;
@@ -2513,6 +2575,7 @@ export function getWebviewContent(
             scheduleLayoutRefresh();
             updateOverviewRulerVisibility();
             updateBreadcrumbs(leftPane, leftBreadcrumbs);
+            persistViewState();
             updateBreadcrumbs(rightPane, rightBreadcrumbs);
         };
 
@@ -2585,6 +2648,7 @@ export function getWebviewContent(
                  statusMsg.textContent = '';
              }
                scheduleAsyncLayoutRefresh();
+              persistViewState();
         };
 
         function applyFolding(pane, enable, paneType) {
@@ -3265,6 +3329,7 @@ export function getWebviewContent(
                 stableFrames,
                 remainingFrames,
               });
+              applySavedScrollPosition();
               if (layoutRefreshQueued) {
                 layoutRefreshQueued = false;
                 stabilizeLayout();
@@ -3448,14 +3513,13 @@ export function getWebviewContent(
             const targetScrollTop = getGroupTargetScrollTop(groupMetrics, targetPane);
             targetPane.scrollTop = targetScrollTop;
 
-            // Sync the other pane proportionally to keep side-by-side aligned
+            // Sync the other pane using anchored block mapping to keep side-by-side aligned
             if (!isInline) {
                 const otherPane = targetPane === leftPane ? rightPane : leftPane;
-                const sourceMax = targetPane.scrollHeight - targetPane.clientHeight;
-                const otherMax = otherPane.scrollHeight - otherPane.clientHeight;
-                if (sourceMax > 0 && otherMax > 0) {
-                    const pct = targetPane.scrollTop / sourceMax;
-                    otherPane.scrollTop = pct * otherMax;
+                const mappedTop = mapPaneScrollTop(targetPane, otherPane, targetPane.scrollTop);
+                if (Math.abs(otherPane.scrollTop - mappedTop) > 0.5) {
+                    otherPane.scrollTop = mappedTop;
+                    markMirroredScroll(otherPane);
                 }
             }
 
@@ -3544,6 +3608,116 @@ export function getWebviewContent(
           return true;
         };
 
+        let cachedScrollAnchorKey = '';
+        let cachedScrollAnchors = [];
+
+        const getScrollAnchorPairs = () => {
+          const cacheKey = [
+            leftPane.scrollHeight,
+            rightPane.scrollHeight,
+            leftPane.clientWidth,
+            rightPane.clientWidth,
+          ].join(':');
+          if (cacheKey === cachedScrollAnchorKey) {
+            return cachedScrollAnchors;
+          }
+
+          const pairs = [];
+          const leftChildren = leftContent.children;
+          const rightChildren = rightContent.children;
+          const count = Math.min(leftChildren.length, rightChildren.length);
+
+          for (let i = 0; i < count; i++) {
+            const leftEl = leftChildren[i];
+            const rightEl = rightChildren[i];
+            if (leftEl.offsetHeight <= 0 || rightEl.offsetHeight <= 0) {
+              continue;
+            }
+            const leftTop = getRelativeTop(leftEl, leftPane);
+            const rightTop = getRelativeTop(rightEl, rightPane);
+            const leftHeight = leftEl.getBoundingClientRect().height;
+            const rightHeight = rightEl.getBoundingClientRect().height;
+            if (leftHeight <= 0 || rightHeight <= 0) {
+              continue;
+            }
+            pairs.push({
+              leftTop,
+              leftBottom: leftTop + leftHeight,
+              rightTop,
+              rightBottom: rightTop + rightHeight,
+            });
+          }
+
+          cachedScrollAnchorKey = cacheKey;
+          cachedScrollAnchors = pairs;
+          return pairs;
+        };
+
+        const mapPaneScrollTop = (sourcePane, targetPane, sourceScrollTop) => {
+          const sourceMax = sourcePane.scrollHeight - sourcePane.clientHeight;
+          const targetMax = targetPane.scrollHeight - targetPane.clientHeight;
+          if (sourceMax <= 0 || targetMax <= 0) {
+            return targetPane.scrollTop;
+          }
+          if (sourceScrollTop <= 2) {
+            return 0;
+          }
+          if (sourceScrollTop >= sourceMax - 2) {
+            return targetMax;
+          }
+
+          const anchors = getScrollAnchorPairs();
+          if (anchors.length === 0) {
+            const percentage = sourceScrollTop / sourceMax;
+            return percentage * targetMax;
+          }
+
+          const sourceIsLeft = sourcePane === leftPane;
+          const points = [{ s: 0, t: 0 }];
+          for (let i = 0; i < anchors.length; i++) {
+            const a = anchors[i];
+            const sTop = sourceIsLeft ? a.leftTop : a.rightTop;
+            const tTop = sourceIsLeft ? a.rightTop : a.leftTop;
+            const sBot = sourceIsLeft ? a.leftBottom : a.rightBottom;
+            const tBot = sourceIsLeft ? a.rightBottom : a.leftBottom;
+
+            const prev = points[points.length - 1];
+            if (sTop >= prev.s && tTop >= prev.t) {
+              points.push({ s: sTop, t: tTop });
+            }
+            const prev2 = points[points.length - 1];
+            if (sBot > prev2.s && tBot >= prev2.t) {
+              points.push({ s: sBot, t: tBot });
+            }
+          }
+          const last = points[points.length - 1];
+          if (sourceMax > last.s && targetMax >= last.t) {
+            points.push({ s: sourceMax, t: targetMax });
+          } else if (sourceMax >= last.s) {
+            points[points.length - 1] = { s: sourceMax, t: targetMax };
+          }
+
+          let lo = 0;
+          let hi = points.length - 2;
+          while (lo <= hi) {
+            const mid = (lo + hi) >> 1;
+            const p0 = points[mid];
+            const p1 = points[mid + 1];
+            if (sourceScrollTop < p0.s) {
+              hi = mid - 1;
+            } else if (sourceScrollTop > p1.s) {
+              lo = mid + 1;
+            } else {
+              const span = p1.s - p0.s;
+              const ratio = span > 0 ? (sourceScrollTop - p0.s) / span : 0;
+              return Math.min(Math.max(0, p0.t + ratio * (p1.t - p0.t)), targetMax);
+            }
+          }
+
+          const percentage = sourceScrollTop / sourceMax;
+          return percentage * targetMax;
+        };
+
         const syncScroll = (sourcePane, targetPane) => {
             // Only sync if the source is the one being actively scrolled by user
             if (!activePane) activePane = sourcePane; 
@@ -3564,16 +3738,11 @@ export function getWebviewContent(
               let shouldMarkTargetScroll = false;
 
               if (sourceMax > 0 && targetMax > 0) {
-                let targetScrollTop = targetPane.scrollTop;
-
-                if (sourcePane.scrollTop <= 2) {
-                  targetScrollTop = 0;
-                } else if (sourcePane.scrollTop >= sourceMax - 2) {
-                  targetScrollTop = targetMax;
-                } else {
-                  const percentage = sourcePane.scrollTop / sourceMax;
-                  targetScrollTop = percentage * targetMax;
-                }
+                const targetScrollTop = mapPaneScrollTop(
+                  sourcePane,
+                  targetPane,
+                  sourcePane.scrollTop,
+                );
 
                 if (Math.abs(targetPane.scrollTop - targetScrollTop) > 0.5) {
                   targetPane.scrollTop = targetScrollTop;
@@ -3770,12 +3939,23 @@ export function getWebviewContent(
         leftPane.addEventListener('wheel', () => setActive(leftPane), { passive: true });
         rightPane.addEventListener('wheel', () => setActive(rightPane), { passive: true });
 
+        const markUserInteraction = () => {
+            hasUserInteracted = true;
+        };
+        document.addEventListener('pointerdown', markUserInteraction, { passive: true });
+        document.addEventListener('wheel', markUserInteraction, { passive: true });
+        document.addEventListener('touchstart', markUserInteraction, { passive: true });
+        document.addEventListener('keydown', markUserInteraction);
+
         leftPane.addEventListener('scroll', () => {
              if (!isInline) {
               if (shouldIgnoreMirroredScroll(leftPane)) return;
               syncScroll(leftPane, rightPane);
              }
              updateBreadcrumbs(leftPane, leftBreadcrumbs);
+             if (hasUserInteracted || !pendingRestoreState) {
+              persistViewState();
+             }
         });
 
         rightPane.addEventListener('scroll', () => {
@@ -3784,6 +3964,9 @@ export function getWebviewContent(
               syncScroll(rightPane, leftPane);
              }
              updateBreadcrumbs(rightPane, rightBreadcrumbs);
+             if (hasUserInteracted || !pendingRestoreState) {
+              persistViewState();
+             }
         });
 
         // Double Click to Open Source (Whole File)
@@ -4216,10 +4399,26 @@ export function getWebviewContent(
             slider.oninput();
         }
 
-        // Initial cleanup
+        // Initial cleanup & restore persisted view state across refreshes
         cleanupGhosts();
         initImageDiffs();
-        ${defaultFoldUnchanged ? "toggleFold();" : ""}
+        isRestoringViewState = true;
+        try {
+            if (pendingRestoreState && typeof pendingRestoreState.isInline === 'boolean') {
+                if (pendingRestoreState.isInline !== isInline) {
+                    toggleInline();
+                }
+            }
+            if (pendingRestoreState && typeof pendingRestoreState.isFolded === 'boolean') {
+                if (pendingRestoreState.isFolded !== isFolded) {
+                    toggleFold();
+                }
+            } else if (${defaultFoldUnchanged ? "true" : "false"}) {
+                toggleFold();
+            }
+        } finally {
+            isRestoringViewState = false;
+        }
 
         // Listen for standard shortcut commands from Extension
         window.addEventListener('message', event => {
@@ -4720,6 +4919,7 @@ export function getWebviewContent(
       updateOverviewRulerVisibility();
       updateBreadcrumbs(leftPane, leftBreadcrumbs);
       updateBreadcrumbs(rightPane, rightBreadcrumbs);
+      applySavedScrollPosition();
 
       // IMMEDIATE SIGNAL FOR VRT (Ensure update-snapshots always proceeds)
       setTimeout(() => {

@@ -816,12 +816,12 @@ describe("MarkdownDiffProvider", () => {
     );
     assert.ok(
       webviewContent.includes("if (sourceMax > 0 && targetMax > 0) {") &&
-        webviewContent.includes(
-          "const percentage = sourcePane.scrollTop / sourceMax;",
-        ) &&
-        webviewContent.includes("targetScrollTop = percentage * targetMax;") &&
+        webviewContent.includes("const getScrollAnchorPairs = () => {") &&
+        webviewContent.includes("const mapPaneScrollTop = (sourcePane, targetPane, sourceScrollTop) => {") &&
+        webviewContent.includes("const percentage = sourceScrollTop / sourceMax;") &&
+        webviewContent.includes("return percentage * targetMax;") &&
         webviewContent.includes("let shouldMarkTargetScroll = false;"),
-      "Scroll sync should use percentage-based vertical mirroring during active scrolling and mark programmatic target updates for mirrored-event suppression",
+      "Scroll sync should use block-anchored piecewise mapping with percentage fallback and mark programmatic target updates for mirrored-event suppression",
     );
     assert.ok(
       !webviewContent.includes(
@@ -2062,6 +2062,44 @@ title: "Doc 1"
     assert.strictEqual(areHtmlTagsBalanced("<div></123></div>"), false, "Numeric tag name in closing tag is invalid");
     assert.strictEqual(areHtmlTagsBalanced("<div></></div>"), false, "Empty closing tag is invalid");
     assert.strictEqual(areHtmlTagsBalanced("<div></div_invalid></div>"), false, "Invalid identifier in closing tag");
+  });
+
+  it("should persist and restore webview view mode, folding, and scroll position across refreshes", () => {
+    const provider = new MarkdownDiffProvider();
+    const html = provider.getWebviewContent(
+      "<p>Hello</p>",
+      "",
+      "",
+      "",
+      "",
+      "Old",
+      "New",
+      "https://example.invalid",
+      {},
+      undefined,
+      undefined,
+      undefined,
+      true,
+      true,
+      500,
+      "",
+      "",
+      "inline",
+      false,
+    );
+
+    assert.ok(
+      html.includes("let isInline = document.body.classList.contains('inline-mode');"),
+      "isInline should initialize from body.inline-mode class",
+    );
+    assert.ok(
+      html.includes("vscode.getState") && html.includes("vscode.setState"),
+      "Webview should persist and restore state using vscode.getState/setState",
+    );
+    assert.ok(
+      html.includes("applySavedScrollPosition"),
+      "Webview should restore scroll position on initial load and layout stabilization",
+    );
   });
 });
 

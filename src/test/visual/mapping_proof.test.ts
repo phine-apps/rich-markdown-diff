@@ -97,6 +97,14 @@ test('mapping accuracy and scroll sync proof', async ({ page }) => {
     await expect(overlay).toContainText('Image Test');
     await expect(overlay).toContainText('Line:');
 
-    // Take a small screenshot of the overlay region instead of fullPage
-    await overlay.screenshot({ path: 'test-results/proof_overlay_success.png' });
+    // Take a small screenshot of the overlay region instead of fullPage.
+    // Use boundingBox + page.screenshot({ clip }) to avoid locator.screenshot()
+    // hanging on scrollIntoView/stability checks for position:fixed overlays.
+    const box = await overlay.boundingBox();
+    expect(box).not.toBeNull();
+    await page.screenshot({
+      path: 'test-results/proof_overlay_success.png',
+      clip: box!,
+      animations: 'disabled',
+    });
 });
