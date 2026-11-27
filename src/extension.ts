@@ -428,6 +428,21 @@ async function readDocumentText(uri?: vscode.Uri): Promise<string> {
     return "";
   }
 
+  if (uri.scheme === "file") {
+    const openDoc = vscode.workspace.textDocuments.find(
+      (doc) => doc.uri.toString() === uri.toString(),
+    );
+    if (openDoc && openDoc.isDirty) {
+      return openDoc.getText();
+    }
+    try {
+      const bytes = await vscode.workspace.fs.readFile(uri);
+      return new TextDecoder("utf-8").decode(bytes);
+    } catch {
+      // Fall back to openTextDocument if direct disk read fails
+    }
+  }
+
   try {
     const document = await vscode.workspace.openTextDocument(uri);
     return document.getText();
@@ -914,10 +929,49 @@ async function bindDiffPanel(
   let currentState: DiffPanelState | undefined;
   let repositorySubscription: vscode.Disposable | undefined;
   let currentRepository: GitRepository | undefined;
+  let fileWatcherDisposables: vscode.Disposable[] = [];
+  let watchedFileKey = "";
   let isDisposed = false;
   let isUpdating = false;
   let queuedTrigger: DiffPanelUpdateTrigger | undefined;
   let lastContentKey: string | undefined;
+
+  const disposeFileWatchers = () => {
+    for (const d of fileWatcherDisposables) {
+      d.dispose();
+    }
+    fileWatcherDisposables = [];
+    watchedFileKey = "";
+  };
+
+  const syncFileWatchers = (watchUris: readonly vscode.Uri[]) => {
+    const fileUris = watchUris.filter((uri) => uri.scheme === "file");
+    const nextKey = fileUris
+      .map((uri) => uri.fsPath)
+      .sort()
+      .join("\0");
+    if (nextKey === watchedFileKey) {
+      return;
+    }
+    disposeFileWatchers();
+    watchedFileKey = nextKey;
+
+    for (const uri of fileUris) {
+      const dirUri = vscode.Uri.file(path.dirname(uri.fsPath));
+      const pattern = new vscode.RelativePattern(
+        dirUri,
+        path.basename(uri.fsPath),
+      );
+      const watcher = vscode.workspace.createFileSystemWatcher(pattern);
+      const onDiskChange = () => scheduleUpdate("document");
+      fileWatcherDisposables.push(
+        watcher,
+        watcher.onDidChange(onDiskChange),
+        watcher.onDidCreate(onDiskChange),
+        watcher.onDidDelete(onDiskChange),
+      );
+    }
+  };
 
   const scheduleUpdate = (trigger: DiffPanelUpdateTrigger) => {
     if (timeout) {
@@ -972,6 +1026,7 @@ async function bindDiffPanel(
       }
 
       currentState = nextState;
+      syncFileWatchers(nextState.watchUris);
 
       if (currentRepository !== nextState.repository) {
         repositorySubscription?.dispose();
@@ -1048,6 +1103,7 @@ async function bindDiffPanel(
     documentSubscription.dispose();
     configSubscription.dispose();
     repositorySubscription?.dispose();
+    disposeFileWatchers();
     if (timeout) {
       clearTimeout(timeout);
     }
