@@ -2063,5 +2063,43 @@ title: "Doc 1"
     assert.strictEqual(areHtmlTagsBalanced("<div></></div>"), false, "Empty closing tag is invalid");
     assert.strictEqual(areHtmlTagsBalanced("<div></div_invalid></div>"), false, "Invalid identifier in closing tag");
   });
+
+  it("should persist and restore webview view mode, folding, and scroll position across refreshes", () => {
+    const provider = new MarkdownDiffProvider();
+    const html = provider.getWebviewContent(
+      "<p>Hello</p>",
+      "",
+      "",
+      "",
+      "",
+      "Old",
+      "New",
+      "https://example.invalid",
+      {},
+      undefined,
+      undefined,
+      undefined,
+      true,
+      true,
+      500,
+      "",
+      "",
+      "inline",
+      false,
+    );
+
+    assert.ok(
+      html.includes("let isInline = document.body.classList.contains('inline-mode');"),
+      "isInline should initialize from body.inline-mode class",
+    );
+    assert.ok(
+      html.includes("vscode.getState") && html.includes("vscode.setState"),
+      "Webview should persist and restore state using vscode.getState/setState",
+    );
+    assert.ok(
+      html.includes("applySavedScrollPosition"),
+      "Webview should restore scroll position on initial load and layout stabilization",
+    );
+  });
 });
 

@@ -2259,7 +2259,9 @@ export function getWebviewContent(
     <div class="overview-ruler" id="right-overview-ruler"></div>
     ${showGitBlame ? '<div id="blame-tooltip" class="blame-tooltip"></div>' : ''}
     <script nonce="${nonce}">
-        const vscode = typeof acquireVsCodeApi !== 'undefined' ? acquireVsCodeApi() : { postMessage: () => {} };
+        const vscode = typeof acquireVsCodeApi !== 'undefined'
+            ? acquireVsCodeApi()
+            : { postMessage: () => {}, getState: () => null, setState: () => {} };
         window.vscode = vscode;
     </script>
     <script nonce="${nonce}">
@@ -2486,10 +2488,70 @@ export function getWebviewContent(
           emitRuntimeDiagnostics('unhandled-rejection', reason, { force: true });
         });
 
-        let isInline = false;
+        let isInline = document.body.classList.contains('inline-mode');
         let isFolded = false;
         let changeElements = [];
         let currentChangeIndex = -1;
+
+        const readSavedViewState = () => {
+            try {
+                return typeof vscode.getState === 'function' ? vscode.getState() : null;
+            } catch {
+                return null;
+            }
+        };
+        const initialSavedState = readSavedViewState();
+        const pendingRestoreState =
+            initialSavedState && typeof initialSavedState === 'object'
+                ? initialSavedState
+                : null;
+        let hasUserInteracted = false;
+        let isRestoringViewState = false;
+
+        const persistViewState = () => {
+            if (isRestoringViewState || typeof vscode.setState !== 'function') {
+                return;
+            }
+            const pane = activePane || (isInline ? rightPane : leftPane);
+            try {
+                vscode.setState({
+                    isInline,
+                    isFolded,
+                    activePaneId: pane ? pane.id : 'left-pane',
+                    scrollTop: pane ? pane.scrollTop : 0,
+                    scrollLeft: pane ? pane.scrollLeft : 0,
+                });
+            } catch {}
+        };
+
+        const applySavedScrollPosition = () => {
+            if (hasUserInteracted || !pendingRestoreState) {
+                return;
+            }
+            if (typeof pendingRestoreState.scrollTop !== 'number') {
+                return;
+            }
+            const targetPane =
+                pendingRestoreState.activePaneId === 'right-pane' || isInline
+                    ? rightPane
+                    : leftPane;
+            const otherPane = targetPane === leftPane ? rightPane : leftPane;
+            isRestoringViewState = true;
+            try {
+                const maxTop = Math.max(targetPane.scrollHeight - targetPane.clientHeight, 0);
+                targetPane.scrollTop = Math.min(Math.max(0, pendingRestoreState.scrollTop), maxTop);
+                if (typeof pendingRestoreState.scrollLeft === 'number') {
+                    const maxLeft = Math.max(targetPane.scrollWidth - targetPane.clientWidth, 0);
+                    targetPane.scrollLeft = Math.min(Math.max(0, pendingRestoreState.scrollLeft), maxLeft);
+                }
+                if (!isInline) {
+                    activePane = targetPane;
+                    syncScroll(targetPane, otherPane);
+                }
+            } finally {
+                isRestoringViewState = false;
+            }
+        };
 
         const toggleInline = () => {
             isInline = !isInline;
@@ -2513,6 +2575,7 @@ export function getWebviewContent(
             scheduleLayoutRefresh();
             updateOverviewRulerVisibility();
             updateBreadcrumbs(leftPane, leftBreadcrumbs);
+            persistViewState();
             updateBreadcrumbs(rightPane, rightBreadcrumbs);
         };
 
@@ -2585,6 +2648,7 @@ export function getWebviewContent(
                  statusMsg.textContent = '';
              }
                scheduleAsyncLayoutRefresh();
+              persistViewState();
         };
 
         function applyFolding(pane, enable, paneType) {
@@ -3265,6 +3329,7 @@ export function getWebviewContent(
                 stableFrames,
                 remainingFrames,
               });
+              applySavedScrollPosition();
               if (layoutRefreshQueued) {
                 layoutRefreshQueued = false;
                 stabilizeLayout();
@@ -3770,12 +3835,23 @@ export function getWebviewContent(
         leftPane.addEventListener('wheel', () => setActive(leftPane), { passive: true });
         rightPane.addEventListener('wheel', () => setActive(rightPane), { passive: true });
 
+        const markUserInteraction = () => {
+            hasUserInteracted = true;
+        };
+        document.addEventListener('pointerdown', markUserInteraction, { passive: true });
+        document.addEventListener('wheel', markUserInteraction, { passive: true });
+        document.addEventListener('touchstart', markUserInteraction, { passive: true });
+        document.addEventListener('keydown', markUserInteraction);
+
         leftPane.addEventListener('scroll', () => {
              if (!isInline) {
               if (shouldIgnoreMirroredScroll(leftPane)) return;
               syncScroll(leftPane, rightPane);
              }
              updateBreadcrumbs(leftPane, leftBreadcrumbs);
+             if (hasUserInteracted || !pendingRestoreState) {
+              persistViewState();
+             }
         });
 
         rightPane.addEventListener('scroll', () => {
@@ -3784,6 +3860,9 @@ export function getWebviewContent(
               syncScroll(rightPane, leftPane);
              }
              updateBreadcrumbs(rightPane, rightBreadcrumbs);
+             if (hasUserInteracted || !pendingRestoreState) {
+              persistViewState();
+             }
         });
 
         // Double Click to Open Source (Whole File)
@@ -4216,10 +4295,26 @@ export function getWebviewContent(
             slider.oninput();
         }
 
-        // Initial cleanup
+        // Initial cleanup & restore persisted view state across refreshes
         cleanupGhosts();
         initImageDiffs();
-        ${defaultFoldUnchanged ? "toggleFold();" : ""}
+        isRestoringViewState = true;
+        try {
+            if (pendingRestoreState && typeof pendingRestoreState.isInline === 'boolean') {
+                if (pendingRestoreState.isInline !== isInline) {
+                    toggleInline();
+                }
+            }
+            if (pendingRestoreState && typeof pendingRestoreState.isFolded === 'boolean') {
+                if (pendingRestoreState.isFolded !== isFolded) {
+                    toggleFold();
+                }
+            } else if (${defaultFoldUnchanged ? "true" : "false"}) {
+                toggleFold();
+            }
+        } finally {
+            isRestoringViewState = false;
+        }
 
         // Listen for standard shortcut commands from Extension
         window.addEventListener('message', event => {
@@ -4720,6 +4815,7 @@ export function getWebviewContent(
       updateOverviewRulerVisibility();
       updateBreadcrumbs(leftPane, leftBreadcrumbs);
       updateBreadcrumbs(rightPane, rightBreadcrumbs);
+      applySavedScrollPosition();
 
       // IMMEDIATE SIGNAL FOR VRT (Ensure update-snapshots always proceeds)
       setTimeout(() => {

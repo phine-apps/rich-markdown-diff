@@ -52,7 +52,7 @@ test.describe("Visual Regression Tests", () => {
 
   for (const c of cases) {
     test(`Visual Diff: ${c.name} - ${c.suffix}`, async ({ page }) => {
-      if (c.name === "comprehensive-v1-v2") {
+      if (c.name.startsWith("comprehensive")) {
         test.setTimeout(180000);
       }
 
@@ -96,6 +96,13 @@ test.describe("Visual Regression Tests", () => {
             stableFrames = 0;
           }
         }
+        // Lock settled height in integer pixels so fullPage stitching cannot
+        // oscillate by 1px between consecutive stability-check screenshots.
+        const settledHeight = Math.ceil(document.documentElement.scrollHeight);
+        if (settledHeight > 0) {
+          document.documentElement.style.setProperty("height", `${settledHeight}px`, "important");
+          document.body.style.setProperty("height", `${settledHeight}px`, "important");
+        }
       });
 
       // Systemic check: Save the rendered HTML to a file for objective inspection
@@ -112,7 +119,7 @@ test.describe("Visual Regression Tests", () => {
         }
       }
 
-      const screenshotTimeout = c.name === "comprehensive-v1-v2" ? 120000 : 30000;
+      const screenshotTimeout = c.name.startsWith("comprehensive") ? 120000 : 30000;
       await expect(page).toHaveScreenshot(`${c.name}-${c.suffix}.png`, {
         maxDiffPixelRatio: 0.1,
         fullPage: true,
