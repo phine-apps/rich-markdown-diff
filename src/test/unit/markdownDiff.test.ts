@@ -24,7 +24,11 @@
 
 import * as assert from "assert";
 import { MarkdownDiffProvider } from "../../markdownDiff";
-import { areHtmlTagsBalanced, stripHtmlTags } from "../../markdown/domUtils";
+import {
+  areHtmlTagsBalanced,
+  findClosing,
+  stripHtmlTags,
+} from "../../markdown/domUtils";
 import {
   splitBySections,
   checkIfAllContentIsWrapped,
@@ -2100,6 +2104,46 @@ title: "Doc 1"
       html.includes("applySavedScrollPosition"),
       "Webview should restore scroll position on initial load and layout stabilization",
     );
+  });
+
+  it("should handle quick-edit double-click, CSS-escaped anchors, and safe link navigation in webview", () => {
+    const provider = new MarkdownDiffProvider();
+    const html = provider.getWebviewContent(
+      '<p><a href="#fn1">1</a> <a href="guide.md#L10">guide</a></p>',
+      "",
+      "",
+      "",
+      "",
+      "Old",
+      "New",
+      "https://example.invalid",
+      {},
+    );
+
+    assert.ok(
+      html.includes("lastQuickEditStart") && html.includes("BlockEditor.close()"),
+      "Double-click right after single-click Quick Edit should close the overlay and open source",
+    );
+    assert.ok(
+      html.includes("CSS.escape") && html.includes("jumpToPaneAnchor"),
+      "Anchor jump should escape selector values using CSS.escape",
+    );
+    assert.ok(
+      html.includes("command: 'openLink'"),
+      "Non-anchor links should post openLink to the extension host",
+    );
+
+    const vm = require("vm");
+    const scriptOpenRe = /<script\b[^>]*>/gi;
+    let openMatch: RegExpExecArray | null;
+    while ((openMatch = scriptOpenRe.exec(html)) !== null) {
+      const openEnd = openMatch.index + openMatch[0].length;
+      const closeEnd = findClosing(html, openMatch.index, "script");
+      assert.ok(closeEnd !== -1, "Every <script> tag must have a matching closing tag");
+      const closeStart = html.lastIndexOf("<", closeEnd - 1);
+      new vm.Script(html.slice(openEnd, closeStart));
+      scriptOpenRe.lastIndex = closeEnd;
+    }
   });
 });
 
