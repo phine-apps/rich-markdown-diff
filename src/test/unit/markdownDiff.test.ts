@@ -816,12 +816,12 @@ describe("MarkdownDiffProvider", () => {
     );
     assert.ok(
       webviewContent.includes("if (sourceMax > 0 && targetMax > 0) {") &&
-        webviewContent.includes(
-          "const percentage = sourcePane.scrollTop / sourceMax;",
-        ) &&
-        webviewContent.includes("targetScrollTop = percentage * targetMax;") &&
+        webviewContent.includes("const getScrollAnchorPairs = () => {") &&
+        webviewContent.includes("const mapPaneScrollTop = (sourcePane, targetPane, sourceScrollTop) => {") &&
+        webviewContent.includes("const percentage = sourceScrollTop / sourceMax;") &&
+        webviewContent.includes("return percentage * targetMax;") &&
         webviewContent.includes("let shouldMarkTargetScroll = false;"),
-      "Scroll sync should use percentage-based vertical mirroring during active scrolling and mark programmatic target updates for mirrored-event suppression",
+      "Scroll sync should use block-anchored piecewise mapping with percentage fallback and mark programmatic target updates for mirrored-event suppression",
     );
     assert.ok(
       !webviewContent.includes(
