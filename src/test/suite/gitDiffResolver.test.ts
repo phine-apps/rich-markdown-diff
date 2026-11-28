@@ -88,6 +88,22 @@ describe("Git Diff Resolver", () => {
     );
   });
 
+  it("should infer index hint when originalRef is HEAD and modifiedUri is undefined (M-1)", () => {
+    const originalUri = fileUri.with({
+      scheme: "git",
+      query: JSON.stringify({ path: fileUri.fsPath, ref: "HEAD" }),
+    });
+
+    assert.strictEqual(
+      getComparisonHintFromUris(originalUri, undefined),
+      "index",
+    );
+    assert.strictEqual(
+      getComparisonHintFromUris(originalUri, fileUri),
+      "workingTree",
+    );
+  });
+
   it("should resolve mixed staged and unstaged changes to working tree versus index", async () => {
     const repository = new FakeRepository({
       HEAD: { name: "main" },

@@ -282,5 +282,44 @@ Paragraph after cards.`;
       "Generic type with comma should remain escaped text",
     );
   });
+
+  it("should ignore closing MDX tags inside fenced code blocks (M-10)", () => {
+    const doc = [
+      '<Card title="Outer">',
+      "```html",
+      "</Card>",
+      "```",
+      "Still inside Card.",
+      "</Card>",
+      "",
+      "Outside paragraph.",
+    ].join("\n");
+    const result = provider.computeDiff(doc, doc);
+    const stillInsidePos = result.html.indexOf("Still inside Card.");
+    const outsidePos = result.html.indexOf("Outside paragraph.");
+    const cardBodyEnd = result.html.indexOf("</div>", stillInsidePos);
+    assert.ok(stillInsidePos > 0);
+    assert.ok(cardBodyEnd > stillInsidePos && cardBodyEnd < outsidePos);
+  });
+
+  it("should support nested Docusaurus admonitions without premature closure (M-10)", () => {
+    const doc = [
+      ":::note Outer Note",
+      "Outer before",
+      "",
+      ":::tip Inner Tip",
+      "Inner body",
+      ":::",
+      "",
+      "Outer after",
+      ":::",
+    ].join("\n");
+    const result = provider.computeDiff(doc, doc);
+    assert.ok(result.html.includes("mdx-admonition-note"));
+    assert.ok(result.html.includes("mdx-admonition-tip"));
+    const outerAfterPos = result.html.indexOf("Outer after");
+    const tipPos = result.html.indexOf("mdx-admonition-tip");
+    assert.ok(outerAfterPos > tipPos, "Outer after must stay inside outer admonition");
+  });
 });
 

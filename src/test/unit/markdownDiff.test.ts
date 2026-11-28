@@ -23,7 +23,7 @@
  */
 
 import * as assert from "assert";
-import { MarkdownDiffProvider } from "../../markdownDiff";
+import { MarkdownDiffProvider, wrapTablesForScrolling } from "../../markdownDiff";
 import {
   areHtmlTagsBalanced,
   findClosing,
@@ -2182,6 +2182,44 @@ title: "Doc 1"
     assert.ok(
       html.includes('data-line="44"'),
       `Expected data-line="44" for second block when newLineOffset=42, got: ${html}`,
+    );
+  });
+
+  it("does not cross <ins>/<del> tags when wrapTablesForScrolling wraps a table followed by sibling elements (M-4)", () => {
+    const html = "<ins><table><tbody><tr><td>Cell</td></tr></tbody></table><p>Trailing</p></ins>";
+    const wrapped = wrapTablesForScrolling(html);
+    assert.strictEqual(
+      areHtmlTagsBalanced(wrapped),
+      true,
+      `Tags must remain balanced, got: ${wrapped}`,
+    );
+    assert.ok(
+      wrapped.startsWith('<ins><div class="table-block-wrapper"><div class="table-scroll"><table>'),
+      `Expected <ins> to remain outside .table-block-wrapper, got: ${wrapped}`,
+    );
+  });
+
+  it("handles YAML frontmatter with circular anchor/alias references without crashing (M-4)", () => {
+    const oldMd = "---\ntitle: Before\n---\nBody";
+    const newMd = "---\nnode: &self\n  ref: *self\ntitle: After\n---\nBody";
+    const { html, hasDiff } = provider.computeDiff(oldMd, newMd);
+    assert.strictEqual(hasDiff, true);
+    assert.ok(html.includes("[Circular]"), "Circular frontmatter value should serialize safely");
+  });
+
+  it("keeps blame tooltip inside viewport, syncs Marp scroll safely, and prefixes # on Obsidian tags (M-9)", () => {
+    const html = provider.getWebviewContent("<p>Test</p>", "", "", "", "");
+    assert.ok(
+      html.includes("Math.max(8, Math.min(window.innerWidth - 300, e.clientX + 15))"),
+      "Tooltip X position should be clamped to >= 8px",
+    );
+    assert.ok(
+      html.includes("targetPane.scrollTop = desiredScrollTop;\n                    markMirroredScroll(targetPane);"),
+      "syncScrollMarp should mark mirrored scroll on targetPane",
+    );
+    assert.ok(
+      html.includes("tag: tag.startsWith('#') ? tag : '#' + tag"),
+      "Obsidian tag click handler should ensure # prefix",
     );
   });
 });

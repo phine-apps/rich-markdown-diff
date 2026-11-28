@@ -504,5 +504,14 @@ describe("MarkdownDiffProvider - Edge Cases", () => {
         `Expected data-diff-label="Mermaid Diagram", got: ${labeled}`,
       );
     });
+
+    it("runs findClosing in linear time on repeated unclosed quotes in other tags (M-11)", () => {
+      const payload = "<div>" + '<a " '.repeat(10000);
+      const start = Date.now();
+      const result = findClosing(payload, 0, "div");
+      const elapsed = Date.now() - start;
+      assert.strictEqual(result, -1);
+      assert.ok(elapsed < 100, `findClosing took ${elapsed}ms (expected < 100ms, linear time)`);
+    });
   });
 });

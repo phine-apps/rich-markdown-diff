@@ -119,7 +119,7 @@ function obsidianPlugin(md: MarkdownIt, _options: ObsidianOptions = {}) {
         ];
         token.children = [];
       } else {
-        const token = state.push("obsidian_embed", "div", 0);
+        const token = state.push("obsidian_embed", "span", 0);
         token.attrs = [
             ["class", "obsidian-embed"],
             ["data-page", pageName]
@@ -146,10 +146,7 @@ function obsidianPlugin(md: MarkdownIt, _options: ObsidianOptions = {}) {
     const token = tokens[idx];
     const pageName = token.attrGet("data-page") || "";
     const escapedPageName = md.utils.escapeHtml(pageName);
-    return `<div class="obsidian-embed" data-page="${escapedPageName}">
-        <span class="obsidian-embed-icon">📄</span>
-        <span class="obsidian-embed-link">${escapedPageName}</span>
-    </div>`;
+    return `<span class="obsidian-embed" data-page="${escapedPageName}"><span class="obsidian-embed-icon">📄</span><span class="obsidian-embed-link">${escapedPageName}</span></span>`;
   };
 }
 

@@ -177,6 +177,24 @@ function resolveWithRealpathSync(targetPath: string): string | undefined {
 }
 
 /**
+ * Checks whether `targetPath` lies within (or equals) `rootPath` without
+ * rejecting legitimate filenames starting with `..` (e.g., `..notes.md`).
+ */
+export function isRelativeWithinRoot(
+  rootPath: string,
+  targetPath: string,
+): boolean {
+  const rel = path.relative(rootPath, targetPath);
+  return (
+    rel !== ".." &&
+    !rel.startsWith(`..${path.sep}`) &&
+    !rel.startsWith("../") &&
+    !rel.startsWith("..\\") &&
+    !path.isAbsolute(rel)
+  );
+}
+
+/**
  * Verifies that a local filesystem path stays strictly within at least one
  * allowed root directory (prevents local file exfiltration via path traversal
  * or symbolic links).
@@ -197,8 +215,7 @@ export function isPathWithinAllowedRoots(
     if (!resolvedRoot) {
       return false;
     }
-    const rel = path.relative(resolvedRoot, resolvedTarget);
-    return !rel.startsWith("..") && !path.isAbsolute(rel);
+    return isRelativeWithinRoot(resolvedRoot, resolvedTarget);
   });
 }
 

@@ -298,5 +298,28 @@ describe("Export HTML Module", () => {
         fs.rmSync(tmpBase, { recursive: true, force: true });
       }
     });
+
+    it("should allow legitimate filenames starting with '..' inside allowedRoots (M-2)", () => {
+      const tmpBase = fs.mkdtempSync(path.join(os.tmpdir(), "rmd-dotdot-test-"));
+      try {
+        const workspaceDir = path.join(tmpBase, "workspace");
+        fs.mkdirSync(workspaceDir);
+        const dotDotFile = path.join(workspaceDir, "..notes.md");
+        fs.writeFileSync(dotDotFile, "# Notes", "utf8");
+
+        assert.strictEqual(
+          isPathWithinAllowedRoots(dotDotFile, [workspaceDir]),
+          true,
+          "Filename starting with '..' inside root must be allowed",
+        );
+        assert.strictEqual(
+          isPathWithinAllowedRoots(path.join(tmpBase, "outside.md"), [workspaceDir]),
+          false,
+          "File outside root must still be rejected",
+        );
+      } finally {
+        fs.rmSync(tmpBase, { recursive: true, force: true });
+      }
+    });
   });
 });

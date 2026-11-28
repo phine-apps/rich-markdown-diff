@@ -447,5 +447,60 @@ graph TD
       `parseMermaidEdges took ${elapsed}ms on 10,000 spaces (expected < 200ms, linear time)`,
     );
   });
+
+  it("should strip dotted inline labels containing digits/punctuation without phantom nodes (M-3)", () => {
+    const code = `
+      graph TD
+        A -. step 1 .-> B
+        B -. v1.2 .-> C
+    `;
+    const nodes = parseMermaidNodes(code);
+    assert.strictEqual(nodes.size, 3);
+    assert.ok(!nodes.has("step"));
+    assert.ok(!nodes.has("1"));
+    assert.ok(!nodes.has("v1"));
+
+    const edges = parseMermaidEdges(code);
+    assert.strictEqual(edges.length, 2);
+    assert.strictEqual(edges[0].label, "step 1");
+    assert.strictEqual(edges[1].label, "v1.2");
+  });
+
+  it("should rewind chain notation accurately even when intermediate nodes have class attachments (M-3)", () => {
+    const code = `
+      graph LR
+        A --> B:::cls --> C:::cls2 --> D
+    `;
+    const edges = parseMermaidEdges(code);
+    assert.strictEqual(edges.length, 3);
+    assert.deepStrictEqual(
+      edges.map((e) => [e.from, e.to]),
+      [["A", "B"], ["B", "C"], ["C", "D"]],
+    );
+  });
+
+  it("should keep linkStyle indices aligned with '&' and '~~~' and detect edge label changes (M-3)", () => {
+    const oldCode = `
+      graph TD
+        A & B --> C
+        C ~~~ D
+        D -->|old| E
+    `;
+    const newCode = `
+      graph TD
+        A & B --> C
+        C ~~~ D
+        D -->|new| E
+        E --> F
+    `;
+    const edges = parseMermaidEdges(newCode);
+    assert.strictEqual(edges.length, 5);
+
+    const { oldMermaid, newMermaid } = computeMermaidDiffPair(oldCode, newCode);
+    assert.ok(oldMermaid.includes("linkStyle 3 stroke:#f59e0b"), `Expected modified edge at linkStyle 3 in oldMermaid, got:\n${oldMermaid}`);
+    assert.ok(newMermaid.includes("linkStyle 3 stroke:#f59e0b"), `Expected modified edge at linkStyle 3 in newMermaid, got:\n${newMermaid}`);
+    assert.ok(newMermaid.includes("linkStyle 4 stroke:#22c55e"), `Expected added edge at linkStyle 4 in newMermaid, got:\n${newMermaid}`);
+    assert.ok(!newMermaid.includes("linkStyle 2"), "Invisible link ~~~ must not be styled when unchanged");
+  });
 });
 

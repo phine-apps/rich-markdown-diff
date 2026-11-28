@@ -61,6 +61,7 @@ export function diffTables(
 
   // 2. Align Rows by content similarity or index
   const rowMapping = alignRows(oldTable.rows, newTable.rows);
+  const footerMapping = alignRows(oldTable.footerRows, newTable.footerRows);
 
   // 3. Generate Merged Table
   return renderMergedTable(
@@ -69,6 +70,7 @@ export function diffTables(
     colMapping,
     rowMapping,
     execute,
+    footerMapping,
   );
 }
 
@@ -80,7 +82,11 @@ export function parseTable(html: string) {
     cells: { html: string; attrs: string; tag: string }[];
     attrs: string;
   }[] = [];
-  const headers: { html: string; attrs: string }[] = [];
+  const footerRows: {
+    cells: { html: string; attrs: string; tag: string }[];
+    attrs: string;
+  }[] = [];
+  const headers: { html: string; attrs: string; tag?: string }[] = [];
 
   const getInner = (h: string, tag: string) => {
     let openTagEnd = -1;
@@ -112,76 +118,26 @@ export function parseTable(html: string) {
     };
   };
 
-  // Extract thead
-  const theadStart = html.search(/<thead/i);
-  if (theadStart !== -1) {
-    const theadEnd = findClosing(html, theadStart, "thead");
-    if (theadEnd !== -1) {
-      const theadFull = html.substring(theadStart, theadEnd);
-      let trStartMatch;
-      const trRegex = /<tr\b[^>]*>/gi;
-      trRegex.lastIndex = 0;
-      while ((trStartMatch = trRegex.exec(theadFull)) !== null) {
-        const absoluteTrStart = trStartMatch.index;
-        const trEnd = findClosing(theadFull, absoluteTrStart, "tr");
-        if (trEnd === -1) {
-          trRegex.lastIndex = absoluteTrStart + 4;
-          continue;
-        }
-
-        const trFull = theadFull.substring(absoluteTrStart, trEnd);
-        const thRegex = /<th\b[^>]*>/gi;
-        thRegex.lastIndex = 0;
-        let thStartMatch;
-        while ((thStartMatch = thRegex.exec(trFull)) !== null) {
-          const absoluteThStart = thStartMatch.index;
-          const thEnd = findClosing(trFull, absoluteThStart, "th");
-          if (thEnd === -1) {
-            thRegex.lastIndex = absoluteThStart + 4;
-            continue;
-          }
-
-          const thFull = trFull.substring(absoluteThStart, thEnd);
-          const info = getInner(thFull, "th");
-          if (info) {
-            headers.push({ html: info.content, attrs: info.attrs });
-          }
-          thRegex.lastIndex = thEnd;
-        }
-        trRegex.lastIndex = trEnd;
-      }
-    }
-  }
-
-  // Extract tbody (support multiple tbodies)
-  const tbodySearchRegex = /<tbody/gi;
-  tbodySearchRegex.lastIndex = 0;
-  let tbodySearchMatch;
-  while ((tbodySearchMatch = tbodySearchRegex.exec(html)) !== null) {
-    const absoluteTbodyStart = tbodySearchMatch.index;
-    const tbodyEnd = findClosing(html, absoluteTbodyStart, "tbody");
-    if (tbodyEnd === -1) {
-      tbodySearchRegex.lastIndex = absoluteTbodyStart + 6;
-      continue;
-    }
-
-    const tbodyFull = html.substring(absoluteTbodyStart, tbodyEnd);
-    const trRegex2 = /<tr\b[^>]*>/gi;
-    trRegex2.lastIndex = 0;
+  const extractRows = (sectionHtml: string) => {
+    const extracted: {
+      cells: { html: string; attrs: string; tag: string }[];
+      attrs: string;
+    }[] = [];
+    const trRegex = /<tr\b[^>]*>/gi;
+    trRegex.lastIndex = 0;
     let trStartMatch;
-    while ((trStartMatch = trRegex2.exec(tbodyFull)) !== null) {
+    while ((trStartMatch = trRegex.exec(sectionHtml)) !== null) {
       const absoluteTrStart = trStartMatch.index;
-      const trEnd = findClosing(tbodyFull, absoluteTrStart, "tr");
+      const trEnd = findClosing(sectionHtml, absoluteTrStart, "tr");
       if (trEnd === -1) {
-        trRegex2.lastIndex = absoluteTrStart + 4;
+        trRegex.lastIndex = absoluteTrStart + 4;
         continue;
       }
 
-      const trFull = tbodyFull.substring(absoluteTrStart, trEnd);
+      const trFull = sectionHtml.substring(absoluteTrStart, trEnd);
       const trAttrs = trStartMatch[0].match(/<tr([^>]*)>/i)?.[1] || "";
       const cells: { html: string; attrs: string; tag: string }[] = [];
 
-      // Extract cells (td/th) inside this tr
       const cellRegex = /<(td|th)\b[^>]*>/gi;
       cellRegex.lastIndex = 0;
       let cellStartMatch;
@@ -202,56 +158,84 @@ export function parseTable(html: string) {
         cellRegex.lastIndex = cellEnd;
       }
 
-      rows.push({ cells, attrs: trAttrs });
-      trRegex2.lastIndex = trEnd;
+      extracted.push({ cells, attrs: trAttrs });
+      trRegex.lastIndex = trEnd;
     }
+    return extracted;
+  };
+
+  // Extract thead (supports both <th> and <td> cells)
+  const theadStart = html.search(/<thead/i);
+  if (theadStart !== -1) {
+    const theadEnd = findClosing(html, theadStart, "thead");
+    if (theadEnd !== -1) {
+      const theadFull = html.substring(theadStart, theadEnd);
+      const theadRows = extractRows(theadFull);
+      for (const row of theadRows) {
+        for (const cell of row.cells) {
+          headers.push({ html: cell.html, attrs: cell.attrs, tag: cell.tag });
+        }
+      }
+    }
+  }
+
+  // Extract tbody (support multiple tbodies)
+  const tbodySearchRegex = /<tbody/gi;
+  tbodySearchRegex.lastIndex = 0;
+  let tbodySearchMatch;
+  while ((tbodySearchMatch = tbodySearchRegex.exec(html)) !== null) {
+    const absoluteTbodyStart = tbodySearchMatch.index;
+    const tbodyEnd = findClosing(html, absoluteTbodyStart, "tbody");
+    if (tbodyEnd === -1) {
+      tbodySearchRegex.lastIndex = absoluteTbodyStart + 6;
+      continue;
+    }
+
+    const tbodyFull = html.substring(absoluteTbodyStart, tbodyEnd);
+    rows.push(...extractRows(tbodyFull));
     tbodySearchRegex.lastIndex = tbodyEnd;
   }
 
-  // Fallback: If no tbody/thead found, try to extract tr directly from table
-  if (rows.length === 0 && headers.length === 0) {
-    const fallbackTrRegex = /<tr\b[^>]*>/gi;
-    fallbackTrRegex.lastIndex = 0;
-    let trStartMatch;
-    while ((trStartMatch = fallbackTrRegex.exec(html)) !== null) {
-      const absoluteTrStart = trStartMatch.index;
-      const trEnd = findClosing(html, absoluteTrStart, "tr");
-      if (trEnd === -1) {
-        fallbackTrRegex.lastIndex = absoluteTrStart + 4;
-        continue;
-      }
-
-      const trFull = html.substring(absoluteTrStart, trEnd);
-      const trAttrs = trStartMatch[0].match(/<tr([^>]*)>/i)?.[1] || "";
-      const cells: { html: string; attrs: string; tag: string }[] = [];
-
-      const fallbackCellRegex = /<(td|th)\b[^>]*>/gi;
-      fallbackCellRegex.lastIndex = 0;
-      let cellStartMatch;
-      while ((cellStartMatch = fallbackCellRegex.exec(trFull)) !== null) {
-        const tag = cellStartMatch[1].toLowerCase();
-        const absoluteCellStart = cellStartMatch.index;
-        const cellEnd = findClosing(trFull, absoluteCellStart, tag);
-        if (cellEnd === -1) {
-          fallbackCellRegex.lastIndex = absoluteCellStart + 4;
-          continue;
-        }
-
-        const cellFull = trFull.substring(absoluteCellStart, cellEnd);
-        const info = getInner(cellFull, tag);
-        if (info) {
-          cells.push({ html: info.content, attrs: info.attrs, tag });
-        }
-        fallbackCellRegex.lastIndex = cellEnd;
-      }
-
-      rows.push({ cells, attrs: trAttrs });
-      fallbackTrRegex.lastIndex = trEnd;
+  // Extract tfoot (support tfoot sections)
+  const tfootSearchRegex = /<tfoot/gi;
+  tfootSearchRegex.lastIndex = 0;
+  let tfootSearchMatch;
+  while ((tfootSearchMatch = tfootSearchRegex.exec(html)) !== null) {
+    const absoluteTfootStart = tfootSearchMatch.index;
+    const tfootEnd = findClosing(html, absoluteTfootStart, "tfoot");
+    if (tfootEnd === -1) {
+      tfootSearchRegex.lastIndex = absoluteTfootStart + 6;
+      continue;
     }
+
+    const tfootFull = html.substring(absoluteTfootStart, tfootEnd);
+    footerRows.push(...extractRows(tfootFull));
+    tfootSearchRegex.lastIndex = tfootEnd;
+  }
+
+  // Fallback: If no tbody/thead/tfoot found, try to extract tr directly from table
+  if (rows.length === 0 && headers.length === 0 && footerRows.length === 0) {
+    rows.push(...extractRows(html));
   }
 
   const tableAttrs = html.match(/<table([^>]*)>/i)?.[1] || "";
-  return { headers, rows, tableAttrs };
+  return { headers, rows, footerRows, tableAttrs };
+}
+
+function compareAlignedIndices(
+  a: { oldIdx: number | null; newIdx: number | null },
+  b: { oldIdx: number | null; newIdx: number | null },
+): number {
+  if (a.newIdx !== null && b.newIdx !== null) {
+    return a.newIdx - b.newIdx;
+  }
+  if (a.newIdx !== null) {
+    return -1;
+  }
+  if (b.newIdx !== null) {
+    return 1;
+  }
+  return (a.oldIdx ?? 0) - (b.oldIdx ?? 0);
 }
 
 /**
@@ -289,11 +273,7 @@ export function alignColumns(
     }
   });
 
-  return mapping.sort((a, b) => {
-    const aVal = a.newIdx !== null ? a.newIdx : 1000 + (a.oldIdx ?? 0);
-    const bVal = b.newIdx !== null ? b.newIdx : 1000 + (b.oldIdx ?? 0);
-    return aVal - bVal;
-  });
+  return mapping.sort(compareAlignedIndices);
 }
 
 /**
@@ -356,11 +336,87 @@ export function alignRows(
     }
   });
 
-  return mapping.sort((a, b) => {
-    const aVal = a.newIdx !== null ? a.newIdx : 1000 + (a.oldIdx ?? 0);
-    const bVal = b.newIdx !== null ? b.newIdx : 1000 + (b.oldIdx ?? 0);
-    return aVal - bVal;
+  return mapping.sort(compareAlignedIndices);
+}
+
+function renderTableRows(
+  oldRows: any[],
+  newRows: any[],
+  rowMapping: any[],
+  colMapping: any[],
+  execute: any,
+): string {
+  let html = "";
+  rowMapping.forEach((rm) => {
+    if (rm.oldIdx !== null && rm.newIdx !== null) {
+      const oldR = oldRows[rm.oldIdx];
+      const newR = newRows[rm.newIdx];
+      html += `<tr${newR.attrs}>`;
+      colMapping.forEach((cm) => {
+        const colClass =
+          cm.newIdx === null
+            ? "diff-col-del"
+            : cm.oldIdx === null
+              ? "diff-col-ins"
+              : "";
+
+        const oldC = cm.oldIdx !== null && cm.oldIdx >= 0 && cm.oldIdx < oldR.cells.length ? oldR.cells[cm.oldIdx] : undefined;
+        const newC = cm.newIdx !== null && cm.newIdx >= 0 && cm.newIdx < newR.cells.length ? newR.cells[cm.newIdx] : undefined;
+        const cellTag = newC?.tag || oldC?.tag || "td";
+
+        if (oldC && newC) {
+          const diff = execute(oldC.html, newC.html);
+          html += `<${cellTag}${appendClass(newC.attrs, colClass)}>${diff}</${cellTag}>`;
+        } else if (oldC) {
+          html += `<${cellTag}${appendClass(oldC.attrs, colClass)}><del class="diffdel">${oldC.html}</del></${cellTag}>`;
+        } else if (newC) {
+          html += `<${cellTag}${appendClass(newC.attrs, colClass)}><ins class="diffins">${newC.html}</ins></${cellTag}>`;
+        } else {
+          html += `<${cellTag}${appendClass("", colClass)}></${cellTag}>`;
+        }
+      });
+      html += "</tr>";
+    } else if (rm.oldIdx !== null) {
+      const oldR = oldRows[rm.oldIdx];
+      html += `<tr${appendClass(oldR.attrs, "diffdel")}>`;
+      colMapping.forEach((cm) => {
+        const colClass =
+          cm.newIdx === null
+            ? "diff-col-del"
+            : cm.oldIdx === null
+              ? "diff-col-ins"
+              : "";
+        const oldC = cm.oldIdx !== null && cm.oldIdx >= 0 && cm.oldIdx < oldR.cells.length ? oldR.cells[cm.oldIdx] : undefined;
+        const cellTag = oldC?.tag || "td";
+        if (oldC) {
+          html += `<${cellTag}${appendClass(oldC.attrs, colClass)}><del class="diffdel">${oldC.html}</del></${cellTag}>`;
+        } else {
+          html += `<${cellTag}${appendClass("", colClass)}></${cellTag}>`;
+        }
+      });
+      html += "</tr>";
+    } else {
+      const newR = newRows[rm.newIdx!];
+      html += `<tr${appendClass(newR.attrs, "diffins")}>`;
+      colMapping.forEach((cm) => {
+        const colClass =
+          cm.newIdx === null
+            ? "diff-col-del"
+            : cm.oldIdx === null
+              ? "diff-col-ins"
+              : "";
+        const newC = cm.newIdx !== null && cm.newIdx >= 0 && cm.newIdx < newR.cells.length ? newR.cells[cm.newIdx] : undefined;
+        const cellTag = newC?.tag || "td";
+        if (newC) {
+          html += `<${cellTag}${appendClass(newC.attrs, colClass)}><ins class="diffins">${newC.html}</ins></${cellTag}>`;
+        } else {
+          html += `<${cellTag}${appendClass("", colClass)}></${cellTag}>`;
+        }
+      });
+      html += "</tr>";
+    }
   });
+  return html;
 }
 
 /**
@@ -372,6 +428,7 @@ export function renderMergedTable(
   colMapping: any[],
   rowMapping: any[],
   execute: any,
+  footerMapping: any[] = [],
 ): string {
   let html = `<table${newTable.tableAttrs || oldTable.tableAttrs}>`;
 
@@ -388,16 +445,17 @@ export function renderMergedTable(
 
       const oldH = m.oldIdx !== null && m.oldIdx >= 0 && m.oldIdx < oldTable.headers.length ? oldTable.headers[m.oldIdx] : undefined;
       const newH = m.newIdx !== null && m.newIdx >= 0 && m.newIdx < newTable.headers.length ? newTable.headers[m.newIdx] : undefined;
+      const cellTag = newH?.tag || oldH?.tag || "th";
 
       if (oldH && newH) {
         const diff = execute(oldH.html, newH.html);
-        html += `<th${appendClass(newH.attrs, colClass)}>${diff}</th>`;
+        html += `<${cellTag}${appendClass(newH.attrs, colClass)}>${diff}</${cellTag}>`;
       } else if (oldH) {
-        html += `<th${appendClass(oldH.attrs, colClass)}><del class="diffdel">${oldH.html}</del></th>`;
+        html += `<${cellTag}${appendClass(oldH.attrs, colClass)}><del class="diffdel">${oldH.html}</del></${cellTag}>`;
       } else if (newH) {
-        html += `<th${appendClass(newH.attrs, colClass)}><ins class="diffins">${newH.html}</ins></th>`;
+        html += `<${cellTag}${appendClass(newH.attrs, colClass)}><ins class="diffins">${newH.html}</ins></${cellTag}>`;
       } else {
-        html += `<th${appendClass("", colClass)}></th>`;
+        html += `<${cellTag}${appendClass("", colClass)}></${cellTag}>`;
       }
     });
     html += "</tr></thead>";
@@ -405,73 +463,19 @@ export function renderMergedTable(
 
   // Render Body
   html += "<tbody>";
-  rowMapping.forEach((rm) => {
-    if (rm.oldIdx !== null && rm.newIdx !== null) {
-      const oldR = oldTable.rows[rm.oldIdx];
-      const newR = newTable.rows[rm.newIdx];
-      html += `<tr${newR.attrs}>`;
-      colMapping.forEach((cm) => {
-        const colClass =
-          cm.newIdx === null
-            ? "diff-col-del"
-            : cm.oldIdx === null
-              ? "diff-col-ins"
-              : "";
+  html += renderTableRows(oldTable.rows, newTable.rows, rowMapping, colMapping, execute);
+  html += "</tbody>";
 
-        const oldC = cm.oldIdx !== null && cm.oldIdx >= 0 && cm.oldIdx < oldR.cells.length ? oldR.cells[cm.oldIdx] : undefined;
-        const newC = cm.newIdx !== null && cm.newIdx >= 0 && cm.newIdx < newR.cells.length ? newR.cells[cm.newIdx] : undefined;
+  // Render Footer (only if at least one table has footer rows)
+  const oldFooterRows = oldTable.footerRows || [];
+  const newFooterRows = newTable.footerRows || [];
+  if (oldFooterRows.length > 0 || newFooterRows.length > 0) {
+    html += "<tfoot>";
+    html += renderTableRows(oldFooterRows, newFooterRows, footerMapping, colMapping, execute);
+    html += "</tfoot>";
+  }
 
-        if (oldC && newC) {
-          const diff = execute(oldC.html, newC.html);
-          html += `<td${appendClass(newC.attrs, colClass)}>${diff}</td>`;
-        } else if (oldC) {
-          html += `<td${appendClass(oldC.attrs, colClass)}><del class="diffdel">${oldC.html}</del></td>`;
-        } else if (newC) {
-          html += `<td${appendClass(newC.attrs, colClass)}><ins class="diffins">${newC.html}</ins></td>`;
-        } else {
-          html += `<td${appendClass("", colClass)}></td>`;
-        }
-      });
-      html += "</tr>";
-    } else if (rm.oldIdx !== null) {
-      const oldR = oldTable.rows[rm.oldIdx];
-      html += `<tr${oldR.attrs} class="diffdel">`;
-      colMapping.forEach((cm) => {
-        const colClass =
-          cm.newIdx === null
-            ? "diff-col-del"
-            : cm.oldIdx === null
-              ? "diff-col-ins"
-              : "";
-        const oldC = cm.oldIdx !== null && cm.oldIdx >= 0 && cm.oldIdx < oldR.cells.length ? oldR.cells[cm.oldIdx] : undefined;
-        if (oldC) {
-          html += `<td${appendClass(oldC.attrs, colClass)}><del class="diffdel">${oldC.html}</del></td>`;
-        } else {
-          html += `<td${appendClass("", colClass)}></td>`;
-        }
-      });
-      html += "</tr>";
-    } else {
-      const newR = newTable.rows[rm.newIdx!];
-      html += `<tr${newR.attrs} class="diffins">`;
-      colMapping.forEach((cm) => {
-        const colClass =
-          cm.newIdx === null
-            ? "diff-col-del"
-            : cm.oldIdx === null
-              ? "diff-col-ins"
-              : "";
-        const newC = cm.newIdx !== null && cm.newIdx >= 0 && cm.newIdx < newR.cells.length ? newR.cells[cm.newIdx] : undefined;
-        if (newC) {
-          html += `<td${appendClass(newC.attrs, colClass)}><ins class="diffins">${newC.html}</ins></td>`;
-        } else {
-          html += `<td${appendClass("", colClass)}></td>`;
-        }
-      });
-      html += "</tr>";
-    }
-  });
-  html += "</tbody></table>";
+  html += "</table>";
   return html;
 }
 
