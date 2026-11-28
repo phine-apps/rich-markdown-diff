@@ -143,4 +143,18 @@ graph TD
       `Expected compound ZWJ emoji tag to stay intact, got: ${html}`,
     );
   });
+
+  it("should render inline obsidian-embed with span instead of div inside paragraphs (M-10)", () => {
+    const md = "Before ![[Embedded Note]] after";
+    const { html } = provider.computeDiff(md, md);
+    assert.ok(
+      html.includes('<span class="obsidian-embed"'),
+      `Expected span.obsidian-embed, got: ${html}`,
+    );
+    assert.strictEqual(
+      html.includes('<div class="obsidian-embed"'),
+      false,
+      "Must not emit div inside inline paragraph",
+    );
+  });
 });

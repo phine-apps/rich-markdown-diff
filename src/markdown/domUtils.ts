@@ -145,13 +145,17 @@ export function findClosing(
           while (j < len && html[j] !== quote) {
             j++;
           }
+          if (j >= len) {
+            return -1;
+          }
         }
         j++;
       }
-      if (j < len) {
-        i = j + 1;
-        continue;
+      if (j >= len) {
+        return -1;
       }
+      i = j + 1;
+      continue;
     }
 
     i++;

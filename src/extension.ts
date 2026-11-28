@@ -45,7 +45,7 @@ import {
 } from "./commandTarget";
 import * as path from "path";
 import * as l10n from "@vscode/l10n";
-import { prepareExportHtml } from "./exportHtml";
+import { isRelativeWithinRoot, prepareExportHtml } from "./exportHtml";
 
 /**
  * Escapes HTML special characters to prevent XSS in webview content.
@@ -63,6 +63,7 @@ function escapeHtml(text: string): string {
 let activePanel: vscode.WebviewPanel | undefined;
 let selectedForCompareUri: vscode.Uri | undefined;
 let activeEditorRepositorySubscription: vscode.Disposable | undefined;
+let activeEditorRepository: GitRepository | undefined;
 let contextUpdateGeneration = 0;
 let lastCanShowRenderedDiff: boolean | undefined;
 let runtimeDiagnosticsChannel: vscode.OutputChannel | undefined;
@@ -256,8 +257,48 @@ function getL10nBundleUri(context: vscode.ExtensionContext): vscode.Uri {
   return vscode.Uri.joinPath(context.extensionUri, "l10n", "bundle.l10n.json");
 }
 
+function getDiffConfiguration() {
+  const config = vscode.workspace.getConfiguration("rich-markdown-diff");
+  const showGutterMarkers = config.get<boolean>("showGutterMarkers", true);
+  const showGitBlame = config.get<boolean>("showGitBlame", true);
+  const rawLineHoverDelay = config.get<unknown>("lineHoverDelay", 500);
+  const lineHoverDelay =
+    typeof rawLineHoverDelay === "number" &&
+    Number.isFinite(rawLineHoverDelay) &&
+    rawLineHoverDelay >= 0
+      ? rawLineHoverDelay
+      : 500;
+  const insertedColor = config.get<string>("insertedColor", "");
+  const deletedColor = config.get<string>("deletedColor", "");
+  const defaultViewMode = config.get<string>("defaultViewMode", "side-by-side");
+  const defaultFoldUnchanged = config.get<boolean>("defaultFoldUnchanged", false);
+  return {
+    showGutterMarkers,
+    showGitBlame,
+    lineHoverDelay,
+    insertedColor,
+    deletedColor,
+    defaultViewMode,
+    defaultFoldUnchanged,
+  };
+}
+
 function isMarkdownPath(fsPath: string): boolean {
   return markdownExtensions.includes(path.extname(fsPath).toLowerCase());
+}
+
+function ensureMarkdownUri(uri: vscode.Uri): boolean {
+  if (!isMarkdownPath(uri.fsPath)) {
+    const ext = path.extname(uri.fsPath).toLowerCase();
+    vscode.window.showInformationMessage(
+      l10n.t(
+        "Markdown Diff only works for Markdown files (found '{0}').",
+        ext,
+      ),
+    );
+    return false;
+  }
+  return true;
 }
 
 function getDiffPanelOptions(context: vscode.ExtensionContext) {
@@ -544,6 +585,7 @@ async function updateRenderedDiffContext(
     if (!hasVisibleMarkdownEditor) {
       activeEditorRepositorySubscription?.dispose();
       activeEditorRepositorySubscription = undefined;
+      activeEditorRepository = undefined;
       await setCanShowRenderedDiff(false, myGen);
     } else if (!lastCanShowRenderedDiff) {
       // A markdown editor is visible but context was previously disabled or
@@ -573,6 +615,7 @@ async function updateRenderedDiffContext(
   ) {
     activeEditorRepositorySubscription?.dispose();
     activeEditorRepositorySubscription = undefined;
+    activeEditorRepository = undefined;
     await setCanShowRenderedDiff(true, myGen);
     return;
   }
@@ -595,9 +638,6 @@ async function updateRenderedDiffContext(
     return;
   }
 
-  activeEditorRepositorySubscription?.dispose();
-  activeEditorRepositorySubscription = undefined;
-
   const canShow = isActionableSingleFileComparison(
     comparison,
     editor.document.isDirty,
@@ -613,7 +653,15 @@ async function updateRenderedDiffContext(
     return;
   }
 
-  const repository = gitApi?.getRepository(resolvedUri);
+  const repository = gitApi?.getRepository(resolvedUri) ?? undefined;
+  if (repository === activeEditorRepository && activeEditorRepositorySubscription) {
+    return;
+  }
+
+  activeEditorRepositorySubscription?.dispose();
+  activeEditorRepositorySubscription = undefined;
+  activeEditorRepository = repository;
+
   if (!repository) {
     return;
   }
@@ -633,17 +681,29 @@ async function renderDiffPanel(
   const originalContent = await readDocumentText(state.originalUri);
   const modifiedContent = await readDocumentText(state.modifiedUri);
 
-  const originalBlame = state.originalUri
-    ? await resolveBlameInfo(state.originalUri)
-    : undefined;
-  const modifiedBlame = state.modifiedUri
-    ? await resolveBlameInfo(toFileBackedUri(state.modifiedUri))
-    : undefined;
-
   const contentKey = `${originalContent}\0${modifiedContent}\0${state.leftLabel}\0${state.rightLabel}`;
   if (lastContentKey !== undefined && contentKey === lastContentKey) {
     return contentKey;
   }
+
+  const {
+    showGutterMarkers,
+    showGitBlame,
+    lineHoverDelay,
+    insertedColor,
+    deletedColor,
+    defaultViewMode,
+    defaultFoldUnchanged,
+  } = getDiffConfiguration();
+
+  // Only resolve git blame when content actually changed, blame is enabled, and the
+  // URI itself is file-backed (avoiding working-tree blame on git: revision/staged sides).
+  const [originalBlame, modifiedBlame] = showGitBlame
+    ? await Promise.all([
+        state.originalUri ? resolveBlameInfo(state.originalUri) : Promise.resolve(undefined),
+        state.modifiedUri ? resolveBlameInfo(state.modifiedUri) : Promise.resolve(undefined),
+      ])
+    : [undefined, undefined];
 
   await diffProvider.waitForReady();
 
@@ -653,21 +713,6 @@ async function renderDiffPanel(
   const modifiedResolver = state.modifiedImageBaseUri
     ? createImageResolver(state.modifiedImageBaseUri, panel.webview)
     : undefined;
-
-  const config = vscode.workspace.getConfiguration("rich-markdown-diff");
-  const showGutterMarkers = config.get<boolean>("showGutterMarkers", true);
-  const showGitBlame = config.get<boolean>("showGitBlame", true);
-  const rawLineHoverDelay = config.get<unknown>("lineHoverDelay", 500);
-  const lineHoverDelay =
-    typeof rawLineHoverDelay === "number" &&
-    Number.isFinite(rawLineHoverDelay) &&
-    rawLineHoverDelay >= 0
-      ? rawLineHoverDelay
-      : 500;
-  const insertedColor = config.get<string>("insertedColor", "");
-  const deletedColor = config.get<string>("deletedColor", "");
-  const defaultViewMode = config.get<string>("defaultViewMode", "side-by-side");
-  const defaultFoldUnchanged = config.get<boolean>("defaultFoldUnchanged", false);
 
   const {
     html: diffHtml,
@@ -1007,21 +1052,27 @@ export function attachDiffWebviewMessageHandler(
           ),
         );
 
-        const fallbackDocument = await vscode.workspace.openTextDocument(
-          currentState.fallbackSourceUri,
-        );
-        const editor = await vscode.window.showTextDocument(fallbackDocument, {
-          viewColumn: vscode.ViewColumn.One,
-        });
+        try {
+          const fallbackDocument = await vscode.workspace.openTextDocument(
+            currentState.fallbackSourceUri,
+          );
+          const editor = await vscode.window.showTextDocument(fallbackDocument, {
+            viewColumn: vscode.ViewColumn.One,
+          });
 
-        if (
-          typeof message.line === "number" &&
-          Number.isInteger(message.line) &&
-          message.line >= 0
-        ) {
-          const range = new vscode.Range(message.line, 0, message.line, 0);
-          editor.revealRange(range, vscode.TextEditorRevealType.InCenter);
-          editor.selection = new vscode.Selection(range.start, range.start);
+          if (
+            typeof message.line === "number" &&
+            Number.isInteger(message.line) &&
+            message.line >= 0
+          ) {
+            const range = new vscode.Range(message.line, 0, message.line, 0);
+            editor.revealRange(range, vscode.TextEditorRevealType.InCenter);
+            editor.selection = new vscode.Selection(range.start, range.start);
+          }
+        } catch (fallbackError) {
+          vscode.window.showErrorMessage(
+            l10n.t("Could not open file: {0}", String(fallbackError)),
+          );
         }
       } else {
         vscode.window.showErrorMessage(
@@ -1284,16 +1335,27 @@ export function activate(context: vscode.ExtensionContext) {
       void updateRenderedDiffContext();
     }),
     vscode.workspace.onDidChangeTextDocument((event) => {
+      const activeEditor = vscode.window.activeTextEditor;
       if (
-        vscode.window.activeTextEditor?.document.uri.toString() ===
-        event.document.uri.toString()
+        activeEditor?.document.uri.toString() === event.document.uri.toString()
       ) {
-        void updateRenderedDiffContext(vscode.window.activeTextEditor);
+        // Once a dirty Markdown editor has already enabled canShowRenderedDiff,
+        // subsequent keystrokes cannot disable it until save/revert.
+        if (
+          event.contentChanges.length > 0 &&
+          event.document.isDirty &&
+          lastCanShowRenderedDiff === true &&
+          isMarkdownDocument(event.document)
+        ) {
+          return;
+        }
+        void updateRenderedDiffContext(activeEditor);
       }
     }),
     new vscode.Disposable(() => {
       activeEditorRepositorySubscription?.dispose();
       activeEditorRepositorySubscription = undefined;
+      activeEditorRepository = undefined;
     }),
   );
   void updateRenderedDiffContext();
@@ -1545,6 +1607,16 @@ export function activate(context: vscode.ExtensionContext) {
         ),
       );
 
+      const {
+        showGutterMarkers,
+        showGitBlame,
+        lineHoverDelay,
+        insertedColor,
+        deletedColor,
+        defaultViewMode,
+        defaultFoldUnchanged,
+      } = getDiffConfiguration();
+
       const webviewContent = diffProvider.getWebviewContent(
         diffHtml,
         katexCssInline,
@@ -1557,6 +1629,14 @@ export function activate(context: vscode.ExtensionContext) {
         getWebviewTranslations(),
         marpCss,
         marpJs,
+        undefined,
+        showGutterMarkers,
+        showGitBlame,
+        lineHoverDelay,
+        insertedColor,
+        deletedColor,
+        defaultViewMode,
+        defaultFoldUnchanged,
       );
 
       // Helper to track active panel for shortcuts
@@ -1628,6 +1708,9 @@ export function activate(context: vscode.ExtensionContext) {
         selectedUris[0];
 
       if (originalUri && modifiedUri) {
+        if (!ensureMarkdownUri(originalUri) || !ensureMarkdownUri(modifiedUri)) {
+          return;
+        }
         showTwoFilesDiff(originalUri, modifiedUri, context);
         return;
       }
@@ -1652,14 +1735,7 @@ export function activate(context: vscode.ExtensionContext) {
     }
 
     // --- Graceful Validation ---
-    const ext = path.extname(targetUri.fsPath).toLowerCase();
-    if (!isMarkdownPath(targetUri.fsPath)) {
-      vscode.window.showInformationMessage(
-        l10n.t(
-          "Markdown Diff only works for Markdown files (found '{0}').",
-          ext,
-        ),
-      );
+    if (!ensureMarkdownUri(targetUri)) {
       return;
     }
     // ---------------------------
@@ -1973,14 +2049,12 @@ export function isPathInsideRoot(targetUri: vscode.Uri, baseUri: vscode.Uri): bo
     if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
       return vscode.workspace.workspaceFolders.some((folder) => {
         const folderPath = path.resolve(folder.uri.fsPath);
-        const rel = path.relative(folderPath, targetPath);
-        return !rel.startsWith("..") && !path.isAbsolute(rel);
+        return isRelativeWithinRoot(folderPath, targetPath);
       });
     }
 
     const baseDir = path.dirname(path.resolve(baseUri.fsPath));
-    const rel = path.relative(baseDir, targetPath);
-    return !rel.startsWith("..") && !path.isAbsolute(rel);
+    return isRelativeWithinRoot(baseDir, targetPath);
   } catch {
     return false;
   }
@@ -2034,15 +2108,25 @@ export async function resolveWikilinkUri(
   const basename = path.basename(page);
   if (basename && !page.includes("..") && !page.includes("/") && !page.includes("\\")) {
     const ext = path.extname(page) ? "" : ".md";
-    const globPattern = `**/${basename}${ext}`;
+    const expectedName = `${basename}${ext}`;
+    const escapedBasename = expectedName.replace(/([*?[\]{}])/g, "[$1]");
+    const globPattern = `**/${escapedBasename}`;
     try {
       const files = await vscode.workspace.findFiles(
         globPattern,
         "**/node_modules/**",
         5,
       );
-      if (files.length > 0 && isPathInsideRoot(files[0], cleanBase)) {
-        return files[0];
+      const matched = files.find((f) => {
+        const candidateName = path.basename(f.fsPath);
+        const matchesName =
+          candidateName === expectedName ||
+          (process.platform === "win32" &&
+            candidateName.toLowerCase() === expectedName.toLowerCase());
+        return matchesName && isPathInsideRoot(f, cleanBase);
+      });
+      if (matched) {
+        return matched;
       }
     } catch (err) {
       console.error("findFiles failed:", err);

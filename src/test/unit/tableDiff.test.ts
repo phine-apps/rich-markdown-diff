@@ -1,5 +1,5 @@
 import * as assert from "assert";
-import { parseTable } from "../../markdown/tableDiff";
+import { diffTables, parseTable } from "../../markdown/tableDiff";
 
 describe("parseTable", () => {
   it("should parse a simple table with thead and tbody", () => {
@@ -112,6 +112,54 @@ describe("parseTable", () => {
     assert.strictEqual(result.headers[0].html, "Real Header");
     assert.strictEqual(result.rows.length, 1);
     assert.strictEqual(result.rows[0].cells[0].html, "Real Data");
+  });
+
+  it("should parse tfoot rows and td cells inside thead (M-5)", () => {
+    const html = `
+      <table>
+        <thead><tr><td>Col A</td><td>Col B</td></tr></thead>
+        <tbody><tr><td>1</td><td>2</td></tr></tbody>
+        <tfoot><tr><td>Total</td><td>3</td></tr></tfoot>
+      </table>
+    `;
+    const parsed = parseTable(html);
+    assert.strictEqual(parsed.headers.length, 2);
+    assert.strictEqual(parsed.headers[0].html, "Col A");
+    assert.strictEqual(parsed.footerRows.length, 1);
+    assert.strictEqual(parsed.footerRows[0].cells[0].html, "Total");
+
+    const diff = diffTables(
+      html,
+      html.replace("<td>3</td>", "<td>4</td>"),
+      (a, b) => (a === b ? a : `<del>${a}</del><ins>${b}</ins>`),
+    );
+    assert.ok(diff.includes("<tfoot>"), "Diffed table should preserve <tfoot>");
+    assert.ok(diff.includes("<del>3</del><ins>4</ins>"), "Diffed table should diff tfoot cells");
+  });
+
+  it("should append diffdel/diffins classes on tr without duplicating class attribute (M-5)", () => {
+    const oldTable = `<table><tbody><tr class="row-old"><td>Removed</td></tr><tr><td>Same</td></tr></tbody></table>`;
+    const newTable = `<table><tbody><tr><td>Same</td></tr><tr class="row-new"><td>Added</td></tr></tbody></table>`;
+    const diff = diffTables(oldTable, newTable, (a, b) => a || b);
+    assert.ok(diff.includes('class="diffdel row-old"') || diff.includes('class="row-old diffdel"'), `Expected merged class on deleted tr, got: ${diff}`);
+    assert.ok(diff.includes('class="diffins row-new"') || diff.includes('class="row-new diffins"'), `Expected merged class on inserted tr, got: ${diff}`);
+  });
+
+  it("should keep deleted rows after all remaining rows even when table has > 1000 rows (M-5)", () => {
+    const makeTable = (count: number, extraOld?: boolean) => {
+      const rows: string[] = [];
+      if (extraOld) {
+        rows.push("<tr><td>deleted-row</td></tr>");
+      }
+      for (let i = 0; i < count; i++) {
+        rows.push(`<tr><td>r-${i}</td></tr>`);
+      }
+      return `<table><tbody>${rows.join("")}</tbody></table>`;
+    };
+    const diff = diffTables(makeTable(1005, true), makeTable(1005, false), (a, b) => a || b);
+    const deletedIdx = diff.indexOf("deleted-row");
+    const lastRowIdx = diff.indexOf("r-1004");
+    assert.ok(deletedIdx > lastRowIdx, "Deleted row must not be sorted before row 1004");
   });
 });
 

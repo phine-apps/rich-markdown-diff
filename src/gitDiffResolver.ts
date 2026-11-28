@@ -421,12 +421,13 @@ export function getComparisonHintFromUris(
     return "workingTree";
   }
 
-  if (originalRef === HEAD_LABEL && modifiedUri?.scheme !== "git") {
-    return "workingTree";
-  }
-
-  if (originalRef === HEAD_LABEL && modifiedUri === undefined) {
-    return "index";
+  if (originalRef === HEAD_LABEL) {
+    if (modifiedUri === undefined) {
+      return "index";
+    }
+    if (modifiedUri.scheme !== "git") {
+      return "workingTree";
+    }
   }
 
   return "auto";

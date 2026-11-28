@@ -20,6 +20,7 @@ export interface MermaidEdge {
   to: string;
   label?: string;
   raw: string;
+  invisible?: boolean;
 }
 
 /**
@@ -78,21 +79,21 @@ export function isMermaidDirectiveOrSkipLine(trimmed: string): boolean {
 export function stripMermaidEdgeLabels(line: string): string {
   // 1. Remove pipe labels: -->|label text| -> -->
   let cleaned = line.replace(
-    /((?:--+>|---+|==+>|===+|-\.->|-\.-|<-->|<--|--o|--x|o--o|x--x)\s*)\|[^|]*\|/g,
+    /((?:--+>|---+|==+>|===+|-\.+->|-\.-|~~~+|<-->|<==>|<-+\.->|<-+\.-|<--|--o|--x|o--o|x--x|o--+>|x--+>)\s*)\|[^|]*\|/g,
     "$1",
   );
   // 2. Remove inline labels:
   // -- label --> -> -->, == label ==> -> ==>, -. label .-> -> -.->
   cleaned = cleaned.replace(
-    /--\s*(?:["'][^"']*["']|[^\s->\n]+(?:\s+[^\s->\n]+)*)\s*(--+>|---+)/g,
+    /--[ \t]*(?:["'][^"']*["']|(?:[^\s>\n\-]|-(?!>))+(?:[ \t]+(?:[^\s>\n\-]|-(?!>))+)*)[ \t]*(--+>|---+)/g,
     "$1",
   );
   cleaned = cleaned.replace(
-    /==\s*(?:["'][^"']*["']|[^\s=>\n]+(?:\s+[^\s=>\n]+)*)\s*(==+>|===+)/g,
+    /==[ \t]*(?:["'][^"']*["']|(?:[^\s>\n=]|=(?!>))+(?:[ \t]+(?:[^\s>\n=]|=(?!>))+)*)[ \t]*(==+>|===+)/g,
     "$1",
   );
   cleaned = cleaned.replace(
-    /-\.\s*(?:["'][^"']*["']|[^\s\.->\n]+(?:\s+[^\s\.->\n]+)*)\s*\.(->|-)/g,
+    /-\.[ \t]*(?:["'][^"']*["']|(?:[^\s.>\n\-]|-(?!>)|\.(?!->|-))+(?:[ \t]+(?:[^\s.>\n\-]|-(?!>)|\.(?!->|-))+)*)[ \t]*\.(->|-)/g,
     "-.$1",
   );
   // 3. Remove class annotations attached to nodes: A:::myClass -> A
@@ -130,11 +131,6 @@ export function parseMermaidEdges(code: string): MermaidEdge[] {
   const edges: MermaidEdge[] = [];
   const lines = code.split(/\r?\n/);
 
-  // Match arrows:
-  // 1. A -->|label| B
-  // 2. A -- label --> B or A -- "label" --> B
-  // 3. A -. label .-> B
-  // 4. A --> B or A --- B or A ==> B or A -.- B or A -.-> B
   const SHAPE_GROUP = `(?:` +
     `\\{\\{(?:[^"}]|"[^"]*")*\\}\\}|` +
     `\\[\\((?:[^")]|"[^"]*")*\\)\\]|` +
@@ -147,24 +143,72 @@ export function parseMermaidEdges(code: string): MermaidEdge[] {
     `>(?:[^"\\]]|"[^"]*")*\\]` +
   `)?`;
   const CLASS_ATTACHMENT = `(?::::[a-zA-Z0-9_-]+)?`;
-  const ARROWS = `(?:--+>|---+|==+>|===+|-\\.->|-\\.-|<-->|<--|--o|--x|o--o|x--x)`;
+  const ARROWS = `(~~~+|--+>|---+|==+>|===+|-\\.+->|-\\.-|<-->|<==>|<-+\\.->|<-+\\.-|<--|--o|--x|o--o|x--x|o--+>|x--+>)`;
   const ID = `([\\p{L}\\p{N}_]+(?:-[\\p{L}\\p{N}_]+)*)`;
+  const ID_CHAR_RE = /[\p{L}\p{N}_-]/u;
+  const SKIP_KEYWORDS = new Set(["graph", "flowchart", "subgraph", "end"]);
 
-  // Disjoint word-separated label pattern: prevents catastrophic backtracking (ReDoS)
-  // caused by overlapping \s* + [\p{L}\p{N}_\s]+ + \s* on long runs of spaces.
-  const UNQUOTED_LABEL = `([\\p{L}\\p{N}_]+(?:[ \\t]+[\\p{L}\\p{N}_]+)*)`;
-
-  const edgeRegex = new RegExp(
-    `(?<![\\p{L}\\p{N}_-])${ID}${SHAPE_GROUP}${CLASS_ATTACHMENT}[ \\t]*` +
-      `(?:` +
-        `${ARROWS}[ \\t]*(?:\\|([^|]+)\\|)?[ \\t]*` +
-        `|--[ \\t]*(?:["']([^"']+)["']|${UNQUOTED_LABEL})[ \\t]*(?:--+>|---+)[ \\t]*` +
-        `|==[ \\t]*(?:["']([^"']+)["']|${UNQUOTED_LABEL})[ \\t]*(?:==+>|===+)[ \\t]*` +
-        `|-\\.[ \\t]*(?:["']([^"']+)["']|${UNQUOTED_LABEL})[ \\t]*\\.(?:->|-)[ \\t]*` +
-      `)` +
-      `${ID}${CLASS_ATTACHMENT}`,
-    "gu",
+  const nodeItemRegex = new RegExp(
+    `${ID}${SHAPE_GROUP}${CLASS_ATTACHMENT}`,
+    "uy",
   );
+
+  // Disjoint word-separated label patterns: prevent catastrophic backtracking (ReDoS).
+  const DASH_UNQUOTED = `((?:[^\\s>\\n\\-]|-(?!>))+(?:[ \\t]+(?:[^\\s>\\n\\-]|-(?!>))+)*)`;
+  const EQ_UNQUOTED = `((?:[^\\s>\\n=]|=(?!>))+(?:[ \\t]+(?:[^\\s>\\n=]|=(?!>))+)*)`;
+  const DOT_UNQUOTED = `((?:[^\\s.>\\n\\-]|-(?!>)|\\.(?!->|-))+(?:[ \\t]+(?:[^\\s.>\\n\\-]|-(?!>)|\\.(?!->|-))+)*)`;
+
+  const arrowRegex = new RegExp(
+    `(?:` +
+      `${ARROWS}[ \\t]*(?:\\|([^|]+)\\|)?` +
+      `|--[ \\t]*(?:["']([^"']+)["']|${DASH_UNQUOTED})[ \\t]*(?:--+>|---+)` +
+      `|==[ \\t]*(?:["']([^"']+)["']|${EQ_UNQUOTED})[ \\t]*(?:==+>|===+)` +
+      `|-\\.[ \\t]*(?:["']([^"']+)["']|${DOT_UNQUOTED})[ \\t]*\\.(?:->|-)` +
+    `)`,
+    "uy",
+  );
+
+  const skipHorizontalWs = (str: string, pos: number): number => {
+    while (pos < str.length && (str[pos] === " " || str[pos] === "\t")) {
+      pos++;
+    }
+    return pos;
+  };
+
+  const readNodeGroup = (
+    str: string,
+    startPos: number,
+  ): { ids: string[]; start: number; end: number } | null => {
+    if (startPos > 0 && ID_CHAR_RE.test(str[startPos - 1])) {
+      return null;
+    }
+    nodeItemRegex.lastIndex = startPos;
+    const first = nodeItemRegex.exec(str);
+    if (!first || SKIP_KEYWORDS.has(first[1])) {
+      return null;
+    }
+
+    const ids: string[] = [first[1]];
+    let end = nodeItemRegex.lastIndex;
+
+    // Consume chained '&' targets/sources (e.g. A & B --> C & D)
+    while (true) {
+      let p = skipHorizontalWs(str, end);
+      if (str[p] !== "&") {
+        break;
+      }
+      p = skipHorizontalWs(str, p + 1);
+      nodeItemRegex.lastIndex = p;
+      const nextNode = nodeItemRegex.exec(str);
+      if (!nextNode || SKIP_KEYWORDS.has(nextNode[1])) {
+        break;
+      }
+      ids.push(nextNode[1]);
+      end = nodeItemRegex.lastIndex;
+    }
+
+    return { ids, start: startPos, end };
+  };
 
   for (const line of lines) {
     const cleanLine = stripMermaidComment(line);
@@ -173,26 +217,66 @@ export function parseMermaidEdges(code: string): MermaidEdge[] {
       continue;
     }
 
-    edgeRegex.lastIndex = 0;
+    let pos = 0;
+    const len = trimmed.length;
 
-    let match: RegExpExecArray | null;
-    while ((match = edgeRegex.exec(trimmed)) !== null) {
-      const from = match[1];
-      const label = match[2] || match[3] || match[4] || match[5] || match[6] || match[7] || match[8];
-      const to = match[9];
-      if (
-        from &&
-        to &&
-        !["graph", "flowchart", "subgraph", "end"].includes(from)
-      ) {
-        edges.push({
-          from,
-          to,
-          label: label ? label.trim() : undefined,
-          raw: match[0],
-        });
-        // Rewind lastIndex to allow chain notation (A --> B --> C)
-        edgeRegex.lastIndex = match.index + match[0].length - to.length;
+    while (pos < len) {
+      pos = skipHorizontalWs(trimmed, pos);
+      if (pos >= len) {
+        break;
+      }
+
+      let leftGroup = readNodeGroup(trimmed, pos);
+      if (!leftGroup) {
+        // Advance past the current non-whitespace token to keep scanning in O(N)
+        while (pos < len && trimmed[pos] !== " " && trimmed[pos] !== "\t") {
+          pos++;
+        }
+        continue;
+      }
+
+      let chained = false;
+      while (true) {
+        const afterLeft = skipHorizontalWs(trimmed, leftGroup.end);
+        arrowRegex.lastIndex = afterLeft;
+        const arrowMatch = arrowRegex.exec(trimmed);
+        if (!arrowMatch) {
+          pos = chained ? leftGroup.end : leftGroup.end;
+          break;
+        }
+
+        const afterArrow = skipHorizontalWs(trimmed, arrowRegex.lastIndex);
+        const rightGroup = readNodeGroup(trimmed, afterArrow);
+        if (!rightGroup) {
+          pos = arrowRegex.lastIndex;
+          break;
+        }
+
+        const invisible = !!(arrowMatch[1] && /^~~~+$/.test(arrowMatch[1]));
+        const label =
+          arrowMatch[2] ||
+          arrowMatch[3] ||
+          arrowMatch[4] ||
+          arrowMatch[5] ||
+          arrowMatch[6] ||
+          arrowMatch[7] ||
+          arrowMatch[8];
+        const raw = trimmed.slice(leftGroup.start, rightGroup.end);
+
+        for (const from of leftGroup.ids) {
+          for (const to of rightGroup.ids) {
+            edges.push({
+              from,
+              to,
+              label: label ? label.trim() : undefined,
+              raw,
+              ...(invisible ? { invisible: true } : {}),
+            });
+          }
+        }
+
+        leftGroup = rightGroup;
+        chained = true;
       }
     }
   }
@@ -327,6 +411,51 @@ export function computeMermaidDiffPair(
     }
   }
 
+  // Pair edges between old and new:
+  // 1. Exact match (same from, to, label, visibility) -> unchanged
+  // 2. Same endpoints (from, to) with different label -> modified
+  // 3. Remaining -> removed (old) / added (new)
+  const matchedOld = new Array<boolean>(oldEdges.length).fill(false);
+  const matchedNew = new Array<boolean>(newEdges.length).fill(false);
+  const modifiedOld = new Array<boolean>(oldEdges.length).fill(false);
+  const modifiedNew = new Array<boolean>(newEdges.length).fill(false);
+
+  const edgeLabelKey = (e: MermaidEdge) => e.label ?? "";
+
+  oldEdges.forEach((oldE, oi) => {
+    const exactIdx = newEdges.findIndex(
+      (newE, ni) =>
+        !matchedNew[ni] &&
+        newE.from === oldE.from &&
+        newE.to === oldE.to &&
+        edgeLabelKey(newE) === edgeLabelKey(oldE) &&
+        Boolean(newE.invisible) === Boolean(oldE.invisible),
+    );
+    if (exactIdx !== -1) {
+      matchedOld[oi] = true;
+      matchedNew[exactIdx] = true;
+    }
+  });
+
+  oldEdges.forEach((oldE, oi) => {
+    if (matchedOld[oi]) {
+      return;
+    }
+    const labelChangedIdx = newEdges.findIndex(
+      (newE, ni) =>
+        !matchedNew[ni] &&
+        !modifiedNew[ni] &&
+        newE.from === oldE.from &&
+        newE.to === oldE.to &&
+        !oldE.invisible &&
+        !newE.invisible,
+    );
+    if (labelChangedIdx !== -1) {
+      modifiedOld[oi] = true;
+      modifiedNew[labelChangedIdx] = true;
+    }
+  });
+
   // 1. Build oldMermaid (Left Pane): highlight deleted (red) & modified (amber)
   let oldMermaid = oldCode.trim();
   const oldStyleLines: string[] = ["\n%% Dynamic Diff Styles (Original)"];
@@ -344,10 +473,14 @@ export function computeMermaidDiffPair(
   }
 
   oldEdges.forEach((edge, idx) => {
-    const isRemoved = !newEdges.some(
-      (e) => e.from === edge.from && e.to === edge.to
-    );
-    if (isRemoved) {
+    if (edge.invisible || matchedOld[idx]) {
+      return;
+    }
+    if (modifiedOld[idx]) {
+      oldStyleLines.push(
+        `    linkStyle ${idx} stroke:${modStroke},stroke-width:2.5px;`
+      );
+    } else {
       oldStyleLines.push(
         `    linkStyle ${idx} stroke:${delStroke},stroke-width:2px;`
       );
@@ -375,10 +508,14 @@ export function computeMermaidDiffPair(
   }
 
   newEdges.forEach((edge, idx) => {
-    const isAdded = !oldEdges.some(
-      (e) => e.from === edge.from && e.to === edge.to
-    );
-    if (isAdded) {
+    if (edge.invisible || matchedNew[idx]) {
+      return;
+    }
+    if (modifiedNew[idx]) {
+      newStyleLines.push(
+        `    linkStyle ${idx} stroke:${modStroke},stroke-width:2.5px;`
+      );
+    } else {
       newStyleLines.push(
         `    linkStyle ${idx} stroke:${insStroke},stroke-width:2px;`
       );

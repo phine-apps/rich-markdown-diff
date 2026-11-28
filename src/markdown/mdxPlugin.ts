@@ -217,6 +217,40 @@ function findSameLineClosing(
   return null;
 }
 
+interface FenceState {
+  char: string;
+  len: number;
+}
+
+function updateFenceState(
+  current: FenceState | null,
+  rawLine: string,
+): { fence: FenceState | null; isFenceBoundary: boolean } {
+  const trimmed = rawLine.trim();
+  if (!current) {
+    const openMatch = trimmed.match(/^(`{3,}|~{3,})(.*)$/);
+    if (openMatch) {
+      const marker = openMatch[1];
+      const info = openMatch[2];
+      // CommonMark: backtick info strings cannot contain backticks
+      if (marker[0] === "`" && info.includes("`")) {
+        return { fence: null, isFenceBoundary: false };
+      }
+      return {
+        fence: { char: marker[0], len: marker.length },
+        isFenceBoundary: true,
+      };
+    }
+    return { fence: null, isFenceBoundary: false };
+  }
+
+  const closeRegex = new RegExp(`^${current.char}{${current.len},}$`);
+  if (closeRegex.test(trimmed)) {
+    return { fence: null, isFenceBoundary: true };
+  }
+  return { fence: current, isFenceBoundary: false };
+}
+
 /**
  * Custom Markdown-It plugin that adds support for MDX elements (like Tabs, Badges, Cards, Steps)
  * and Docusaurus Admonitions (:::note etc.).
@@ -314,6 +348,7 @@ export default function mdxPlugin(md: MarkdownIt) {
 
     let nextLine = startLine + 1;
     let depth = 1;
+    let fence: FenceState | null = null;
     const closeTag = `</${tagName}>`;
     const escapedTagName = tagName.replace(/[-\/\\^$*+?.()|[\]{}]/g, "\\$&");
     const openTagRegex = new RegExp(`^<${escapedTagName}(?:[\\s/>]|$)`, "i");
@@ -323,6 +358,13 @@ export default function mdxPlugin(md: MarkdownIt) {
       const nextPos = state.bMarks[nextLine] + state.tShift[nextLine];
       const nextMax = state.eMarks[nextLine];
       const nextLineText = state.src.slice(nextPos, nextMax).trim();
+
+      const fenceRes = updateFenceState(fence, nextLineText);
+      fence = fenceRes.fence;
+      if (fenceRes.isFenceBoundary || fence !== null) {
+        nextLine++;
+        continue;
+      }
 
       if (closeTagRegex.test(nextLineText)) {
         depth--;
@@ -365,8 +407,8 @@ export default function mdxPlugin(md: MarkdownIt) {
     const max = state.eMarks[startLine];
     const lineText = state.src.slice(pos, max).trim();
 
-    // Match admonition open trigger: starts with exactly 3 colons :::
-    const match = lineText.match(/^:::\s*([a-zA-Z0-9-]+)(?:\s+(.*))?$/);
+    // Match admonition open trigger: starts with 3+ colons (::: or ::::)
+    const match = lineText.match(/^(:{3,})\s*([a-zA-Z0-9-]+)(?:\s+(.*))?$/);
     if (!match) {
       return false;
     }
@@ -375,17 +417,38 @@ export default function mdxPlugin(md: MarkdownIt) {
       return true;
     }
 
-    const type = match[1].toLowerCase();
-    const title = match[2] ? match[2].trim() : "";
+    const openColons = match[1].length;
+    const type = match[2].toLowerCase();
+    const title = match[3] ? match[3].trim() : "";
 
     let nextLine = startLine + 1;
+    const colonStack: number[] = [openColons];
+    let fence: FenceState | null = null;
     while (nextLine < endLine) {
       const nextPos = state.bMarks[nextLine] + state.tShift[nextLine];
       const nextMax = state.eMarks[nextLine];
       const nextLineText = state.src.slice(nextPos, nextMax).trim();
 
-      if (nextLineText === ":::") {
-        break;
+      const fenceRes = updateFenceState(fence, nextLineText);
+      fence = fenceRes.fence;
+      if (fenceRes.isFenceBoundary || fence !== null) {
+        nextLine++;
+        continue;
+      }
+
+      const nestedOpen = nextLineText.match(/^(:{3,})\s*[a-zA-Z0-9-]+(?:\s+.*)?$/);
+      if (nestedOpen) {
+        colonStack.push(nestedOpen[1].length);
+        nextLine++;
+        continue;
+      }
+
+      const closeMatch = nextLineText.match(/^(:{3,})$/);
+      if (closeMatch && closeMatch[1].length >= colonStack[colonStack.length - 1]) {
+        colonStack.pop();
+        if (colonStack.length === 0) {
+          break;
+        }
       }
       nextLine++;
     }
@@ -402,10 +465,10 @@ export default function mdxPlugin(md: MarkdownIt) {
     state.parentType = oldParentType;
 
     const tokenClose = state.push("admonition_close", "div", -1);
-    tokenClose.markup = ":::";
+    tokenClose.markup = ":".repeat(openColons);
     tokenClose.map = [nextLine, nextLine + 1];
 
-    state.line = nextLine + 1;
+    state.line = Math.min(nextLine + 1, endLine);
     return true;
   });
 

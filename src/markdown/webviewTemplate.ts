@@ -121,7 +121,7 @@ export function getWebviewContent(
                     tooltip.innerHTML = \`<span class="blame-author">\${escapeHtmlInline(info.author)}</span><span class="blame-date">\${date}</span><span class="blame-msg">\${escapeHtmlInline(info.summary)}</span>\`;
                     tooltip.style.display = 'block';
                     
-                    const x = Math.min(window.innerWidth - 300, e.clientX + 15);
+                    const x = Math.max(8, Math.min(window.innerWidth - 300, e.clientX + 15));
                     const y = e.clientY + 15;
                     tooltip.style.left = x + 'px';
                     tooltip.style.top = y + 'px';
@@ -3814,6 +3814,7 @@ export function getWebviewContent(
 
                 if (Math.abs(targetPane.scrollTop - desiredScrollTop) > 0.5) {
                     targetPane.scrollTop = desiredScrollTop;
+                    markMirroredScroll(targetPane);
                 }
             }
         };
@@ -4047,7 +4048,7 @@ export function getWebviewContent(
             if (tagEl) {
                 const tag = tagEl.getAttribute('data-tag');
                 if (tag) {
-                    vscode.postMessage({ command: 'searchTag', tag: tag });
+                    vscode.postMessage({ command: 'searchTag', tag: tag.startsWith('#') ? tag : '#' + tag });
                     return;
                 }
             }

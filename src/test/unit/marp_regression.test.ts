@@ -1,7 +1,7 @@
 
 import * as assert from "assert";
 import { MarkdownDiffProvider } from "../../markdownDiff";
-import { scopeMarpCss } from "../../markdown/marpRenderer";
+import { resolveCssUrls, scopeMarpCss } from "../../markdown/marpRenderer";
 
 describe("Marp Regression Tests", () => {
   let provider: MarkdownDiffProvider;
@@ -147,5 +147,36 @@ theme: gaia
     assert.ok(scoped.includes("from { opacity: 0; }"), "'from' selector inside keyframes should not be scoped");
     assert.ok(scoped.includes("to { opacity: 1; }"), "'to' selector inside keyframes should not be scoped");
     assert.ok(!scoped.includes("#left-pane .marpit from"), "'from' selector should not get prepended with scopeSelector");
+  });
+
+  it("should ignore braces in CSS comments/strings and semicolons inside @import URLs (M-7)", () => {
+    const rawCss = `
+      @import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;700");
+      /* comment with { brace } */
+      .with-content { content: "{not-a-block}"; }
+      .after-comment { color: blue; }
+    `;
+    const { imports, scoped } = scopeMarpCss(rawCss, "#left-pane .marpit");
+    assert.strictEqual(imports.length, 1);
+    assert.ok(
+      imports[0].includes("wght@400;700"),
+      `@import URL containing ';' must not be truncated: ${imports[0]}`,
+    );
+    assert.ok(scoped.includes("#left-pane .marpit .with-content"));
+    assert.ok(scoped.includes("#left-pane .marpit .after-comment"));
+  });
+
+  it("should skip data:, http(s): case-insensitively and protocol-relative // URLs in resolveCssUrls (M-7)", () => {
+    const css = [
+      "a { background: url(HTTPS://example.com/a.png); }",
+      "b { background: url(DATA:image/png;base64,AAA); }",
+      "c { background: url(//cdn.example.com/c.png); }",
+      "d { background: url(./local.png); }",
+    ].join("\n");
+    const resolved = resolveCssUrls(css, (src) => `resolved:${src}`);
+    assert.ok(resolved.includes("url(HTTPS://example.com/a.png)"));
+    assert.ok(resolved.includes("url(DATA:image/png;base64,AAA)"));
+    assert.ok(resolved.includes("url(//cdn.example.com/c.png)"));
+    assert.ok(resolved.includes("url('resolved:./local.png')"));
   });
 });

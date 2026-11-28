@@ -150,12 +150,93 @@ export function resolveCssUrls(
   }
 
   return css.replace(/url\(['"]?(.*?)['"]?\)/gi, (match, src) => {
-    if (src && !src.startsWith("data:") && !src.startsWith("http")) {
-      const resolved = imageResolver(src);
+    const trimmed = typeof src === "string" ? src.trim() : "";
+    if (trimmed && !/^(?:data:|https?:|\/\/|#)/i.test(trimmed)) {
+      const resolved = imageResolver(trimmed);
       return `url('${resolved}')`;
     }
     return match;
   });
+}
+
+function scanQuotedCssString(css: string, start: number): number {
+  const quote = css[start];
+  let i = start + 1;
+  while (i < css.length) {
+    if (css[i] === "\\") {
+      i += 2;
+      continue;
+    }
+    if (css[i] === quote) {
+      return i + 1;
+    }
+    i++;
+  }
+  return css.length;
+}
+
+function scanCssComment(css: string, start: number): number {
+  const end = css.indexOf("*/", start + 2);
+  return end === -1 ? css.length : end + 2;
+}
+
+function extractCssAtRules(css: string): {
+  charsets: string[];
+  imports: string[];
+  cleanedCss: string;
+} {
+  const charsets: string[] = [];
+  const imports: string[] = [];
+  let cleanedCss = "";
+  let i = 0;
+
+  while (i < css.length) {
+    if (css[i] === "/" && css[i + 1] === "*") {
+      const end = scanCssComment(css, i);
+      cleanedCss += css.slice(i, end);
+      i = end;
+      continue;
+    }
+    if (css[i] === '"' || css[i] === "'") {
+      const end = scanQuotedCssString(css, i);
+      cleanedCss += css.slice(i, end);
+      i = end;
+      continue;
+    }
+    if (css[i] === "@") {
+      const rest = css.slice(i);
+      const match = rest.match(/^@(charset|import)(?=\s|["'])/i);
+      if (match) {
+        const keyword = match[1].toLowerCase();
+        let j = i + match[0].length;
+        while (j < css.length && css[j] !== ";") {
+          if (css[j] === "/" && css[j + 1] === "*") {
+            j = scanCssComment(css, j);
+          } else if (css[j] === '"' || css[j] === "'") {
+            j = scanQuotedCssString(css, j);
+          } else if (css[j] === "{" || css[j] === "}") {
+            break;
+          } else {
+            j++;
+          }
+        }
+        if (j < css.length && css[j] === ";") {
+          const rule = css.slice(i, j + 1);
+          if (keyword === "charset") {
+            charsets.push(rule);
+          } else {
+            imports.push(rule);
+          }
+          i = j + 1;
+          continue;
+        }
+      }
+    }
+    cleanedCss += css[i];
+    i++;
+  }
+
+  return { charsets, imports, cleanedCss };
 }
 
 /**
@@ -165,20 +246,10 @@ export function scopeMarpCss(
   css: string,
   scopeSelector: string,
 ): { charsets: string[]; imports: string[]; scoped: string } {
-  const charsets: string[] = [];
-  const imports: string[] = [];
+  const { charsets, imports, cleanedCss } = extractCssAtRules(css);
 
-  let cleanedCss = css.replace(/@charset\s+[^;]+;/g, (m) => {
-    charsets.push(m);
-    return "";
-  });
-
-  cleanedCss = cleanedCss.replace(/@import\s+[^;]+;/gi, (m) => {
-    imports.push(m);
-    return "";
-  });
-
-  // Scopes selectors robustly, avoiding keyframes inner selectors
+  // Scopes selectors robustly, skipping comments and quoted strings so '{'/'}' inside them
+  // cannot corrupt brace depth or selector scoping.
   let scoped = "";
   let i = 0;
   const stack: string[] = [];
@@ -186,8 +257,22 @@ export function scopeMarpCss(
 
   while (i < cleanedCss.length) {
     const char = cleanedCss[i];
+    if (char === "/" && cleanedCss[i + 1] === "*") {
+      const end = scanCssComment(cleanedCss, i);
+      buffer += cleanedCss.slice(i, end);
+      i = end;
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      const end = scanQuotedCssString(cleanedCss, i);
+      buffer += cleanedCss.slice(i, end);
+      i = end;
+      continue;
+    }
     if (char === "{") {
-      const selector = buffer.trim();
+      const leadingCommentsMatch = buffer.match(/^(?:\s|\/\*[\s\S]*?\*\/)*/);
+      const leadingPrefix = leadingCommentsMatch ? leadingCommentsMatch[0] : "";
+      const selector = buffer.slice(leadingPrefix.length).trim();
       let isKeyframes = false;
       let isOtherAtRule = false;
 
@@ -214,9 +299,9 @@ export function scopeMarpCss(
             return `${scopeSelector} ${trimmed}`;
           })
           .join(", ");
-        scoped += scopedSelector + " {";
+        scoped += leadingPrefix + scopedSelector + " {";
       } else {
-        scoped += selector + " {";
+        scoped += leadingPrefix + selector + " {";
       }
 
       if (isKeyframes) {

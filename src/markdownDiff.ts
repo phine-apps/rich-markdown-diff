@@ -45,7 +45,7 @@ import {
   lcsAlignment,
 } from "./markdown/structuralDiff";
 
-function wrapTablesForScrolling(html: string): string {
+export function wrapTablesForScrolling(html: string): string {
   if (!/<table\b/i.test(html)) {
     return html;
   }
@@ -74,32 +74,40 @@ function wrapTablesForScrolling(html: string): string {
       wrapperStart = nextTable - wrapperMatch[0].length;
     }
 
-    // Emit everything before this table (or its wrapper)
-    result.push(html.slice(pos, wrapperStart));
-
     // Find the matching </table> using depth tracking
     const tableEnd = findClosing(html, nextTable, "table");
     if (tableEnd === -1) {
       // Malformed HTML: no closing tag found; emit remainder as-is
-      result.push(html.slice(wrapperStart));
+      result.push(html.slice(pos));
       break;
     }
 
+    const wrapperTag = wrapperMatch ? wrapperMatch[1].toLowerCase() : null;
+    let wrapDiffTag = false;
     let matchEnd = tableEnd;
 
-    // If we detected a wrapper, look for the corresponding </ins> or </del>
-    if (wrapperMatch) {
+    // Only include the surrounding <ins>/<del> inside .table-scroll if its matching
+    // closing tag immediately follows </table>; otherwise <ins>/<del> spans additional
+    // elements and splitting across it would create crossed tags.
+    if (wrapperMatch && wrapperTag) {
       const afterTable = html.slice(tableEnd);
-      const closeWrapperMatch = afterTable.match(/^\s*<\/(?:ins|del)>/i);
+      const closeWrapperRegex = new RegExp(`^\\s*</${wrapperTag}\\s*>`, "i");
+      const closeWrapperMatch = afterTable.match(closeWrapperRegex);
       if (closeWrapperMatch) {
+        wrapDiffTag = true;
         matchEnd = tableEnd + closeWrapperMatch[0].length;
       }
     }
 
-    const tableFragment = html.slice(wrapperStart, matchEnd);
+    const effectiveStart = wrapDiffTag ? wrapperStart : nextTable;
+
+    // Emit everything before this table (or its closed diff wrapper)
+    result.push(html.slice(pos, effectiveStart));
+
+    const tableFragment = html.slice(effectiveStart, matchEnd);
 
     // Check if already wrapped in .table-scroll / .table-block-wrapper
-    const preceding = html.slice(0, wrapperStart).trim();
+    const preceding = html.slice(0, effectiveStart).trim();
     const following = html.slice(matchEnd).trim();
 
     const isPrecededByScrollDiv = /<div\b[^>]*\bclass=["'][^"']*\b(table-scroll|table-block-wrapper)\b[^"']*["'][^>]*>\s*(?:<div\b[^>]*\bclass=["'][^"']*\btable-scroll\b[^"']*["'][^>]*>\s*)?$/i.test(preceding);
@@ -115,6 +123,46 @@ function wrapTablesForScrolling(html: string): string {
   }
 
   return result.join("");
+}
+
+function safeJsonStringify(value: unknown): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  try {
+    return JSON.stringify(value);
+  } catch {
+    const ancestors = new WeakSet<object>();
+    const serialize = (val: unknown): unknown => {
+      if (val === null || typeof val !== "object") {
+        return typeof val === "bigint" ? val.toString() : val;
+      }
+      if (val instanceof Date) {
+        return val.toISOString();
+      }
+      if (ancestors.has(val)) {
+        return "[Circular]";
+      }
+      ancestors.add(val);
+      try {
+        if (Array.isArray(val)) {
+          return val.map((item) => serialize(item));
+        }
+        const out: Record<string, unknown> = {};
+        for (const k of Object.keys(val)) {
+          out[k] = serialize((val as Record<string, unknown>)[k]);
+        }
+        return out;
+      } finally {
+        ancestors.delete(val);
+      }
+    };
+    try {
+      return JSON.stringify(serialize(value));
+    } catch {
+      return String(value);
+    }
+  }
 }
 
 function safeParseMatter(markdown: string): {
@@ -430,8 +478,8 @@ export class MarkdownDiffProvider {
     let hasFmChanges = false;
 
     allKeys.forEach((key) => {
-      const oldVal = JSON.stringify(oldMatter.data[key]);
-      const newVal = JSON.stringify(newMatter.data[key]);
+      const oldVal = safeJsonStringify(oldMatter.data[key]);
+      const newVal = safeJsonStringify(newMatter.data[key]);
 
       const isChanged = oldVal !== newVal;
       if (isChanged) {
