@@ -202,5 +202,51 @@ describe("Webview Bridge Integration Tests", () => {
         assert.strictEqual(afterActive, beforeActive, "Blocked openLink must not change active editor");
         disposable.dispose();
     });
+
+    it("should reject requestBlockSource and applyEdit when disableQuickEdit is true (H-2)", async () => {
+        const { attachDiffWebviewMessageHandler } = require("../../extension");
+
+        let listener: ((msg: unknown) => Promise<void>) | undefined;
+        const postedMessages: unknown[] = [];
+        const mockPanel = {
+            webview: {
+                onDidReceiveMessage: (cb: (msg: unknown) => Promise<void>) => {
+                    listener = cb;
+                    return { dispose: () => {} };
+                },
+                postMessage: async (msg: unknown) => {
+                    postedMessages.push(msg);
+                    return true;
+                },
+            },
+        } as unknown as vscode.WebviewPanel;
+
+        const disposable = attachDiffWebviewMessageHandler(
+            mockPanel,
+            () => ({
+                modifiedUri: tmpFile,
+                leftLabel: "Clipboard",
+                rightLabel: path.basename(tmpFile.fsPath),
+                watchUris: [],
+                modifiedImageBaseUri: tmpFile,
+                fallbackSourceUri: tmpFile,
+                disableQuickEdit: true,
+            }),
+        );
+
+        await listener!({ command: "requestBlockSource", lineStart: 0, lineEnd: 1 });
+        assert.deepStrictEqual(postedMessages, [{ command: "quickEditDisabled" }]);
+
+        await listener!({
+            command: "applyEdit",
+            lineStart: 0,
+            lineEnd: 1,
+            newContent: "OVERWRITTEN",
+        });
+
+        const doc = await vscode.workspace.openTextDocument(tmpFile);
+        assert.strictEqual(doc.lineAt(0).text, "Line 1", "File must not be overwritten when disableQuickEdit is true");
+        disposable.dispose();
+    });
 });
 

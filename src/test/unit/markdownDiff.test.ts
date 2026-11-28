@@ -2145,5 +2145,44 @@ title: "Doc 1"
       scriptOpenRe.lastIndex = closeEnd;
     }
   });
+
+  it("preserves regex backslash escapes in generated webview script (H-1)", () => {
+    const provider = new MarkdownDiffProvider();
+    const html = provider.getWebviewContent("<p>Test</p>", "", "", "", "");
+
+    assert.ok(
+      html.includes(String.raw`replace(/[\s\u00A0]+/g, '')`),
+      "hasContent regex must keep \\s and \\u00A0 escapes in generated JS",
+    );
+    assert.ok(
+      html.includes(String.raw`replace(/[^\p{L}\p{N}\s-]/gu, '')`) &&
+        html.includes(String.raw`replace(/\s+/g, '-')`),
+      "slugifyHeadingText regexes must keep \\p{L}, \\p{N}, and \\s escapes in generated JS",
+    );
+    assert.ok(
+      html.includes(String.raw`match(/[\d.]+/g)`),
+      "toMermaidHexColor regex must keep \\d escape in generated JS",
+    );
+  });
+
+  it("applies newLineOffset option to data-line attributes for selection diffs (H-2)", () => {
+    const provider = new MarkdownDiffProvider();
+    const { html } = provider.computeDiff(
+      "# Old",
+      "# Selected Heading\n\nParagraph",
+      undefined,
+      undefined,
+      { newLineOffset: 42 },
+    );
+
+    assert.ok(
+      html.includes('data-line="42"'),
+      `Expected data-line="42" when newLineOffset=42, got: ${html}`,
+    );
+    assert.ok(
+      html.includes('data-line="44"'),
+      `Expected data-line="44" for second block when newLineOffset=42, got: ${html}`,
+    );
+  });
 });
 
