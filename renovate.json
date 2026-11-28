@@ -1,0 +1,78 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended"
+  ],
+  "timezone": "Asia/Tokyo",
+  "schedule": [
+    "* 9-10 * * 1"
+  ],
+  "prConcurrentLimit": 10,
+  "packageRules": [
+    {
+      "description": "Wait 7 days after release before opening PRs for npm and GitHub Actions",
+      "matchManagers": [
+        "npm",
+        "github-actions"
+      ],
+      "minimumReleaseAge": "7 days",
+      "internalChecksFilter": "strict"
+    },
+    {
+      "description": "Group all npm updates (including pnpm packageManager) together",
+      "matchManagers": [
+        "npm"
+      ],
+      "groupName": "npm-dependencies"
+    },
+    {
+      "description": "Group all GitHub Actions updates together",
+      "matchManagers": [
+        "github-actions"
+      ],
+      "groupName": "github-actions"
+    },
+    {
+      "description": "Group Playwright npm packages and Dockerfile.vrt image together to keep VRT versions in sync",
+      "matchPackageNames": [
+        "playwright",
+        "@playwright/test",
+        "mcr.microsoft.com/playwright"
+      ],
+      "groupName": "playwright"
+    },
+    {
+      "description": "Ignore @types/vscode to stay aligned with engines.vscode (^1.80.0)",
+      "matchManagers": [
+        "npm"
+      ],
+      "matchPackageNames": [
+        "@types/vscode"
+      ],
+      "enabled": false
+    },
+    {
+      "description": "Ignore major updates for npm packages",
+      "matchManagers": [
+        "npm"
+      ],
+      "matchUpdateTypes": [
+        "major"
+      ],
+      "enabled": false
+    },
+    {
+      "description": "Ignore major updates for Playwright Docker image to stay aligned with npm packages",
+      "matchManagers": [
+        "dockerfile"
+      ],
+      "matchPackageNames": [
+        "mcr.microsoft.com/playwright"
+      ],
+      "matchUpdateTypes": [
+        "major"
+      ],
+      "enabled": false
+    }
+  ]
+}
