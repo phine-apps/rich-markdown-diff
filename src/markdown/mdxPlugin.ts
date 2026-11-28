@@ -134,6 +134,8 @@ function parseMdxTag(text: string): MdxTagInfo | null {
       braceDepth++;
     } else if (ch === "}") {
       braceDepth = Math.max(0, braceDepth - 1);
+    } else if (braceDepth === 0 && (ch === "," || ch === "<")) {
+      return null;
     } else if (ch === ">" && braceDepth === 0) {
       tagEndIdx = i;
       break;
@@ -415,6 +417,12 @@ export default function mdxPlugin(md: MarkdownIt) {
       return false;
     }
 
+    // Do not treat generic type arguments attached to an identifier (e.g. Array<Foo>, Promise<Response>)
+    // as inline MDX components.
+    if (state.pos > 0 && /[a-zA-Z0-9_$]/.test(src[state.pos - 1])) {
+      return false;
+    }
+
     const tail = src.slice(state.pos, max);
     const tagInfo = parseMdxTag(tail);
     if (!tagInfo) {
@@ -437,17 +445,7 @@ export default function mdxPlugin(md: MarkdownIt) {
 
     const sameLineClose = findSameLineClosing(tail, fullTag.length, tagName);
     if (!sameLineClose) {
-      if (isBadge) {
-        return false;
-      }
-      // Fallback for unclosed non-badge custom components in an inline paragraph
-      if (!silent) {
-        const token = state.push("mdx_inline", "span", 0);
-        token.markup = fullTag;
-        token.meta = { tagName, attrs, isSelfClosing: true };
-      }
-      state.pos += fullTag.length;
-      return true;
+      return false;
     }
 
     if (!silent) {

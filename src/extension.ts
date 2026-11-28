@@ -88,6 +88,7 @@ interface DiffPanelState {
   originalImageBaseUri?: vscode.Uri;
   modifiedImageBaseUri?: vscode.Uri;
   fallbackSourceUri: vscode.Uri;
+  disableQuickEdit?: boolean;
 }
 
 interface RuntimeDiagnosticsPayload {
@@ -656,7 +657,13 @@ async function renderDiffPanel(
   const config = vscode.workspace.getConfiguration("rich-markdown-diff");
   const showGutterMarkers = config.get<boolean>("showGutterMarkers", true);
   const showGitBlame = config.get<boolean>("showGitBlame", true);
-  const lineHoverDelay = config.get<number>("lineHoverDelay", 500);
+  const rawLineHoverDelay = config.get<unknown>("lineHoverDelay", 500);
+  const lineHoverDelay =
+    typeof rawLineHoverDelay === "number" &&
+    Number.isFinite(rawLineHoverDelay) &&
+    rawLineHoverDelay >= 0
+      ? rawLineHoverDelay
+      : 500;
   const insertedColor = config.get<string>("insertedColor", "");
   const deletedColor = config.get<string>("deletedColor", "");
   const defaultViewMode = config.get<string>("defaultViewMode", "side-by-side");
@@ -753,6 +760,13 @@ export function attachDiffWebviewMessageHandler(
     }
 
     if (message.command === "requestBlockSource" && currentState) {
+      if (currentState.disableQuickEdit) {
+        panel.webview.postMessage({ command: "quickEditDisabled" });
+        vscode.window.showInformationMessage(
+          l10n.t("Quick Edit is disabled when comparing a text selection."),
+        );
+        return;
+      }
       const uri = currentState.modifiedUri ?? currentState.fallbackSourceUri;
       if (uri) {
         const start = message.lineStart;
@@ -782,6 +796,12 @@ export function attachDiffWebviewMessageHandler(
     }
 
     if (message.command === "applyEdit" && currentState) {
+      if (currentState.disableQuickEdit) {
+        vscode.window.showInformationMessage(
+          l10n.t("Quick Edit is disabled when comparing a text selection."),
+        );
+        return;
+      }
       const uri = currentState.modifiedUri ?? currentState.fallbackSourceUri;
       const start = message.lineStart;
       const end = message.lineEnd;
@@ -1462,7 +1482,15 @@ export function activate(context: vscode.ExtensionContext) {
 
       let docText = document.getText();
       const editor = vscode.window.activeTextEditor;
-      if (editor && editor.document === document && !editor.selection.isEmpty) {
+      const hasSelection = !!(
+        editor &&
+        editor.document === document &&
+        !editor.selection.isEmpty
+      );
+      const selectionLineOffset = hasSelection
+        ? editor.selection.start.line
+        : 0;
+      if (hasSelection) {
         docText = document.getText(editor.selection);
       }
       const clipboardText = await vscode.env.clipboard.readText();
@@ -1483,6 +1511,7 @@ export function activate(context: vscode.ExtensionContext) {
         docText,
         resolver,
         undefined,
+        { newLineOffset: selectionLineOffset },
       );
       const katexFontBaseUri = panel.webview.asWebviewUri(
         vscode.Uri.joinPath(context.extensionUri, "media", "katex", "fonts"),
@@ -1544,6 +1573,7 @@ export function activate(context: vscode.ExtensionContext) {
         watchUris: [],
         modifiedImageBaseUri: document.uri,
         fallbackSourceUri: document.uri,
+        disableQuickEdit: hasSelection,
       };
 
       const messageDisposable = attachDiffWebviewMessageHandler(

@@ -396,4 +396,61 @@ section { color: red; }
     assert.strictEqual(html.includes("leak2"), false, "CSS comment-obfuscated url() must be stripped");
     assert.strictEqual(html.includes("leak3"), false, "CSS image-set() must be stripped");
   });
+
+  it("disables gray-matter JavaScript frontmatter engine to prevent RCE (C-1)", () => {
+    const provider = new MarkdownDiffProvider();
+    (globalThis as any).__rmd_rce_test = false;
+    const jsFrontmatter = `---js
+{ title: (() => { globalThis.__rmd_rce_test = true; return "pwned"; })() }
+---
+# Safe Body`;
+    const javascriptFrontmatter = `---javascript
+{ title: (() => { globalThis.__rmd_rce_test = true; return "pwned"; })() }
+---
+# Safe Body`;
+
+    provider.computeDiff("# Normal", jsFrontmatter);
+    provider.computeDiff("# Normal", javascriptFrontmatter);
+
+    assert.strictEqual(
+      (globalThis as any).__rmd_rce_test,
+      false,
+      "JavaScript/JS frontmatter must never be evaluated",
+    );
+    delete (globalThis as any).__rmd_rce_test;
+  });
+
+  it("validates lineHoverDelay before interpolating into webview script (C-2)", () => {
+    const provider = new MarkdownDiffProvider();
+    const { html: diffHtml } = provider.computeDiff("# A", "# B");
+    const maliciousDelay = "500; window.__injected = true; //" as unknown as number;
+
+    const webview = provider.getWebviewContent(
+      diffHtml,
+      "",
+      "",
+      "",
+      "",
+      "Old",
+      "New",
+      "",
+      {},
+      undefined,
+      undefined,
+      undefined,
+      true,
+      true,
+      maliciousDelay,
+    );
+
+    assert.strictEqual(
+      webview.includes("__injected"),
+      false,
+      "Malicious string in lineHoverDelay must not be interpolated into script",
+    );
+    assert.ok(
+      webview.includes("const lineHoverDelay = 500;"),
+      "Invalid lineHoverDelay should safely fall back to 500",
+    );
+  });
 });

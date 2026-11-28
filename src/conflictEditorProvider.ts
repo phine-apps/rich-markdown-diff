@@ -6,6 +6,7 @@
 
 import * as crypto from "crypto";
 import * as vscode from "vscode";
+import { MarkdownDiffProvider } from "./markdownDiff";
 import {
   parseConflictBlocks,
   reconstructDocument,
@@ -16,6 +17,7 @@ import {
 
 export class ConflictEditorProvider implements vscode.CustomTextEditorProvider {
   public static readonly viewType = "rich-markdown-diff.conflictResolver";
+  private readonly diffProvider = new MarkdownDiffProvider();
 
   constructor(private readonly context: vscode.ExtensionContext) {}
 
@@ -52,7 +54,15 @@ export class ConflictEditorProvider implements vscode.CustomTextEditorProvider {
     // to avoid a full Webview reload, which previously caused scroll-position race conditions.
     webviewPanel.webview.html = this.getShellHtml(nonce);
 
-    const sendUpdate = () => {
+    let isDisposed = false;
+    let updateGeneration = 0;
+
+    const sendUpdate = async () => {
+      const generation = ++updateGeneration;
+      await this.diffProvider.waitForReady();
+      if (isDisposed || generation !== updateGeneration) {
+        return;
+      }
       const text = document.getText();
       const blocks = parseConflictBlocks(text);
       const content = this.renderBlocksContent(blocks);
@@ -61,11 +71,12 @@ export class ConflictEditorProvider implements vscode.CustomTextEditorProvider {
 
     const changeDocumentSubscription = vscode.workspace.onDidChangeTextDocument((e) => {
       if (e.document.uri.toString() === document.uri.toString()) {
-        sendUpdate();
+        void sendUpdate();
       }
     });
 
     webviewPanel.onDidDispose(() => {
+      isDisposed = true;
       changeDocumentSubscription.dispose();
     });
 
@@ -105,7 +116,7 @@ export class ConflictEditorProvider implements vscode.CustomTextEditorProvider {
         // [UX-01] Webview signals that it is ready to receive content.
         // Send the initial content only after the Webview JS is fully initialised,
         // so the scroll-restore logic runs AFTER the DOM is populated.
-        sendUpdate();
+        await sendUpdate();
       }
     });
 
@@ -126,6 +137,6 @@ export class ConflictEditorProvider implements vscode.CustomTextEditorProvider {
    * Does NOT include <html>/<head>/<body> wrappers.
    */
   public renderBlocksContent(blocks: DocBlock[]): string {
-    return renderConflictBlocks(blocks);
+    return renderConflictBlocks(blocks, this.diffProvider);
   }
 }

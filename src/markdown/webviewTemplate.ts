@@ -66,6 +66,12 @@ export function getWebviewContent(
   defaultFoldUnchanged: boolean = false,
 ): string {
   const nonce = crypto.randomBytes(16).toString("hex");
+  const safeLineHoverDelay =
+    typeof lineHoverDelay === "number" &&
+    Number.isFinite(lineHoverDelay) &&
+    lineHoverDelay >= 0
+      ? lineHoverDelay
+      : 500;
 
   const t = (key: string, ...args: any[]) => {
     let text = translations[key] || key;
@@ -2267,7 +2273,7 @@ export function getWebviewContent(
     <script nonce="${nonce}">
         const escapeHtmlInline = (s) => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
         const blameInfo = ${JSON.stringify(blameInfo || {}).replace(/<\//g, '<\\/')};
-        const lineHoverDelay = ${lineHoverDelay};
+        const lineHoverDelay = ${safeLineHoverDelay};
         const translations = ${JSON.stringify(translations).replace(/<\//g, '<\\/')};
         const t = (key, ...args) => {
             let text = translations[key] || key;
@@ -2675,7 +2681,7 @@ export function getWebviewContent(
             const hasContent = (el) => {
                 if (el.querySelector('img, table, iframe, svg, canvas, .image-diff-block')) return true;
                 // Use a regex that works inside the webview's script string
-                const text = el.textContent.replace(/[\s\u00A0]+/g, '');
+                const text = el.textContent.replace(/[\\s\\u00A0]+/g, '');
                 return text.length > 0;
             };
 
@@ -4117,8 +4123,8 @@ export function getWebviewContent(
             return String(text || '')
                 .trim()
                 .toLowerCase()
-                .replace(/[^\p{L}\p{N}\s-]/gu, '')
-                .replace(/\s+/g, '-');
+                .replace(/[^\\p{L}\\p{N}\\s-]/gu, '')
+                .replace(/\\s+/g, '-');
         };
 
         const jumpToPaneAnchor = (pane, rawId) => {
@@ -4534,6 +4540,10 @@ export function getWebviewContent(
                 case 'receiveBlockSource':
                     BlockEditor.onSourceReceived(message.content);
                     break;
+                case 'quickEditDisabled':
+                    BlockEditor.close();
+                    statusMsg.textContent = '';
+                    break;
             }
         });
 
@@ -4682,7 +4692,7 @@ export function getWebviewContent(
             return '#' + normalizedValue.slice(1, 7);
           }
 
-          const rgbParts = normalizedValue.match(/[\d.]+/g);
+          const rgbParts = normalizedValue.match(/[\\d.]+/g);
           if (rgbParts && rgbParts.length >= 3) {
             return '#' + rgbParts.slice(0, 3).map(part => toHexByte(Number(part))).join('');
           }

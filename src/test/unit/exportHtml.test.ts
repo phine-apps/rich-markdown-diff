@@ -1,8 +1,12 @@
 import * as assert from "assert";
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
 import {
   extractLocalFsPath,
   getMimeType,
   isAllowedAsset,
+  isPathWithinAllowedRoots,
   prepareExportHtml,
 } from "../../exportHtml";
 
@@ -47,6 +51,16 @@ describe("Export HTML Module", () => {
       assert.strictEqual(extractLocalFsPath("https://example.com/image.png"), undefined);
       assert.strictEqual(extractLocalFsPath("data:image/png;base64,..."), undefined);
       assert.strictEqual(extractLocalFsPath("file:///path/to/test\0.png"), undefined);
+    });
+
+    it("should return undefined without throwing on malformed percent-encoding (H-5)", () => {
+      assert.strictEqual(extractLocalFsPath("file:///Users/test/100%ZZ.png"), undefined);
+      assert.strictEqual(
+        extractLocalFsPath("https://file%2B.vscode-resource.vscode-cdn.net/bad%2.svg"),
+        undefined,
+      );
+      assert.strictEqual(extractLocalFsPath("vscode-file://vscode-app/%E0%A4%A.png"), undefined);
+      assert.strictEqual(extractLocalFsPath("vscode-resource:/bad%ZZ.png"), undefined);
     });
   });
 
@@ -240,6 +254,49 @@ describe("Export HTML Module", () => {
       assert.ok(result.includes("data:image/png;base64,"), "In-workspace asset should be inlined");
       assert.ok(result.includes(`src="${outsideUri}"`), "Out-of-workspace asset must not be inlined");
       assert.ok(result.includes(`src="${traversalUri}"`), "Path traversal asset must not be inlined");
+    });
+
+    it("should not crash on malformed URI encoding during export (H-5)", async () => {
+      const badUri = "https://file%2B.vscode-resource.vscode-cdn.net/Users/test/100%ZZ.png";
+      const result = await prepareExportHtml(`<img src="${badUri}">`);
+      assert.ok(result.includes(badUri));
+    });
+
+    it("should block symlinks pointing outside allowedRoots (H-5)", async () => {
+      const tmpBase = fs.mkdtempSync(path.join(os.tmpdir(), "rmd-symlink-test-"));
+      try {
+        const workspaceDir = path.join(tmpBase, "workspace");
+        const outsideDir = path.join(tmpBase, "outside");
+        fs.mkdirSync(workspaceDir);
+        fs.mkdirSync(outsideDir);
+
+        const outsideSecret = path.join(outsideDir, "secret.svg");
+        fs.writeFileSync(outsideSecret, "<svg><text>SECRET</text></svg>", "utf8");
+
+        const symlinkInside = path.join(workspaceDir, "evil.svg");
+        fs.symlinkSync(outsideSecret, symlinkInside);
+
+        const insideReal = path.join(workspaceDir, "legit.svg");
+        fs.writeFileSync(insideReal, "<svg><circle r='5'/></svg>", "utf8");
+
+        assert.strictEqual(
+          isPathWithinAllowedRoots(symlinkInside, [workspaceDir]),
+          false,
+          "Symlink pointing outside allowedRoots must be rejected",
+        );
+        assert.strictEqual(
+          isPathWithinAllowedRoots(insideReal, [workspaceDir]),
+          true,
+          "Real file inside allowedRoots must be allowed",
+        );
+
+        const mockHtml = `<img src="file://${symlinkInside}"><img src="file://${insideReal}">`;
+        const result = await prepareExportHtml(mockHtml, { allowedRoots: [workspaceDir] });
+        assert.ok(result.includes(`src="file://${symlinkInside}"`), "Symlinked external SVG must not be inlined");
+        assert.ok(result.includes("data:image/svg+xml;base64,"), "Legitimate in-workspace SVG should be inlined");
+      } finally {
+        fs.rmSync(tmpBase, { recursive: true, force: true });
+      }
     });
   });
 });

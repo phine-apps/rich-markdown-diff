@@ -21,6 +21,14 @@ const MIME_TYPES: Record<string, string> = {
   ".eot": "application/vnd.ms-fontobject",
 };
 
+function safeDecodeUriComponent(value: string): string | undefined {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Extracts a local filesystem path from a VS Code Webview URI or file URI string.
  *
@@ -46,7 +54,10 @@ export function extractLocalFsPath(uriStr: string): string | undefined {
 
   const vscodeResourceCdnMatch = decoded.match(/^https:\/\/(?:file%2B|file\+)\.vscode-resource\.vscode-cdn\.net\/(.*)$/i);
   if (vscodeResourceCdnMatch) {
-    let rawPath = decodeURIComponent(vscodeResourceCdnMatch[1]);
+    let rawPath = safeDecodeUriComponent(vscodeResourceCdnMatch[1]);
+    if (rawPath === undefined) {
+      return undefined;
+    }
     // If Windows drive letter without leading slash: e.g. "c:/path/to" or "/c:/path/to"
     if (/^\/?[a-zA-Z]:[\\/]/.test(rawPath)) {
       rawPath = rawPath.replace(/^\//, "");
@@ -58,7 +69,10 @@ export function extractLocalFsPath(uriStr: string): string | undefined {
 
   const vscodeFileMatch = decoded.match(/^vscode-file:\/\/vscode-app\/(.*)$/i);
   if (vscodeFileMatch) {
-    let rawPath = decodeURIComponent(vscodeFileMatch[1]);
+    let rawPath = safeDecodeUriComponent(vscodeFileMatch[1]);
+    if (rawPath === undefined) {
+      return undefined;
+    }
     if (/^\/?[a-zA-Z]:[\\/]/.test(rawPath)) {
       rawPath = rawPath.replace(/^\//, "");
     } else if (!rawPath.startsWith("/")) {
@@ -69,7 +83,10 @@ export function extractLocalFsPath(uriStr: string): string | undefined {
 
   const vscodeResourceMatch = decoded.match(/^vscode-resource:(?:\/\/file)?\/(.*)$/i);
   if (vscodeResourceMatch) {
-    let rawPath = decodeURIComponent(vscodeResourceMatch[1]);
+    let rawPath = safeDecodeUriComponent(vscodeResourceMatch[1]);
+    if (rawPath === undefined) {
+      return undefined;
+    }
     if (/^\/?[a-zA-Z]:[\\/]/.test(rawPath)) {
       rawPath = rawPath.replace(/^\//, "");
     } else if (!rawPath.startsWith("/")) {
@@ -80,7 +97,10 @@ export function extractLocalFsPath(uriStr: string): string | undefined {
 
   const fileMatch = decoded.match(/^file:\/\/(.*)$/i);
   if (fileMatch) {
-    let rawPath = decodeURIComponent(fileMatch[1]);
+    let rawPath = safeDecodeUriComponent(fileMatch[1]);
+    if (rawPath === undefined) {
+      return undefined;
+    }
     // file:///c:/... or file:///Users/...
     if (/^\/[a-zA-Z]:[\\/]/.test(rawPath)) {
       rawPath = rawPath.slice(1);
@@ -122,9 +142,44 @@ async function defaultReadFile(fsPath: string): Promise<Uint8Array> {
   return await fs.promises.readFile(fsPath);
 }
 
+function resolveWithRealpathSync(targetPath: string): string | undefined {
+  let current = path.resolve(targetPath);
+  const trailingSegments: string[] = [];
+
+  while (true) {
+    try {
+      const stat = fs.lstatSync(current);
+      if (stat.isSymbolicLink()) {
+        // Resolve symlink target; if dangling, reject to prevent symlink traversal
+        const real = fs.realpathSync(current);
+        return trailingSegments.length > 0
+          ? path.join(real, ...trailingSegments.reverse())
+          : real;
+      }
+      const real = fs.realpathSync(current);
+      return trailingSegments.length > 0
+        ? path.join(real, ...trailingSegments.reverse())
+        : real;
+    } catch (err: unknown) {
+      const code = (err as NodeJS.ErrnoException)?.code;
+      if (code === "ENOENT") {
+        const parent = path.dirname(current);
+        if (parent === current) {
+          return path.resolve(targetPath);
+        }
+        trailingSegments.push(path.basename(current));
+        current = parent;
+        continue;
+      }
+      return undefined;
+    }
+  }
+}
+
 /**
  * Verifies that a local filesystem path stays strictly within at least one
- * allowed root directory (prevents local file exfiltration via path traversal).
+ * allowed root directory (prevents local file exfiltration via path traversal
+ * or symbolic links).
  */
 export function isPathWithinAllowedRoots(
   filePath: string,
@@ -133,9 +188,15 @@ export function isPathWithinAllowedRoots(
   if (!filePath || filePath.includes("\0") || allowedRoots.length === 0) {
     return false;
   }
-  const resolvedTarget = path.resolve(filePath);
+  const resolvedTarget = resolveWithRealpathSync(filePath);
+  if (!resolvedTarget) {
+    return false;
+  }
   return allowedRoots.some((root) => {
-    const resolvedRoot = path.resolve(root);
+    const resolvedRoot = resolveWithRealpathSync(root);
+    if (!resolvedRoot) {
+      return false;
+    }
     const rel = path.relative(resolvedRoot, resolvedTarget);
     return !rel.startsWith("..") && !path.isAbsolute(rel);
   });

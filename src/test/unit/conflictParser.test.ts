@@ -1,4 +1,5 @@
 import * as assert from "assert";
+import { MarkdownDiffProvider } from "../../markdownDiff";
 import {
   parseConflictBlocks,
   reconstructDocument,
@@ -230,5 +231,69 @@ Theirs line 2
     }
     const reconstructed = reconstructDocument(blocks);
     assert.strictEqual(reconstructed, "before\n\nafter");
+  });
+
+  it("should render async plugins when passed a ready MarkdownDiffProvider (H-4)", async () => {
+    const text = `<<<<<<< HEAD\n==highlighted== :smile:\n=======\n==updated== :rocket:\n>>>>>>> branch`;
+    const blocks = parseConflictBlocks(text);
+    const provider = new MarkdownDiffProvider();
+    await provider.waitForReady();
+
+    const html = renderConflictBlocks(blocks, provider);
+    assert.ok(html.includes("<mark>"), "Async markdown-it-mark plugin should be active");
+    assert.ok(html.includes("😄") || html.includes("🚀"), "Async markdown-it-emoji plugin should be active");
+  });
+
+  it("should not split conflict when mine contains a Setext H1 heading underline ========= (H-8)", () => {
+    const text = [
+      "<<<<<<< HEAD",
+      "Heading Title",
+      "=============",
+      "Mine body",
+      "=======",
+      "Theirs body",
+      ">>>>>>> branch",
+    ].join("\n");
+
+    const blocks = parseConflictBlocks(text);
+    assert.strictEqual(blocks.length, 1);
+    assert.strictEqual(blocks[0].type, "conflict");
+    if (blocks[0].type === "conflict") {
+      assert.strictEqual(blocks[0].mine, "Heading Title\n=============\nMine body");
+      assert.strictEqual(blocks[0].theirs, "Theirs body");
+    }
+  });
+
+  it("should preserve empty diff3 base section and baseLabel in reconstructDocument and unclosed rescue (H-8)", () => {
+    const text = [
+      "<<<<<<< HEAD",
+      "Mine",
+      "||||||| common-base",
+      "=======",
+      "Theirs",
+      ">>>>>>> feature",
+    ].join("\n");
+
+    const blocks = parseConflictBlocks(text);
+    assert.strictEqual(blocks.length, 1);
+    assert.strictEqual(blocks[0].type, "conflict");
+    if (blocks[0].type === "conflict") {
+      assert.strictEqual(blocks[0].base, "");
+      assert.strictEqual(blocks[0].baseLabel, "common-base");
+    }
+    const reconstructed = reconstructDocument(blocks);
+    assert.strictEqual(reconstructed, text);
+
+    const unclosedText = [
+      "<<<<<<< HEAD",
+      "Mine",
+      "||||||| common-base",
+    ].join("\n");
+    const rescuedBlocks = parseConflictBlocks(unclosedText);
+    assert.strictEqual(rescuedBlocks.length, 1);
+    assert.strictEqual(rescuedBlocks[0].type, "common");
+    if (rescuedBlocks[0].type === "common") {
+      assert.strictEqual(rescuedBlocks[0].text, unclosedText);
+    }
   });
 });

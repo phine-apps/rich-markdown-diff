@@ -20,6 +20,7 @@ export interface ConflictBlock {
   base?: string;
   mineLabel?: string;
   theirsLabel?: string;
+  baseLabel?: string;
   startLine: number;
   endLine: number;
   choice?: "mine" | "theirs" | "both";
@@ -179,8 +180,10 @@ export function getConflictResolverShellHtml(nonce: string): string {
  * Renders blocks to an HTML string for injection into #content via postMessage.
  * Does NOT include <html>/<head>/<body> wrappers.
  */
-export function renderConflictBlocks(blocks: DocBlock[]): string {
-  const diffProvider = new MarkdownDiffProvider();
+export function renderConflictBlocks(
+  blocks: DocBlock[],
+  diffProvider: MarkdownDiffProvider = new MarkdownDiffProvider(),
+): string {
   let bodyContent = "";
 
   for (const block of blocks) {
@@ -245,29 +248,34 @@ export function parseConflictBlocks(content: string): DocBlock[] {
   let conflictBaseLines: string[] = [];
   let conflictTheirsLines: string[] = [];
   let mineLabel = "";
+  let rawMineLabel = "";
+  let baseLabel = "";
+  let hasBase = false;
   let conflictStartLine = 0;
   let section: "mine" | "base" | "theirs" = "mine";
+
+  const rescueUnclosedConflict = () => {
+    const headerLine = rawMineLabel ? `<<<<<<< ${rawMineLabel}` : "<<<<<<<";
+    const unclosedLines: string[] = [headerLine, ...conflictMineLines];
+    if (hasBase) {
+      unclosedLines.push(baseLabel ? `||||||| ${baseLabel}` : "|||||||");
+      unclosedLines.push(...conflictBaseLines);
+    }
+    if (section === "theirs") {
+      unclosedLines.push("=======");
+      unclosedLines.push(...conflictTheirsLines);
+    }
+    currentCommonLines.push(...unclosedLines);
+  };
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
 
-    // Git conflict markers start with <<<<<<<, |||||||, =======, >>>>>>>
-    if (line.startsWith("<<<<<<<")) {
+    // Git conflict markers: <<<<<<< [label], ||||||| [label], ======= (exact 7 '='), >>>>>>> [label]
+    if (/^<<<<<<<(?:\s|$)/.test(line)) {
       if (inConflict) {
         // Safely rescue the previous unclosed conflict block as common text to prevent data loss
-        const unclosedLines: string[] = [
-          `<<<<<<< ${mineLabel}`,
-          ...conflictMineLines,
-        ];
-        if (conflictBaseLines.length > 0) {
-          unclosedLines.push("|||||||");
-          unclosedLines.push(...conflictBaseLines);
-        }
-        if (section === "theirs") {
-          unclosedLines.push("=======");
-          unclosedLines.push(...conflictTheirsLines);
-        }
-        currentCommonLines.push(...unclosedLines);
+        rescueUnclosedConflict();
       }
 
       if (currentCommonLines.length > 0) {
@@ -280,33 +288,43 @@ export function parseConflictBlocks(content: string): DocBlock[] {
       inConflict = true;
       section = "mine";
       conflictStartLine = i;
-      mineLabel = line.substring(7).trim() || "Current (Mine)";
+      rawMineLabel = line.substring(7).trim();
+      mineLabel = rawMineLabel || "Current (Mine)";
+      baseLabel = "";
+      hasBase = false;
       conflictMineLines = [];
       conflictBaseLines = [];
       conflictTheirsLines = [];
       continue;
     }
 
-    if (inConflict && section === "mine" && line.startsWith("|||||||")) {
+    if (inConflict && section === "mine" && /^\|\|\|\|\|\|\|(?:\s|$)/.test(line)) {
       section = "base";
+      hasBase = true;
+      baseLabel = line.substring(7).trim();
       continue;
     }
 
-    if (inConflict && (section === "mine" || section === "base") && line.startsWith("=======")) {
+    if (
+      inConflict &&
+      (section === "mine" || section === "base") &&
+      /^=======[ \t]*$/.test(line)
+    ) {
       section = "theirs";
       continue;
     }
 
-    if (inConflict && line.startsWith(">>>>>>>")) {
+    if (inConflict && /^>>>>>>>(?:\s|$)/.test(line)) {
       const theirsLabel = line.substring(7).trim() || "Incoming (Theirs)";
       blocks.push({
         type: "conflict",
         id: `conflict-${conflictIdCounter++}`,
         mine: conflictMineLines.join("\n"),
         theirs: conflictTheirsLines.join("\n"),
-        base: conflictBaseLines.length > 0 ? conflictBaseLines.join("\n") : undefined,
+        base: hasBase ? conflictBaseLines.join("\n") : undefined,
         mineLabel,
         theirsLabel,
+        baseLabel: hasBase && baseLabel ? baseLabel : undefined,
         startLine: conflictStartLine,
         endLine: i,
         mineLineCount: conflictMineLines.length,
@@ -332,19 +350,7 @@ export function parseConflictBlocks(content: string): DocBlock[] {
 
   // Safely rescue unclosed conflict marker
   if (inConflict) {
-    const unclosedLines: string[] = [
-      `<<<<<<< ${mineLabel}`,
-      ...conflictMineLines,
-    ];
-    if (conflictBaseLines.length > 0) {
-      unclosedLines.push("|||||||");
-      unclosedLines.push(...conflictBaseLines);
-    }
-    if (section === "theirs") {
-      unclosedLines.push("=======");
-      unclosedLines.push(...conflictTheirsLines);
-    }
-    currentCommonLines.push(...unclosedLines);
+    rescueUnclosedConflict();
   }
 
   if (currentCommonLines.length > 0) {
@@ -389,7 +395,7 @@ export function reconstructDocument(blocks: DocBlock[]): string {
           resultLines.push(block.mine);
         }
         if (block.base !== undefined) {
-          resultLines.push("|||||||");
+          resultLines.push(block.baseLabel ? `||||||| ${block.baseLabel}` : "|||||||");
           if ((block.baseLineCount ?? (block.base.length > 0 ? 1 : 0)) > 0) {
             resultLines.push(block.base);
           }

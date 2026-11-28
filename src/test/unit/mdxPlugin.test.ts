@@ -267,5 +267,20 @@ Paragraph after cards.`;
     const bodyContent = result.html.split('class="mdx-card-body"')[1] || "";
     assert.ok(!bodyContent.includes('&gt; y ?'), "Expression must not spill into body as raw text");
   });
+
+  it("should not convert generic type expressions into inline MDX fallback badges (H-6)", () => {
+    const doc = "Use Promise<Response>, Array<Foo>, and Map<String, Number> in TypeScript.";
+    const result = provider.computeDiff(doc, doc);
+
+    assert.strictEqual(
+      result.html.includes("mdx-inline-fallback"),
+      false,
+      `Generic type expressions must not become MDX badges: ${result.html}`,
+    );
+    assert.ok(
+      result.html.includes("Map&lt;String, Number&gt;"),
+      "Generic type with comma should remain escaped text",
+    );
+  });
 });
 

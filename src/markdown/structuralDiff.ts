@@ -92,6 +92,212 @@ function isBlockLevelRun(s: string): boolean {
   return seen;
 }
 
+/**
+ * Quote-aware scan for the closing `>` of an HTML opening tag starting at `start`.
+ */
+function findOpeningTagEnd(html: string, start: number): number {
+  let j = start;
+  const len = html.length;
+  while (j < len) {
+    const ch = html[j];
+    if (ch === ">") {
+      return j;
+    }
+    if (ch === '"' || ch === "'") {
+      j++;
+      while (j < len && html[j] !== ch) {
+        j++;
+      }
+      if (j >= len) {
+        return -1;
+      }
+    }
+    j++;
+  }
+  return -1;
+}
+
+interface BalancedTagMatch {
+  full: string;
+  tagName: string;
+  attrs: string;
+  inner: string;
+  start: number;
+  end: number;
+}
+
+/**
+ * Extracts a whitespace-separated sequence of top-level balanced HTML elements
+ * whose opening tags match `allowedTagRegex`, using `findClosing` depth tracking.
+ * Returns `null` if any non-whitespace content falls outside allowed elements
+ * or if any element is unclosed.
+ */
+function extractTopLevelTagSequence(
+  content: string,
+  allowedTagRegex: RegExp,
+): BalancedTagMatch[] | null {
+  const parts: BalancedTagMatch[] = [];
+  let pos = 0;
+  const len = content.length;
+
+  while (pos < len) {
+    while (pos < len && /\s/.test(content[pos])) {
+      pos++;
+    }
+    if (pos >= len) {
+      break;
+    }
+
+    const slice = content.slice(pos);
+    const openMatch = slice.match(allowedTagRegex);
+    if (!openMatch) {
+      return null;
+    }
+
+    const tagName = openMatch[1];
+    const tagEnd = findOpeningTagEnd(content, pos);
+    if (tagEnd === -1) {
+      return null;
+    }
+
+    const isSelfClosing = content[tagEnd - 1] === "/";
+    const end = isSelfClosing ? tagEnd + 1 : findClosing(content, pos, tagName);
+    if (end === -1) {
+      return null;
+    }
+
+    const full = content.slice(pos, end);
+    const attrs = content.slice(pos + 1 + tagName.length, isSelfClosing ? tagEnd - 1 : tagEnd);
+    let inner = "";
+    if (!isSelfClosing) {
+      const closeStart = content.lastIndexOf("</", end - 1);
+      if (closeStart < tagEnd + 1) {
+        return null;
+      }
+      inner = content.slice(tagEnd + 1, closeStart);
+    }
+
+    parts.push({ full, tagName, attrs, inner, start: pos, end });
+    pos = end;
+  }
+
+  return parts;
+}
+
+/**
+ * Linear O(N) replacement for paired `<del><tag>...</tag></del>\s*<ins><tag>...</tag></ins>`
+ * diff blocks using `findClosing` depth tracking so nested same-name elements
+ * (e.g. nested lists, blockquotes, tables) are never cut off at the first inner close tag.
+ */
+function replacePairedDiffBlocks(
+  html: string,
+  tagRegex: RegExp,
+  onPair: (info: {
+    fullMatch: string;
+    delBlock: string;
+    oldTag: string;
+    oldAttrs: string;
+    oldInner: string;
+    oldFull: string;
+    insBlock: string;
+    newTag: string;
+    newAttrs: string;
+    newInner: string;
+    newFull: string;
+  }) => string,
+): string {
+  const parts: string[] = [];
+  let cursor = 0;
+  const delRegex = /<del(?=[\s>])/gi;
+
+  while (cursor < html.length) {
+    delRegex.lastIndex = cursor;
+    const delMatch = delRegex.exec(html);
+    if (!delMatch) {
+      parts.push(html.slice(cursor));
+      break;
+    }
+
+    const delIdx = delMatch.index;
+    const delTagEnd = findOpeningTagEnd(html, delIdx);
+    if (delTagEnd === -1) {
+      parts.push(html.slice(cursor));
+      break;
+    }
+
+    const delFullEnd = findClosing(html, delIdx, "del");
+    if (delFullEnd === -1) {
+      parts.push(html.slice(cursor, delTagEnd + 1));
+      cursor = delTagEnd + 1;
+      continue;
+    }
+
+    const delCloseStart = html.lastIndexOf("</", delFullEnd - 1);
+    const delContent = html.slice(delTagEnd + 1, delCloseStart);
+    const delElements = extractTopLevelTagSequence(delContent, tagRegex);
+    if (!delElements || delElements.length !== 1) {
+      parts.push(html.slice(cursor, delTagEnd + 1));
+      cursor = delTagEnd + 1;
+      continue;
+    }
+
+    const afterDelClose = html.slice(delFullEnd);
+    const insOpenMatch = afterDelClose.match(/^(\s*)<ins(?=[\s>])/i);
+    if (!insOpenMatch) {
+      parts.push(html.slice(cursor, delFullEnd));
+      cursor = delFullEnd;
+      continue;
+    }
+
+    const insIdx = delFullEnd + insOpenMatch[1].length;
+    const insTagEnd = findOpeningTagEnd(html, insIdx);
+    if (insTagEnd === -1) {
+      parts.push(html.slice(cursor, delFullEnd));
+      cursor = delFullEnd;
+      continue;
+    }
+
+    const insFullEnd = findClosing(html, insIdx, "ins");
+    if (insFullEnd === -1) {
+      parts.push(html.slice(cursor, delFullEnd));
+      cursor = delFullEnd;
+      continue;
+    }
+
+    const insCloseStart = html.lastIndexOf("</", insFullEnd - 1);
+    const insContent = html.slice(insTagEnd + 1, insCloseStart);
+    const insElements = extractTopLevelTagSequence(insContent, tagRegex);
+    if (!insElements || insElements.length !== 1) {
+      parts.push(html.slice(cursor, delFullEnd));
+      cursor = delFullEnd;
+      continue;
+    }
+
+    const oldEl = delElements[0];
+    const newEl = insElements[0];
+
+    parts.push(html.slice(cursor, delIdx));
+    parts.push(
+      onPair({
+        fullMatch: html.slice(delIdx, insFullEnd),
+        delBlock: html.slice(delIdx, delFullEnd),
+        oldTag: oldEl.tagName,
+        oldAttrs: oldEl.attrs,
+        oldInner: oldEl.inner,
+        oldFull: oldEl.full,
+        insBlock: html.slice(insIdx, insFullEnd),
+        newTag: newEl.tagName,
+        newAttrs: newEl.attrs,
+        newInner: newEl.inner,
+        newFull: newEl.full,
+      }),
+    );
+    cursor = insFullEnd;
+  }
+
+  return parts.join("");
+}
+
 
 /**
  * Main entrance for computing granular HTML diffs.
@@ -989,81 +1195,141 @@ export function flattenDiffNesting(html: string): string {
  * This ensures that refineBlockDiffs can match individual blocks correctly.
  */
 export function splitConsolidatedDiffs(html: string): string {
-  const blockTags = "h[1-6]|p|blockquote|pre|div|table|ul|ol|dl|section";
-  const blocksRegex = new RegExp(
-    `<(${blockTags})[^>]*>[\\s\\S]*?<\\/\\1>`,
-    "gi",
-  );
+  const blockTagRegex =
+    /^<(h[1-6]|p|blockquote|pre|div|table|ul|ol|dl|section)(?=[\s/>])/i;
 
-  let result = html;
+  // First, look for pairs of <del> and <ins> that both contain multiple top-level blocks.
+  // Uses findClosing() depth tracking so nested blocks (e.g. nested <div>, <ul>, <blockquote>)
+  // are never truncated at their first inner closing tag.
+  let result = (() => {
+    const out: string[] = [];
+    let cursor = 0;
+    const delOpenRegex = /<del\b/gi;
 
-  // First, look for pairs of <del> and <ins> that both contain multiple blocks
-  // This is where interleaving is most effective.
-  result = result.replace(
-    /(<del([^>]*)>([\s\S]*?)<\/del>)\s*(<ins([^>]*)>([\s\S]*?)<\/ins>)/gi,
-    (match, fullDel, delAttrs, delContent, fullIns, insAttrs, insContent) => {
-      const delParts: string[] = [];
-      const insParts: string[] = [];
-      let m: RegExpExecArray | null;
-
-      while ((m = blocksRegex.exec(delContent)) !== null) {
-        delParts.push(m[0]);
+    while (cursor < html.length) {
+      delOpenRegex.lastIndex = cursor;
+      const dm = delOpenRegex.exec(html);
+      if (!dm) {
+        out.push(html.slice(cursor));
+        break;
       }
-      blocksRegex.lastIndex = 0;
-      while ((m = blocksRegex.exec(insContent)) !== null) {
-        insParts.push(m[0]);
-      }
-      blocksRegex.lastIndex = 0;
 
-      blocksRegex.lastIndex = 0;
-      const delRemaining = delContent.replace(blocksRegex, "").trim();
-      blocksRegex.lastIndex = 0;
-      const insRemaining = insContent.replace(blocksRegex, "").trim();
+      const delIdx = dm.index;
+      const delTagEnd = findOpeningTagEnd(html, delIdx);
+      if (delTagEnd === -1) {
+        out.push(html.slice(cursor));
+        break;
+      }
+      const delCloseEnd = findClosing(html, delIdx, "del");
+      if (delCloseEnd === -1) {
+        out.push(html.slice(cursor, delTagEnd + 1));
+        cursor = delTagEnd + 1;
+        continue;
+      }
+
+      const delCloseStart = html.lastIndexOf("</", delCloseEnd - 1);
+      const delAttrs = html.slice(delIdx + 4, delTagEnd);
+      const delContent = html.slice(delTagEnd + 1, delCloseStart);
+
+      const afterDel = html.slice(delCloseEnd);
+      const insMatch = afterDel.match(/^(\s*)<ins\b/i);
+      if (!insMatch) {
+        out.push(html.slice(cursor, delCloseEnd));
+        cursor = delCloseEnd;
+        continue;
+      }
+
+      const insIdx = delCloseEnd + insMatch[1].length;
+      const insTagEnd = findOpeningTagEnd(html, insIdx);
+      if (insTagEnd === -1) {
+        out.push(html.slice(cursor, delCloseEnd));
+        cursor = delCloseEnd;
+        continue;
+      }
+      const insCloseEnd = findClosing(html, insIdx, "ins");
+      if (insCloseEnd === -1) {
+        out.push(html.slice(cursor, delCloseEnd));
+        cursor = delCloseEnd;
+        continue;
+      }
+
+      const insCloseStart = html.lastIndexOf("</", insCloseEnd - 1);
+      const insAttrs = html.slice(insIdx + 4, insTagEnd);
+      const insContent = html.slice(insTagEnd + 1, insCloseStart);
+
+      const delParts = extractTopLevelTagSequence(delContent, blockTagRegex);
+      const insParts = extractTopLevelTagSequence(insContent, blockTagRegex);
 
       if (
+        delParts &&
+        insParts &&
         delParts.length > 1 &&
         insParts.length > 1 &&
-        delParts.length === insParts.length &&
-        delRemaining.length === 0 &&
-        insRemaining.length === 0
+        delParts.length === insParts.length
       ) {
-        return delParts
-          .map((p, i) => {
-            return `<del${delAttrs}>${p}</del><ins${insAttrs}>${insParts[i]}</ins>`;
-          })
-          .join("\n");
+        out.push(html.slice(cursor, delIdx));
+        out.push(
+          delParts
+            .map((p, i) => `<del${delAttrs}>${p.full}</del><ins${insAttrs}>${insParts[i].full}</ins>`)
+            .join("\n"),
+        );
+        cursor = insCloseEnd;
+      } else {
+        out.push(html.slice(cursor, delCloseEnd));
+        cursor = delCloseEnd;
       }
-      return match;
-    },
-  );
+    }
+
+    return out.join("");
+  })();
 
   // Fallback for single tags or unbalanced tags: split them normally
-  const diffTags = ["ins", "del"];
+  const diffTags = ["ins", "del"] as const;
   diffTags.forEach((tagName) => {
-    const regex = new RegExp(
-      `<${tagName}([^>]*)>([\\s\\S]*?)<\\/${tagName}>`,
-      "gi",
-    );
+    const out: string[] = [];
+    let cursor = 0;
+    const openRegex = new RegExp(`<${tagName}(?=[\\s>])`, "gi");
 
-    result = result.replace(regex, (match, attrs, content) => {
-      const parts: string[] = [];
-      let m: RegExpExecArray | null;
-      blocksRegex.lastIndex = 0;
-      while ((m = blocksRegex.exec(content)) !== null) {
-        parts.push(m[0]);
+    while (cursor < result.length) {
+      openRegex.lastIndex = cursor;
+      const m = openRegex.exec(result);
+      if (!m) {
+        out.push(result.slice(cursor));
+        break;
       }
 
-      blocksRegex.lastIndex = 0;
-      const remainingText = content.replace(blocksRegex, "").trim();
-
-      if (parts.length > 1 && remainingText.length === 0) {
-        return parts
-          .map((p) => `<${tagName}${attrs}>${p}</${tagName}>`)
-          .join("\n");
+      const idx = m.index;
+      const tagEnd = findOpeningTagEnd(result, idx);
+      if (tagEnd === -1) {
+        out.push(result.slice(cursor));
+        break;
+      }
+      const closeEnd = findClosing(result, idx, tagName);
+      if (closeEnd === -1) {
+        out.push(result.slice(cursor, tagEnd + 1));
+        cursor = tagEnd + 1;
+        continue;
       }
 
-      return match;
-    });
+      const closeStart = result.lastIndexOf("</", closeEnd - 1);
+      const attrs = result.slice(idx + 1 + tagName.length, tagEnd);
+      const content = result.slice(tagEnd + 1, closeStart);
+      const parts = extractTopLevelTagSequence(content, blockTagRegex);
+
+      out.push(result.slice(cursor, idx));
+      if (parts && parts.length > 1) {
+        out.push(
+          parts
+            .map((p) => `<${tagName}${attrs}>${p.full}</${tagName}>`)
+            .join("\n"),
+        );
+      } else {
+        out.push(result.slice(idx, closeEnd));
+      }
+      cursor = closeEnd;
+    }
+
+    result = out.join("");
   });
 
   return result;
@@ -1732,28 +1998,24 @@ export function refineBlockDiffs(
     return parts.join("");
   })();
 
-  const listContainerRegex =
-    /<del[^>]*>\s*<(ol|ul|dl)([^>]*)>([\s\S]*?)<\/\1>\s*<\/del>\s*<ins[^>]*>\s*<(ol|ul|dl)([^>]*)>([\s\S]*?)<\/\4>\s*<\/ins>/gi;
-
-  resultHtml = resultHtml.replace(
-    listContainerRegex,
-    (match, oldTag, oldAttrs, oldContent, newTag, newAttrs, newContent) => {
+  resultHtml = replacePairedDiffBlocks(
+    resultHtml,
+    /^<(ol|ul|dl)(?=[\s/>])/i,
+    ({ oldTag, oldAttrs, oldInner, oldFull, newTag, newAttrs, newInner, newFull }) => {
       if (oldTag.toLowerCase() !== newTag.toLowerCase()) {
         return createStructuralListContainerDiff(
           oldTag,
           oldAttrs,
-          oldContent,
+          oldInner,
           newTag,
           newAttrs,
-          newContent,
+          newInner,
         );
       }
 
-      return (execute as any)(
-        `<${oldTag}${oldAttrs}>${oldContent}</${oldTag}>`,
-        `<${newTag}${newAttrs}>${newContent}</${newTag}>`,
-        { tokenizeListContainers: false },
-      );
+      return (execute as any)(oldFull, newFull, {
+        tokenizeListContainers: false,
+      });
     },
   );
 
@@ -1914,130 +2176,195 @@ export function refineBlockDiffs(
       tokenizeCodeBlocks: false,
     });
 
-  // NOTE: We cannot use a simple adjacency regex (del<pre></pre>del ins<pre></pre>ins) because
-  // other diff elements (e.g. a deleted section) may sit between the del-pre and ins-pre blocks.
-  // Instead, collect all del-wrapped and ins-wrapped code blocks globally, pair them by index,
-  // re-diff each pair, and substitute back via placeholder tokens.
+  // NOTE: Pair deleted and inserted code blocks ONLY within the same contiguous diff hunk
+  // (adjacent <del>/<ins> runs separated only by whitespace, with no unchanged content in between).
+  // Global pairing across unchanged sections causes newly added code blocks in later sections
+  // to disappear and merge into unrelated deleted code blocks in earlier sections.
   //
   // Code blocks may appear as:
   //   A) <del><div class="code-block-wrapper"><pre ...>...</pre></div></del>  (standard renderer)
   //   B) <del><pre ...>...</pre></del>                                        (bare, e.g. Marp)
-  {
-    interface PreBlock {
-      full: string;
-      wrapperAttrs: string; // div attrs (empty string for bare <pre>)
+  resultHtml = (() => {
+    interface HunkPreBlock {
+      start: number;
+      end: number;
+      wrapperAttrs: string;
       preAttrs: string;
       inner: string;
-      isWrapped: boolean;   // true → code-block-wrapper present
-    }
-    const delWrappedBlocks: PreBlock[] = [];
-    const insWrappedBlocks: PreBlock[] = [];
-    const delBareBlocks: PreBlock[] = [];
-    const insBareBlocks: PreBlock[] = [];
-
-    // Pattern A: del/ins wrapping the code-block-wrapper div
-    const delWrappedRegex =
-      /<del([^>]*)>\s*<div class="code-block-wrapper"([^>]*)>\s*<pre([^>]*)>([\s\S]*?)<\/pre>\s*<\/div>\s*<\/del>/gi;
-    const insWrappedRegex =
-      /<ins([^>]*)>\s*<div class="code-block-wrapper"([^>]*)>\s*<pre([^>]*)>([\s\S]*?)<\/pre>\s*<\/div>\s*<\/ins>/gi;
-
-    let m: RegExpExecArray | null;
-    while ((m = delWrappedRegex.exec(resultHtml)) !== null) {
-      delWrappedBlocks.push({ full: m[0], wrapperAttrs: m[2], preAttrs: m[3], inner: m[4], isWrapped: true });
-    }
-    while ((m = insWrappedRegex.exec(resultHtml)) !== null) {
-      insWrappedBlocks.push({ full: m[0], wrapperAttrs: m[2], preAttrs: m[3], inner: m[4], isWrapped: true });
     }
 
-    // Pattern B: del/ins wrapping a bare <pre> (fallback for Marp etc.)
-    const delPreRegex =
-      /<del([^>]*)>\s*<pre([^>]*)>([\s\S]*?)<\/pre>\s*<\/del>/gi;
-    const insPreRegex =
-      /<ins([^>]*)>\s*<pre([^>]*)>([\s\S]*?)<\/pre>\s*<\/ins>/gi;
-
-    while ((m = delPreRegex.exec(resultHtml)) !== null) {
-      delBareBlocks.push({ full: m[0], wrapperAttrs: "", preAttrs: m[2], inner: m[3], isWrapped: false });
-    }
-    while ((m = insPreRegex.exec(resultHtml)) !== null) {
-      insBareBlocks.push({ full: m[0], wrapperAttrs: "", preAttrs: m[2], inner: m[3], isWrapped: false });
-    }
-
-    const diffedPairs: Array<{
-      delFull: string;
-      insFull: string;
-      diffed: string;
-    }> = [];
-
-    const pairWrappedCount = Math.min(delWrappedBlocks.length, insWrappedBlocks.length);
-    for (let i = 0; i < pairWrappedCount; i++) {
-      const innerDiff = diffCodeBlocks(
-        delWrappedBlocks[i].inner,
-        insWrappedBlocks[i].inner,
+    const extractCodeBlockFromDiffInner = (
+      innerHtml: string,
+    ): { isWrapped: boolean; wrapperAttrs: string; preAttrs: string; inner: string } | null => {
+      const trimmed = innerHtml.trim();
+      const wrappedMatch = trimmed.match(
+        /^<div class="code-block-wrapper"([^>]*)>\s*<pre([^>]*)>([\s\S]*?)<\/pre>\s*<\/div>$/i,
       );
-      const diffedPre = `<pre${insWrappedBlocks[i].preAttrs}>${innerDiff}</pre>`;
-      const diffed = `<div class="code-block-wrapper"${insWrappedBlocks[i].wrapperAttrs}>${diffedPre}</div>`;
-      diffedPairs.push({
-        delFull: delWrappedBlocks[i].full,
-        insFull: insWrappedBlocks[i].full,
-        diffed,
-      });
-    }
-
-    const pairBareCount = Math.min(delBareBlocks.length, insBareBlocks.length);
-    for (let i = 0; i < pairBareCount; i++) {
-      const innerDiff = diffCodeBlocks(
-        delBareBlocks[i].inner,
-        insBareBlocks[i].inner,
-      );
-      const diffedPre = `<pre${insBareBlocks[i].preAttrs}>${innerDiff}</pre>`;
-      diffedPairs.push({
-        delFull: delBareBlocks[i].full,
-        insFull: insBareBlocks[i].full,
-        diffed: diffedPre,
-      });
-    }
-
-    const pairCount = diffedPairs.length;
-    if (pairCount > 0) {
-
-      const uniqueRunId = Math.random().toString(36).slice(2, 10);
-      for (let i = 0; i < diffedPairs.length; i++) {
-        const placeholder = `PREDIFF_${i}_${uniqueRunId}_PLACEHOLDER`;
-        resultHtml = resultHtml.replace(
-          diffedPairs[i].delFull,
-          () => placeholder,
-        );
-        resultHtml = resultHtml.replace(diffedPairs[i].insFull, () => "");
-        diffedPairs[i].delFull = placeholder;
+      if (wrappedMatch) {
+        // Verify single balanced outer div so nested divs can't mis-match
+        const divEnd = findClosing(trimmed, 0, "div");
+        if (divEnd === trimmed.length) {
+          return {
+            isWrapped: true,
+            wrapperAttrs: wrappedMatch[1],
+            preAttrs: wrappedMatch[2],
+            inner: wrappedMatch[3],
+          };
+        }
       }
-      for (let i = 0; i < diffedPairs.length; i++) {
-        resultHtml = resultHtml.replace(
-          diffedPairs[i].delFull,
-          () => diffedPairs[i].diffed,
-        );
+      const bareMatch = trimmed.match(/^<pre([^>]*)>([\s\S]*?)<\/pre>$/i);
+      if (bareMatch) {
+        const preEnd = findClosing(trimmed, 0, "pre");
+        if (preEnd === trimmed.length) {
+          return {
+            isWrapped: false,
+            wrapperAttrs: "",
+            preAttrs: bareMatch[1],
+            inner: bareMatch[2],
+          };
+        }
       }
+      return null;
+    };
+
+    const parts: string[] = [];
+    let cursor = 0;
+    const diffStartRegex = /<(del|ins)(?=[\s>])/gi;
+
+    while (cursor < resultHtml.length) {
+      diffStartRegex.lastIndex = cursor;
+      const firstMatch = diffStartRegex.exec(resultHtml);
+      if (!firstMatch) {
+        parts.push(resultHtml.slice(cursor));
+        break;
+      }
+
+      const hunkStart = firstMatch.index;
+      parts.push(resultHtml.slice(cursor, hunkStart));
+
+      const delWrappedBlocks: HunkPreBlock[] = [];
+      const insWrappedBlocks: HunkPreBlock[] = [];
+      const delBareBlocks: HunkPreBlock[] = [];
+      const insBareBlocks: HunkPreBlock[] = [];
+
+      let pos = hunkStart;
+      while (pos < resultHtml.length) {
+        let wsEnd = pos;
+        while (wsEnd < resultHtml.length && /\s/.test(resultHtml[wsEnd])) {
+          wsEnd++;
+        }
+        const slice = resultHtml.slice(wsEnd);
+        const tagMatch = slice.match(/^<(del|ins)(?=[\s>])/i);
+        if (!tagMatch) {
+          break;
+        }
+        const tagName = tagMatch[1].toLowerCase() as "del" | "ins";
+        const tagEnd = findOpeningTagEnd(resultHtml, wsEnd);
+        if (tagEnd === -1) {
+          break;
+        }
+        const closeEnd = findClosing(resultHtml, wsEnd, tagName);
+        if (closeEnd === -1) {
+          break;
+        }
+        const closeStart = resultHtml.lastIndexOf("</", closeEnd - 1);
+        const innerHtml = resultHtml.slice(tagEnd + 1, closeStart);
+        const parsed = extractCodeBlockFromDiffInner(innerHtml);
+        if (parsed) {
+          const entry: HunkPreBlock = {
+            start: wsEnd - hunkStart,
+            end: closeEnd - hunkStart,
+            wrapperAttrs: parsed.wrapperAttrs,
+            preAttrs: parsed.preAttrs,
+            inner: parsed.inner,
+          };
+          if (tagName === "del") {
+            (parsed.isWrapped ? delWrappedBlocks : delBareBlocks).push(entry);
+          } else {
+            (parsed.isWrapped ? insWrappedBlocks : insBareBlocks).push(entry);
+          }
+        }
+        pos = closeEnd;
+      }
+
+      if (pos === hunkStart) {
+        // Unclosed <del>/<ins> tag; emit opening `<` and advance safely
+        parts.push(resultHtml[hunkStart]);
+        cursor = hunkStart + 1;
+        continue;
+      }
+
+      const hunkHtml = resultHtml.slice(hunkStart, pos);
+      const replacements: Array<{ start: number; end: number; value: string }> = [];
+
+      const pairWrappedCount = Math.min(delWrappedBlocks.length, insWrappedBlocks.length);
+      for (let i = 0; i < pairWrappedCount; i++) {
+        const innerDiff = diffCodeBlocks(
+          delWrappedBlocks[i].inner,
+          insWrappedBlocks[i].inner,
+        );
+        const diffedPre = `<pre${insWrappedBlocks[i].preAttrs}>${innerDiff}</pre>`;
+        const diffed = `<div class="code-block-wrapper"${insWrappedBlocks[i].wrapperAttrs}>${diffedPre}</div>`;
+        replacements.push({
+          start: delWrappedBlocks[i].start,
+          end: delWrappedBlocks[i].end,
+          value: diffed,
+        });
+        replacements.push({
+          start: insWrappedBlocks[i].start,
+          end: insWrappedBlocks[i].end,
+          value: "",
+        });
+      }
+
+      const pairBareCount = Math.min(delBareBlocks.length, insBareBlocks.length);
+      for (let i = 0; i < pairBareCount; i++) {
+        const innerDiff = diffCodeBlocks(
+          delBareBlocks[i].inner,
+          insBareBlocks[i].inner,
+        );
+        const diffedPre = `<pre${insBareBlocks[i].preAttrs}>${innerDiff}</pre>`;
+        replacements.push({
+          start: delBareBlocks[i].start,
+          end: delBareBlocks[i].end,
+          value: diffedPre,
+        });
+        replacements.push({
+          start: insBareBlocks[i].start,
+          end: insBareBlocks[i].end,
+          value: "",
+        });
+      }
+
+      if (replacements.length === 0) {
+        parts.push(hunkHtml);
+      } else {
+        replacements.sort((a, b) => a.start - b.start);
+        let hCursor = 0;
+        for (const r of replacements) {
+          parts.push(hunkHtml.slice(hCursor, r.start));
+          parts.push(r.value);
+          hCursor = r.end;
+        }
+        parts.push(hunkHtml.slice(hCursor));
+      }
+
+      cursor = pos;
     }
-  }
 
-  const blockquoteRegex =
-    /(<del[^>]*>\s*(<blockquote>[\s\S]*?<\/blockquote>)\s*<\/del>)\s*(<ins[^>]*>\s*(<blockquote>[\s\S]*?<\/blockquote>)\s*<\/ins>)/gi;
+    return parts.join("");
+  })();
 
-  resultHtml = resultHtml.replace(
-    blockquoteRegex,
-    (match, delWrapper, delInner, insWrapper, insInner) => {
-      const cleanedInnerDiff = execute(delInner, insInner);
-      return cleanedInnerDiff;
-    },
+  resultHtml = replacePairedDiffBlocks(
+    resultHtml,
+    /^<(blockquote)(?=[\s/>])/i,
+    ({ oldFull, newFull }) => execute(oldFull, newFull),
   );
 
-  const tableRegex =
-    /(<del[^>]*>\s*(<table[^>]*>[\s\S]*?<\/table>)\s*<\/del>)\s*(<ins[^>]*>\s*(<table[^>]*>[\s\S]*?<\/table>)\s*<\/ins>)/gi;
-
-  resultHtml = resultHtml.replace(
-    tableRegex,
-    (match, delBlock, oldInner, insBlock, newInner) => {
-      return diffTables(oldInner, newInner, execute);
-    },
+  resultHtml = replacePairedDiffBlocks(
+    resultHtml,
+    /^<(table)(?=[\s/>])/i,
+    ({ oldFull, newFull }) => diffTables(oldFull, newFull, execute),
   );
 
   // Replace genericBlockRegex with deterministic linear parsing (findClosing)
@@ -2337,11 +2664,35 @@ export function consolidateBlockDiffs(html: string): string {
     },
   );
   blocks.forEach((tag) => {
-    const regex = new RegExp(
-      `<(?:${tag})[^>]*>[\\s\\S]*?<\\/(?:${tag})>|<(?:${tag})[^>]*\\/?>`,
-      "gi",
-    );
-    result = result.replace(regex, (match, offset) => {
+    const out: string[] = [];
+    let cursor = 0;
+    const openRegex = new RegExp(`<${tag}(?=[\\s/>])`, "gi");
+    const isVoid = HTML_VOID_TAGS.has(tag.toLowerCase());
+
+    while (cursor < result.length) {
+      openRegex.lastIndex = cursor;
+      const m = openRegex.exec(result);
+      if (!m) {
+        out.push(result.slice(cursor));
+        break;
+      }
+
+      const idx = m.index;
+      const tagEnd = findOpeningTagEnd(result, idx);
+      if (tagEnd === -1) {
+        out.push(result.slice(cursor));
+        break;
+      }
+
+      const isSelfClosing = isVoid || result[tagEnd - 1] === "/";
+      const end = isSelfClosing ? tagEnd + 1 : findClosing(result, idx, tag);
+      if (end === -1) {
+        out.push(result.slice(cursor, tagEnd + 1));
+        cursor = tagEnd + 1;
+        continue;
+      }
+
+      const match = result.slice(idx, end);
       // EXCEPTION: Don't consolidate math blocks or Marp sections into block-level diffs.
       // This keeps the diff tags internal and prevents layout breakage.
       if (
@@ -2349,40 +2700,56 @@ export function consolidateBlockDiffs(html: string): string {
         match.startsWith("<section") ||
         match.startsWith("<pre")
       ) {
-        return match;
+        out.push(result.slice(cursor, tagEnd + 1));
+        cursor = tagEnd + 1;
+        continue;
       }
 
       const hasIns = /<ins\b[^>]*>([\s\S]*?)<\/ins>/gi.test(match);
       const hasDel = /<del\b[^>]*>([\s\S]*?)<\/del>/gi.test(match);
 
-      if (hasIns && !hasDel) {
-        if (checkIfAllContentIsWrapped(match, "ins")) {
-          // If the block is ALREADY wrapped in an outer diff tag, don't wrap it again.
-          const before = result.substring(0, offset);
-          if (
-            /<(ins|del)\b[^>]*class="[^"]*diff-block[^"]*"[^>]*>[\s\n]*$/i.test(
-              before,
-            )
-          ) {
-            return match;
-          }
-          return `<ins class="diffins diff-block">${cleanInnerDiffTags(match, "ins")}</ins>`;
+      if (hasIns && !hasDel && checkIfAllContentIsWrapped(match, "ins")) {
+        out.push(result.slice(cursor, idx));
+        const before = out.join("");
+        if (
+          /<(ins|del)\b[^>]*class="[^"]*diff-block[^"]*"[^>]*>[\s\n]*$/i.test(
+            before,
+          )
+        ) {
+          out.push(match);
+        } else {
+          out.push(
+            `<ins class="diffins diff-block">${cleanInnerDiffTags(match, "ins")}</ins>`,
+          );
         }
-      } else if (hasDel && !hasIns) {
-        if (checkIfAllContentIsWrapped(match, "del")) {
-          const before = result.substring(0, offset);
-          if (
-            /<(ins|del)\b[^>]*class="[^"]*diff-block[^"]*"[^>]*>[\s\n]*$/i.test(
-              before,
-            )
-          ) {
-            return match;
-          }
-          return `<del class="diffdel diff-block">${cleanInnerDiffTags(match, "del")}</del>`;
-        }
+        cursor = end;
+        continue;
       }
-      return match;
-    });
+
+      if (hasDel && !hasIns && checkIfAllContentIsWrapped(match, "del")) {
+        out.push(result.slice(cursor, idx));
+        const before = out.join("");
+        if (
+          /<(ins|del)\b[^>]*class="[^"]*diff-block[^"]*"[^>]*>[\s\n]*$/i.test(
+            before,
+          )
+        ) {
+          out.push(match);
+        } else {
+          out.push(
+            `<del class="diffdel diff-block">${cleanInnerDiffTags(match, "del")}</del>`,
+          );
+        }
+        cursor = end;
+        continue;
+      }
+
+      // Not fully wrapped: advance past opening tag so nested same-name containers can still be checked
+      out.push(result.slice(cursor, tagEnd + 1));
+      cursor = tagEnd + 1;
+    }
+
+    result = out.join("");
   });
 
   // Final cleanup: Deduplicate diff-block class if any doubling occurred
@@ -2516,20 +2883,65 @@ export function wrapHeadingPrefixes(html: string): string {
 }
 
 export function markGhostListItems(html: string): string {
-  // 1. First, handle cases where the whole list container is wrapped in <ins> or <del>
-  let result = html.replace(
-    /(<(ins|del)[^>]*>)\s*(<(ul|ol|dl)[^>]*>[\s\S]*?<\/(ul|ol|dl)>)\s*(<\/\2>)/gi,
-    (match, open, type, list, openTagName, closeTagName, close) => {
-      if (openTagName.toLowerCase() !== closeTagName.toLowerCase()) {
-        return match;
+  const rewriteDiffWrappedElements = (
+    source: string,
+    innerTagRegex: RegExp,
+    transform: (type: "ins" | "del", innerElement: string) => string,
+  ): string => {
+    const out: string[] = [];
+    let cursor = 0;
+    const diffRegex = /<(ins|del)(?=[\s>])/gi;
+
+    while (cursor < source.length) {
+      diffRegex.lastIndex = cursor;
+      const m = diffRegex.exec(source);
+      if (!m) {
+        out.push(source.slice(cursor));
+        break;
       }
 
+      const idx = m.index;
+      const type = m[1].toLowerCase() as "ins" | "del";
+      const tagEnd = findOpeningTagEnd(source, idx);
+      if (tagEnd === -1) {
+        out.push(source.slice(cursor));
+        break;
+      }
+      const closeEnd = findClosing(source, idx, type);
+      if (closeEnd === -1) {
+        out.push(source.slice(cursor, tagEnd + 1));
+        cursor = tagEnd + 1;
+        continue;
+      }
+
+      const closeStart = source.lastIndexOf("</", closeEnd - 1);
+      const innerContent = source.slice(tagEnd + 1, closeStart);
+      const seq = extractTopLevelTagSequence(innerContent, innerTagRegex);
+      if (seq && seq.length === 1) {
+        out.push(source.slice(cursor, idx));
+        const open = source.slice(idx, tagEnd + 1);
+        const close = source.slice(closeStart, closeEnd);
+        out.push(`${open}${transform(type, seq[0].full)}${close}`);
+        cursor = closeEnd;
+      } else {
+        out.push(source.slice(cursor, tagEnd + 1));
+        cursor = tagEnd + 1;
+      }
+    }
+    return out.join("");
+  };
+
+  // 1. First, handle cases where the whole list container is wrapped in <ins> or <del>
+  let result = rewriteDiffWrappedElements(
+    html,
+    /^<(ul|ol|dl)(?=[\s>])/i,
+    (type, list) => {
       const marker =
         type === "ins"
           ? ' data-all-inserted="true"'
           : ' data-all-deleted="true"';
 
-      const markedList = list.replace(
+      return list.replace(
         /<li([^>]*)>/gi,
         (liMatch: string, attrs: string) => {
           if (
@@ -2538,56 +2950,78 @@ export function markGhostListItems(html: string): string {
           ) {
             return liMatch;
           }
-
           return `<li${attrs}${marker}>`;
         },
       );
-
-      return `${open}${markedList}${close}`;
     },
   );
 
   // 2. Then handle cases where the whole <li> is wrapped in <ins> or <del>
-  result = result.replace(
-    /(<(ins|del)[^>]*>)\s*(<li[^>]*>[\s\S]*?<\/li>)\s*(<\/\2>)/gi,
-    (match, open, type, li, close) => {
-      if (type === "ins") {
-        return (
-          open + li.replace(/^<li/, '<li data-all-inserted="true"') + close
-        );
-      } else {
-        return open + li.replace(/^<li/, '<li data-all-deleted="true"') + close;
-      }
-    },
+  result = rewriteDiffWrappedElements(
+    result,
+    /^<(li)(?=[\s>])/i,
+    (type, li) =>
+      type === "ins"
+        ? li.replace(/^<li/i, '<li data-all-inserted="true"')
+        : li.replace(/^<li/i, '<li data-all-deleted="true"'),
   );
 
   // 3. Then handle cases where the markers are INSIDE the <li>
-  result = result.replace(
-    /<li([^>]*)>([\s\S]*?)<\/li>/gi,
-    (match, attrs: string, content: string) => {
+  result = (() => {
+    const out: string[] = [];
+    let cursor = 0;
+    const liOpenRegex = /<li(?=[\s>])/gi;
+
+    const stripInsignificant = (s: string) => {
+      let current = s;
+      let previous: string;
+      const tagRegex =
+        /<\/?(strong|em|b|i|concept|code|s|span|a|p|div|br|section)\b[^>]*>/gi;
+      do {
+        previous = current;
+        current = current.replace(tagRegex, "");
+      } while (current !== previous);
+      return current
+        .replace(/[.\s]+/g, "")
+        .replace(/\u21a9[\ufe0e\ufe0f]?/g, "") // Strip backref emoji variants (↩︎)
+        .trim();
+    };
+
+    while (cursor < result.length) {
+      liOpenRegex.lastIndex = cursor;
+      const m = liOpenRegex.exec(result);
+      if (!m) {
+        out.push(result.slice(cursor));
+        break;
+      }
+
+      const idx = m.index;
+      const tagEnd = findOpeningTagEnd(result, idx);
+      if (tagEnd === -1) {
+        out.push(result.slice(cursor));
+        break;
+      }
+      const closeEnd = findClosing(result, idx, "li");
+      if (closeEnd === -1) {
+        out.push(result.slice(cursor, tagEnd + 1));
+        cursor = tagEnd + 1;
+        continue;
+      }
+
+      const closeStart = result.lastIndexOf("</", closeEnd - 1);
+      const attrs = result.slice(idx + 3, tagEnd);
+      const content = result.slice(tagEnd + 1, closeStart);
+
       if (
         attrs.includes('data-all-inserted="true"') ||
-        attrs.includes('data-all-deleted="true"')
+        attrs.includes('data-all-deleted="true"') ||
+        /<li\b/i.test(content)
       ) {
-        return match;
+        // Skip outer <li> and continue scanning inside so nested leaf <li> items are still processed
+        out.push(result.slice(cursor, tagEnd + 1));
+        cursor = tagEnd + 1;
+        continue;
       }
-      if (/<li\b/i.test(content)) {
-        return match;
-      }
-      const stripInsignificant = (s: string) => {
-        let current = s;
-        let previous: string;
-        const tagRegex =
-          /<\/?(strong|em|b|i|concept|code|s|span|a|p|div|br|section)\b[^>]*>/gi;
-        do {
-          previous = current;
-          current = current.replace(tagRegex, "");
-        } while (current !== previous);
-        return current
-          .replace(/[.\s]+/g, "")
-          .replace(/\u21a9[\ufe0e\ufe0f]?/g, "") // Strip backref emoji variants (↩︎)
-          .trim();
-      };
 
       const withoutIns = content.replace(/<ins\b[^>]*>[\s\S]*?<\/ins>/gi, "");
       const withoutDel = content.replace(/<del\b[^>]*>[\s\S]*?<\/del>/gi, "");
@@ -2599,12 +3033,19 @@ export function markGhostListItems(html: string): string {
       if (stripInsignificant(withoutDel) === "") {
         newAttrs += ' data-all-deleted="true"';
       }
+
+      out.push(result.slice(cursor, idx));
       if (newAttrs === attrs) {
-        return match;
+        out.push(result.slice(idx, closeEnd));
+      } else {
+        out.push(`<li${newAttrs}>${content}</li>`);
       }
-      return `<li${newAttrs}>${content}</li>`;
-    },
-  );
+      cursor = closeEnd;
+    }
+
+    return out.join("");
+  })();
+
   return result;
 }
 
@@ -2615,30 +3056,69 @@ export function extractSharedReparentedLists(html: string): string {
       .replace(/\s+/g, " ")
       .trim();
 
+  const listTagRegex = /^<(ul|ol|dl)(?=[\s>])/i;
+
   const findMatchingDeletedNestedListWrapper = (
     sourceHtml: string,
     beforeIndex: number,
     normalizedSharedList: string,
   ): { wrapper: string; index: number } | null => {
     const prefix = sourceHtml.slice(0, beforeIndex);
-    const deletedNestedListRegex =
-      /(?:<del[^>]*>\s*<\/del>\s*)?<del[^>]*class="[^"]*diff-block[^"]*"[^>]*>\s*(<(ul|ol|dl)[^>]*>[\s\S]*?<\/\2>)\s*<\/del>(?:\s*<del[^>]*>\s*<\/del>\s*)*/gi;
-    let deletedMatch: RegExpExecArray | null;
     let matchedDeletedWrapper: { wrapper: string; index: number } | null = null;
-    while ((deletedMatch = deletedNestedListRegex.exec(prefix)) !== null) {
-      const deletedList = deletedMatch[1];
-      if (normalizeListFragment(deletedList) === normalizedSharedList) {
-        matchedDeletedWrapper = {
-          wrapper: deletedMatch[0],
-          index: deletedMatch.index,
-        };
+    let cursor = 0;
+    const delRegex = /<del\b/gi;
+
+    while (cursor < prefix.length) {
+      delRegex.lastIndex = cursor;
+      const dm = delRegex.exec(prefix);
+      if (!dm) {
+        break;
       }
+      const delIdx = dm.index;
+      const delTagEnd = findOpeningTagEnd(prefix, delIdx);
+      if (delTagEnd === -1) {
+        break;
+      }
+      const delCloseEnd = findClosing(prefix, delIdx, "del");
+      if (delCloseEnd === -1) {
+        cursor = delTagEnd + 1;
+        continue;
+      }
+      const delAttrs = prefix.slice(delIdx + 4, delTagEnd);
+      if (!/class="[^"]*diff-block[^"]*"/i.test(delAttrs)) {
+        cursor = delTagEnd + 1;
+        continue;
+      }
+      const delCloseStart = prefix.lastIndexOf("</", delCloseEnd - 1);
+      const delContent = prefix.slice(delTagEnd + 1, delCloseStart);
+      const lists = extractTopLevelTagSequence(delContent, listTagRegex);
+      if (lists && lists.length === 1) {
+        if (normalizeListFragment(lists[0].full) === normalizedSharedList) {
+          // Include optional single preceding empty <del></del> and trailing empty <del></del> wrappers
+          let wrapperStart = delIdx;
+          const leadingEmptyMatch = prefix
+            .slice(0, delIdx)
+            .match(/<del[^>]*>\s*<\/del>\s*$/i);
+          if (leadingEmptyMatch) {
+            wrapperStart = delIdx - leadingEmptyMatch[0].length;
+          }
+          let wrapperEnd = delCloseEnd;
+          const trailingEmptyMatch = prefix
+            .slice(delCloseEnd)
+            .match(/^(?:\s*<del[^>]*>\s*<\/del>\s*)*/i);
+          if (trailingEmptyMatch) {
+            wrapperEnd = delCloseEnd + trailingEmptyMatch[0].length;
+          }
+          matchedDeletedWrapper = {
+            wrapper: prefix.slice(wrapperStart, wrapperEnd),
+            index: wrapperStart,
+          };
+        }
+      }
+      cursor = delCloseEnd;
     }
     return matchedDeletedWrapper;
   };
-
-  const insertedCompositeRegex =
-    /<ins([^>]*)>\s*(<(ol|ul|dl)[^>]*>\s*<li[\s\S]*?<\/li>\s*<\/\3>)\s*(<(ul|ol|dl)[^>]*>[\s\S]*?<\/\5>)\s*<\/ins>(?:\s*<ins[^>]*>\s*<\/ins>\s*)*/gi;
 
   let result = html;
   const matches: {
@@ -2648,16 +3128,50 @@ export function extractSharedReparentedLists(html: string): string {
     newParentList: string;
     sharedList: string;
   }[] = [];
-  let compositeMatch: RegExpExecArray | null;
-  insertedCompositeRegex.lastIndex = 0;
-  while ((compositeMatch = insertedCompositeRegex.exec(result)) !== null) {
-    matches.push({
-      index: compositeMatch.index,
-      fullMatch: compositeMatch[0],
-      insertedAttrs: compositeMatch[1],
-      newParentList: compositeMatch[2],
-      sharedList: compositeMatch[4],
-    });
+
+  {
+    let cursor = 0;
+    const insRegex = /<ins\b/gi;
+    while (cursor < result.length) {
+      insRegex.lastIndex = cursor;
+      const im = insRegex.exec(result);
+      if (!im) {
+        break;
+      }
+      const insIdx = im.index;
+      const insTagEnd = findOpeningTagEnd(result, insIdx);
+      if (insTagEnd === -1) {
+        break;
+      }
+      const insCloseEnd = findClosing(result, insIdx, "ins");
+      if (insCloseEnd === -1) {
+        cursor = insTagEnd + 1;
+        continue;
+      }
+      const insAttrs = result.slice(insIdx + 4, insTagEnd);
+      const insCloseStart = result.lastIndexOf("</", insCloseEnd - 1);
+      const insContent = result.slice(insTagEnd + 1, insCloseStart);
+      const seq = extractTopLevelTagSequence(insContent, listTagRegex);
+      if (seq && seq.length === 2 && /^\s*<li\b/i.test(seq[0].inner)) {
+        let matchEnd = insCloseEnd;
+        const trailingEmptyMatch = result
+          .slice(insCloseEnd)
+          .match(/^(?:\s*<ins[^>]*>\s*<\/ins>\s*)*/i);
+        if (trailingEmptyMatch) {
+          matchEnd = insCloseEnd + trailingEmptyMatch[0].length;
+        }
+        matches.push({
+          index: insIdx,
+          fullMatch: result.slice(insIdx, matchEnd),
+          insertedAttrs: insAttrs,
+          newParentList: seq[0].full,
+          sharedList: seq[1].full,
+        });
+        cursor = matchEnd;
+        continue;
+      }
+      cursor = insTagEnd + 1;
+    }
   }
 
   // Iterate backwards so indices to the left remain stable
@@ -2688,22 +3202,44 @@ export function extractSharedReparentedLists(html: string): string {
     result = beforeDeleted + betweenDeletedAndMatch + replacement + afterMatch;
   }
 
-  const insertedListOnlyRegex =
-    /<ins([^>]*)>\s*(<(ul|ol|dl)[^>]*>[\s\S]*?<\/\3>)\s*<\/ins>/gi;
-
   const matches2: {
     index: number;
     fullMatch: string;
     sharedList: string;
   }[] = [];
-  let insertedListOnlyMatch: RegExpExecArray | null;
-  insertedListOnlyRegex.lastIndex = 0;
-  while ((insertedListOnlyMatch = insertedListOnlyRegex.exec(result)) !== null) {
-    matches2.push({
-      index: insertedListOnlyMatch.index,
-      fullMatch: insertedListOnlyMatch[0],
-      sharedList: insertedListOnlyMatch[2],
-    });
+  {
+    let cursor = 0;
+    const insRegex = /<ins\b/gi;
+    while (cursor < result.length) {
+      insRegex.lastIndex = cursor;
+      const im = insRegex.exec(result);
+      if (!im) {
+        break;
+      }
+      const insIdx = im.index;
+      const insTagEnd = findOpeningTagEnd(result, insIdx);
+      if (insTagEnd === -1) {
+        break;
+      }
+      const insCloseEnd = findClosing(result, insIdx, "ins");
+      if (insCloseEnd === -1) {
+        cursor = insTagEnd + 1;
+        continue;
+      }
+      const insCloseStart = result.lastIndexOf("</", insCloseEnd - 1);
+      const insContent = result.slice(insTagEnd + 1, insCloseStart);
+      const seq = extractTopLevelTagSequence(insContent, listTagRegex);
+      if (seq && seq.length === 1) {
+        matches2.push({
+          index: insIdx,
+          fullMatch: result.slice(insIdx, insCloseEnd),
+          sharedList: seq[0].full,
+        });
+        cursor = insCloseEnd;
+        continue;
+      }
+      cursor = insTagEnd + 1;
+    }
   }
 
   for (let i = matches2.length - 1; i >= 0; i--) {

@@ -122,7 +122,19 @@ function safeParseMatter(markdown: string): {
   data: Record<string, any>;
 } {
   try {
-    const parsed = matter(markdown);
+    // Disable gray-matter's default JavaScript engine (which uses eval()) to prevent RCE
+    // from untrusted ---js / ---javascript frontmatter blocks.
+    const disabledJsEngine = {
+      parse: () => {
+        throw new Error("JavaScript frontmatter engine is disabled");
+      },
+    };
+    const parsed = matter(markdown, {
+      engines: {
+        javascript: disabledJsEngine,
+        js: disabledJsEngine,
+      },
+    });
     const data =
       parsed.data &&
       typeof parsed.data === "object" &&
@@ -207,7 +219,7 @@ export class MarkdownDiffProvider {
     newMarkdown: string,
     imageResolver?: (src: string) => string,
     oldImageResolver?: (src: string) => string,
-    options: { tokenizeListContainers?: boolean } = {},
+    options: { tokenizeListContainers?: boolean; newLineOffset?: number } = {},
   ): { html: string; marpCss?: string; marpJs?: string; hasDiff: boolean } {
     const oldMatter = safeParseMatter(oldMarkdown);
     const newMatter = safeParseMatter(newMarkdown);
@@ -215,7 +227,9 @@ export class MarkdownDiffProvider {
     const isMarp = !!(oldMatter.data.marp || newMatter.data.marp);
 
     const oldLineOffset = isMarp ? 0 : getLineOffset(oldMarkdown, oldMatter.content);
-    const newLineOffset = isMarp ? 0 : getLineOffset(newMarkdown, newMatter.content);
+    const newLineOffset = isMarp
+      ? 0
+      : (options.newLineOffset ?? 0) + getLineOffset(newMarkdown, newMatter.content);
 
     // 1. Render Body Diff
     const envOld = {
