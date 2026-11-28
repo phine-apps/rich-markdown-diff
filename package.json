@@ -1,6 +1,6 @@
 {
   "name": "rich-markdown-diff",
-  "packageManager": "pnpm@11.21.0",
+  "packageManager": "pnpm@11.28.13",
   "publisher": "phine-apps",
   "displayName": "Rich Markdown Diff",
   "description": "Professional visual Markdown diff with Math, Mermaid, and Git integration for better document reviews.",
